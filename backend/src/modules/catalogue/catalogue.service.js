@@ -381,6 +381,9 @@ export const bulkImportServices = async ({ branchId: requested, rows }, actor) =
     });
 
     return { totalRows: rows.length, acceptedRows: accepted, duplicateRows: duplicates, rejectedRows: rejected, details };
+  }, {
+    maxWait: 10000,
+    timeout: 60000,
   });
 };
 
@@ -566,6 +569,9 @@ export const bulkImportPackages = async ({ branchId: requested, rows }, actor) =
     });
 
     return { totalRows: rows.length, acceptedRows: accepted, duplicateRows: duplicates, rejectedRows: rejected, details };
+  }, {
+    maxWait: 10000,
+    timeout: 60000,
   });
 };
 
