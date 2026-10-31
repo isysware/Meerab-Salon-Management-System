@@ -204,11 +204,36 @@
 
 ::-webkit-scrollbar-thumb,
 *::-webkit-scrollbar-thumb {
-  background: #E8BFCD; /* Soft, warm luxury rose-blush */
+  background: #C4728F; /* Clearly visible, elegant rose */
   border-radius: 9999px;
   border: 1px solid transparent;
   background-clip: padding-box;
   transition: background-color 0.2s ease;
+}
+
+/* Explicit styling for all Select & Dropdown menus to have visible scrollbar */
+[data-radix-select-viewport],
+[data-radix-dropdown-menu-content] {
+  scrollbar-width: thin !important;
+  scrollbar-color: #B82E69 #FCE4EC !important;
+}
+
+[data-radix-select-viewport]::-webkit-scrollbar,
+[data-radix-dropdown-menu-content]::-webkit-scrollbar {
+  width: 5px !important;
+  display: block !important;
+}
+
+[data-radix-select-viewport]::-webkit-scrollbar-track,
+[data-radix-dropdown-menu-content]::-webkit-scrollbar-track {
+  background: #FDF2F5 !important;
+  border-radius: 9999px;
+}
+
+[data-radix-select-viewport]::-webkit-scrollbar-thumb,
+[data-radix-dropdown-menu-content]::-webkit-scrollbar-thumb {
+  background: #B82E69 !important;
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover,

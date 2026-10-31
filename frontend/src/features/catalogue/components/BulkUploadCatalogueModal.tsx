@@ -647,17 +647,21 @@ export const BulkUploadCatalogueModal: React.FC<BulkUploadCatalogueModalProps> =
         <fieldset disabled={!actionScope.ready} className="space-y-3.5 min-w-0 flex-1">
           <Tabs value={activeTab} onValueChange={handleTabChange} className="mt-1 min-w-0">
             {/* TAB SELECTOR & TEMPLATE DOWNLOADS */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-slate-200 min-w-0">
-              <TabsList className="bg-slate-100 p-1 rounded-xl flex-wrap h-auto min-w-0">
-                <TabsTrigger value="SERVICES" className="text-xs font-semibold gap-1.5 py-1 px-2.5">
-                  <Scissors className="w-3.5 h-3.5 text-[#9D2558]" />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
+              <TabsList className="!bg-transparent !border-0 !p-0 gap-2.5 h-auto inline-flex items-center w-fit shrink-0">
+                <TabsTrigger
+                  value="SERVICES"
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 data-[state=active]:!bg-white data-[state=active]:!border-[#B82E69] data-[state=active]:!text-[#B82E69] data-[state=active]:font-semibold data-[state=active]:!shadow-xs transition-all cursor-pointer"
+                >
+                  <Scissors className="w-4 h-4 text-[#B82E69]" />
                   <span>Services</span>
-                  <span className="text-[10px] text-slate-500 font-normal hidden md:inline">(Name, Price, Category)</span>
                 </TabsTrigger>
-                <TabsTrigger value="PACKAGES" className="text-xs font-semibold gap-1.5 py-1 px-2.5">
-                  <Package className="w-3.5 h-3.5 text-[#9D2558]" />
+                <TabsTrigger
+                  value="PACKAGES"
+                  className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 data-[state=active]:!bg-white data-[state=active]:!border-[#B82E69] data-[state=active]:!text-[#B82E69] data-[state=active]:font-semibold data-[state=active]:!shadow-xs transition-all cursor-pointer"
+                >
+                  <Package className="w-4 h-4 text-[#B82E69]" />
                   <span>Packages</span>
-                  <span className="text-[10px] text-slate-500 font-normal hidden md:inline">(Name, Services, Price)</span>
                 </TabsTrigger>
               </TabsList>
 
@@ -804,98 +808,98 @@ export const BulkUploadCatalogueModal: React.FC<BulkUploadCatalogueModalProps> =
                     <TableBody>
                       {activeTab === 'SERVICES'
                         ? parsedServices.map((row) => (
-                            <TableRow
-                              key={row.rowNumber}
-                              className={`text-xs ${!row.isValid ? 'bg-rose-50/60' : 'hover:bg-slate-50/60'}`}
-                            >
-                              <TableCell className="font-mono text-slate-400 text-center">
-                                {row.rowNumber}
-                              </TableCell>
-                              <TableCell className="font-semibold text-slate-900">
-                                {row.name || <span className="text-rose-400 italic">Missing Name</span>}
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex items-center gap-1.5">
-                                  <Badge variant="neutral" className="text-[11px] font-medium bg-slate-100">
-                                    {row.category}
-                                  </Badge>
-                                  {row.isNewCategory && (
-                                    <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-800 border border-violet-200">
-                                      <Sparkles className="w-2.5 h-2.5" />
-                                      New
-                                    </span>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell className="font-bold text-slate-900 font-mono">
-                                {formatCurrency(row.price)}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {row.isValid ? (
-                                  <Badge
-                                    variant="primary"
-                                    className="text-[11px] bg-emerald-50 text-emerald-800 border-emerald-200 inline-flex items-center gap-1 font-semibold"
-                                  >
-                                    <Check className="w-3 h-3 text-emerald-600" />
-                                    Valid
-                                  </Badge>
-                                ) : (
-                                  <span className="text-xs text-rose-600 font-semibold inline-flex items-center justify-end gap-1">
-                                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                                    {row.error}
+                          <TableRow
+                            key={row.rowNumber}
+                            className={`text-xs ${!row.isValid ? 'bg-rose-50/60' : 'hover:bg-slate-50/60'}`}
+                          >
+                            <TableCell className="font-mono text-slate-400 text-center">
+                              {row.rowNumber}
+                            </TableCell>
+                            <TableCell className="font-semibold text-slate-900">
+                              {row.name || <span className="text-rose-400 italic">Missing Name</span>}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-1.5">
+                                <Badge variant="neutral" className="text-[11px] font-medium bg-slate-100">
+                                  {row.category}
+                                </Badge>
+                                {row.isNewCategory && (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-800 border border-violet-200">
+                                    <Sparkles className="w-2.5 h-2.5" />
+                                    New
                                   </span>
                                 )}
-                              </TableCell>
-                            </TableRow>
-                          ))
+                              </div>
+                            </TableCell>
+                            <TableCell className="font-bold text-slate-900 font-mono">
+                              {formatCurrency(row.price)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {row.isValid ? (
+                                <Badge
+                                  variant="primary"
+                                  className="text-[11px] bg-emerald-50 text-emerald-800 border-emerald-200 inline-flex items-center gap-1 font-semibold"
+                                >
+                                  <Check className="w-3 h-3 text-emerald-600" />
+                                  Valid
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-rose-600 font-semibold inline-flex items-center justify-end gap-1">
+                                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                  {row.error}
+                                </span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))
                         : parsedPackages.map((row) => (
-                            <TableRow
-                              key={row.rowNumber}
-                              className={`text-xs ${!row.isValid ? 'bg-rose-50/60' : 'hover:bg-slate-50/60'}`}
-                            >
-                              <TableCell className="font-mono text-slate-400 text-center">
-                                {row.rowNumber}
-                              </TableCell>
-                              <TableCell className="font-semibold text-slate-900">
-                                {row.name || <span className="text-rose-400 italic">Missing Name</span>}
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex flex-wrap gap-1 max-w-sm">
-                                  {row.components.map((c, i) => (
-                                    <Badge
-                                      key={i}
-                                      variant="neutral"
-                                      className="text-[10px] font-normal bg-slate-100 text-slate-800 border-slate-200"
-                                    >
-                                      <Check className="w-2.5 h-2.5 mr-0.5 text-emerald-600 inline" />
-                                      <span>{c.matchedService?.name || c.serviceIdentifier}</span>
-                                      {c.quantity > 1 ? ` (x${c.quantity})` : ''}
-                                      {c.allocationPercentage > 0 ? ` · ${c.allocationPercentage}%` : ''}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              </TableCell>
-                              <TableCell className="font-bold text-slate-900 font-mono">
-                                {formatCurrency(row.price)}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                {row.isValid ? (
+                          <TableRow
+                            key={row.rowNumber}
+                            className={`text-xs ${!row.isValid ? 'bg-rose-50/60' : 'hover:bg-slate-50/60'}`}
+                          >
+                            <TableCell className="font-mono text-slate-400 text-center">
+                              {row.rowNumber}
+                            </TableCell>
+                            <TableCell className="font-semibold text-slate-900">
+                              {row.name || <span className="text-rose-400 italic">Missing Name</span>}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1 max-w-sm">
+                                {row.components.map((c, i) => (
                                   <Badge
-                                    variant="primary"
-                                    className="text-[11px] bg-emerald-50 text-emerald-800 border-emerald-200 inline-flex items-center gap-1 font-semibold"
+                                    key={i}
+                                    variant="neutral"
+                                    className="text-[10px] font-normal bg-slate-100 text-slate-800 border-slate-200"
                                   >
-                                    <Check className="w-3 h-3 text-emerald-600" />
-                                    Valid
+                                    <Check className="w-2.5 h-2.5 mr-0.5 text-emerald-600 inline" />
+                                    <span>{c.matchedService?.name || c.serviceIdentifier}</span>
+                                    {c.quantity > 1 ? ` (x${c.quantity})` : ''}
+                                    {c.allocationPercentage > 0 ? ` · ${c.allocationPercentage}%` : ''}
                                   </Badge>
-                                ) : (
-                                  <span className="text-xs text-rose-600 font-semibold inline-flex items-center justify-end gap-1">
-                                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                                    {row.error}
-                                  </span>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          ))}
+                                ))}
+                              </div>
+                            </TableCell>
+                            <TableCell className="font-bold text-slate-900 font-mono">
+                              {formatCurrency(row.price)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {row.isValid ? (
+                                <Badge
+                                  variant="primary"
+                                  className="text-[11px] bg-emerald-50 text-emerald-800 border-emerald-200 inline-flex items-center gap-1 font-semibold"
+                                >
+                                  <Check className="w-3 h-3 text-emerald-600" />
+                                  Valid
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-rose-600 font-semibold inline-flex items-center justify-end gap-1">
+                                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                  {row.error}
+                                </span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
                     </TableBody>
                   </Table>
                 </div>
