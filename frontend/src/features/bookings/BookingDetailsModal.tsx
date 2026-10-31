@@ -364,18 +364,7 @@ export const BookingDetailsModal: React.FC<BookingDetailsModalProps> = ({
               </Button>
             )}
 
-            {isOpenStatus && onNoShow && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => onNoShow(booking)}
-                className="text-xs gap-1 text-slate-600 hover:text-slate-800"
-              >
-                <UserX className="w-3.5 h-3.5" />
-                No-Show
-              </Button>
-            )}
+
           </div>
 
           <div className="flex items-center gap-2">

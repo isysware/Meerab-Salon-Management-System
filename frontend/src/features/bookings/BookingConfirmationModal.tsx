@@ -101,7 +101,7 @@ We look forward to serving you!`;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-md p-5 sm:p-6 font-sans">
+      <DialogContent className="max-w-lg p-5 sm:p-6 font-sans">
         <DialogHeader className="pb-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
