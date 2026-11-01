@@ -420,8 +420,8 @@ const liveMethods: SalonServiceContract = {
 
   // ── Step 17 · Commission ───────────────────────────────────────────────────
   getCommissionRuns: (branchId) => api.get<CommissionRun[]>('/commission/runs', branchQuery(branchId)),
-  generateCommissionPreview: (branchId, startDate, endDate, staffId) =>
-    api.post<CommissionRun>('/commission/preview', { branchId, startDate, endDate, staffId }),
+  generateCommissionPreview: (branchId, startDate, endDate, staffId, user, staffIds, compensationType) =>
+    api.post<CommissionRun>('/commission/preview', { branchId, startDate, endDate, staffId, staffIds, compensationType }),
   finalizeCommission: (runId) => api.post<CommissionRun>(`/commission/runs/${runId}/finalize`),
   cancelCommissionRun: (runId, reason) => api.post<CommissionRun>(`/commission/runs/${runId}/cancel`, { reason }),
   recordCommissionPayment: (input) => api.post('/commission/payments', input, newIdempotencyKey()),

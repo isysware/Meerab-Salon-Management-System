@@ -582,7 +582,7 @@ export interface SalonServiceContract {
   getInventoryReport(query: InventoryReportQuery): Promise<InventoryReportData>;
   getAttendanceOvertimeReport(query: AttendanceOvertimeReportQuery): Promise<AttendanceOvertimeReport>;
 
-  generateCommissionPreview(branchId: string, startDate: string, endDate: string, staffId?: string, actor?: User): Promise<CommissionRun>;
+  generateCommissionPreview(branchId: string, startDate: string, endDate: string, staffId?: string, actor?: User, staffIds?: string[], compensationType?: string): Promise<CommissionRun>;
   finalizeCommission(commissionRunId: string, actor?: User): Promise<CommissionRun>;
   recordCommissionPayment(input: RecordCommissionPaymentInput, actor?: User): Promise<{ commissionRun: CommissionRun; payment: CommissionPayment }>;
   cancelCommissionRun(commissionRunId: string, reason: string, actor?: User): Promise<CommissionRun>;

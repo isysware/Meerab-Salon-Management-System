@@ -27,6 +27,7 @@ const monthRange = (body) => {
 router.post('/preview', validate(z.object({
   branchId: z.string().optional(), startDate: ymd.optional(), endDate: ymd.optional(),
   month: z.string().regex(/^\d{4}-\d{2}$/, 'Month must be YYYY-MM').optional(), staffId: z.string().optional(),
+  staffIds: z.array(z.string()).optional(), compensationType: z.string().optional(),
 }).refine((b) => b.month || (b.startDate && b.endDate), { message: 'Provide a month or both startDate and endDate.' })),
 send((req) => s.generatePreview(req.user, monthRange(req.body)), 201));
 router.post('/runs/:id/finalize', send((req) => s.finalizeRun(req.user, req.params.id)));

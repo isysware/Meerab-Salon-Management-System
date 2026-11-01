@@ -39,6 +39,7 @@ import {
   MapPin,
   Briefcase,
   Banknote,
+  Building2,
 } from 'lucide-react';
 import { roundCurrency } from '../../lib/taxCalculations';
 import { AccessDeniedView } from '../scaffold/AccessDeniedView';
@@ -1793,24 +1794,26 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                   <button
                     type="button"
                     onClick={() => setPaymentForm({ ...paymentForm, method: 'CASH' })}
-                    className={`p-3 rounded-xl border text-center font-medium transition-all ${
+                    className={`p-3 rounded-xl border text-center font-medium transition-all flex items-center justify-center gap-2 ${
                       paymentForm.method === 'CASH'
                         ? 'border-indigo-600 bg-indigo-50/50 text-indigo-700 ring-2 ring-indigo-500'
                         : 'border-slate-200 bg-slate-50 text-slate-600'
                     }`}
                   >
-                    Cash (Open Drawer)
+                    <Banknote className="w-4 h-4 text-emerald-600" />
+                    <span>Cash (Open Drawer)</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setPaymentForm({ ...paymentForm, method: 'ONLINE' })}
-                    className={`p-3 rounded-xl border text-center font-medium transition-all ${
+                    className={`p-3 rounded-xl border text-center font-medium transition-all flex items-center justify-center gap-2 ${
                       paymentForm.method === 'ONLINE'
                         ? 'border-indigo-600 bg-indigo-50/50 text-indigo-700 ring-2 ring-indigo-500'
                         : 'border-slate-200 bg-slate-50 text-slate-600'
                     }`}
                   >
-                    Bank / Online Account
+                    <Building2 className="w-4 h-4 text-blue-600" />
+                    <span>Bank / Online Account</span>
                   </button>
                 </div>
               </div>

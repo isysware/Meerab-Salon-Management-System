@@ -1,5 +1,5 @@
-import html2canvas from 'html2canvas-pro';
 import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas-pro';
 import { Invoice, Branch } from '@/types/salon';
 import { formatCurrency } from '@/lib/formatters';
 
@@ -21,196 +21,344 @@ export interface GeneratedReceipt {
   imageBlob?: Blob;
 }
 
-/**
- * Captures the exact on-screen receipt DOM element (A to Z)
- * and turns it into a high-resolution, continuous-roll thermal POS PDF.
- */
+export const formatPkr = (val: number | undefined | null): string => {
+  const num = typeof val === 'number' && !isNaN(val) ? val : 0;
+  return `PKR ${num.toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+export function getPaymentMethodSummary(invoice: Invoice): string {
+  const payments = invoice.payments || [];
+  if (payments.length > 0) {
+    const methods = payments.map((p) => {
+      if (p.method === 'CASH') return 'Cash';
+      if (p.paymentAccountName) return p.paymentAccountName;
+      return 'Online';
+    });
+    const unique = Array.from(new Set(methods.filter(Boolean)));
+    return unique.join(' / ') || 'Cash';
+  }
+  if (invoice.paymentMethod) {
+    if (invoice.paymentMethod === 'CASH') return 'Cash';
+    if (invoice.paymentAccountName) return invoice.paymentAccountName;
+    return 'Online';
+  }
+  return invoice.amountPaid > 0 ? 'Cash' : 'Unpaid';
+}
+
+export function generateThermalReceiptHtml(invoice: Invoice, branch: Branch | null): string {
+  const branchName = (branch?.name || 'MEERUB SALON & SPA').toUpperCase();
+  const branchAddress = branch?.address ? `${branch.address}${branch?.city ? `, ${branch.city}` : ''}` : 'Salon & Spa';
+  const branchPhone = branch?.phone ? `Tel: ${branch.phone}` : '';
+  const taxReg = branch?.taxRegistrationNumber
+    ? `${branch.taxAuthority || 'Tax Reg'}: ${branch.taxRegistrationNumber}`
+    : '';
+
+  const lines = invoice.lineItems || invoice.lines || [];
+  const methodSummary = getPaymentMethodSummary(invoice);
+
+  const itemsHtml = lines.map((li) => {
+    const qtyText = li.quantity > 1 ? ` (${li.quantity}x @ ${formatPkr(li.unitPrice)})` : '';
+    const lineTotal = formatPkr(li.total || (li.unitPrice * li.quantity));
+    const stylistText = li.staffName
+      ? `<div style="font-size: 9px; color: #222; padding-left: 3px;">Stylist: ${escapeHtml(li.staffName)}</div>`
+      : '';
+
+    const comps = li.packageComponentsSnapshot || li.packageComponents || [];
+    const compsHtml = comps.length > 0
+      ? `<div style="padding-left: 5px; font-size: 8.5px; color: #333;">
+          ${comps.map((c) => `<div>• ${escapeHtml(c.serviceName)}${c.staffName ? ` (${escapeHtml(c.staffName)})` : ''}</div>`).join('')}
+         </div>`
+      : '';
+
+    return `
+      <tr>
+        <td style="padding: 1.5px 0; vertical-align: top; text-align: left;">
+          <div style="font-weight: bold; font-size: 10.5px;">${escapeHtml(li.name)}${qtyText}</div>
+          ${stylistText}
+          ${compsHtml}
+        </td>
+        <td style="padding: 1.5px 0; vertical-align: top; text-align: center; font-size: 10px; width: 12%;">
+          ${li.quantity}
+        </td>
+        <td style="padding: 1.5px 0; vertical-align: top; text-align: right; font-weight: bold; font-size: 10.5px; width: 32%;">
+          ${lineTotal}
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  let discountRow = '';
+  if (invoice.discount > 0) {
+    discountRow = `
+      <tr>
+        <td style="text-align: left; padding: 1px 0;">Discount:</td>
+        <td style="text-align: right; font-weight: bold;">- ${formatPkr(invoice.discount)}</td>
+      </tr>
+    `;
+  }
+
+  let taxRow = '';
+  if (invoice.tax > 0) {
+    const rateText = branch?.taxEnabled && branch?.taxRate ? ` (${((branch.taxRate || 0) * 100).toFixed(0)}%)` : '';
+    taxRow = `
+      <tr>
+        <td style="text-align: left; padding: 1px 0;">Sales Tax${rateText}:</td>
+        <td style="text-align: right; font-weight: bold;">${formatPkr(invoice.tax)}</td>
+      </tr>
+    `;
+  }
+
+  let tipRow = '';
+  if (invoice.tip > 0) {
+    tipRow = `
+      <tr>
+        <td style="text-align: left; padding: 1px 0;">Staff Gratuity / Tip:</td>
+        <td style="text-align: right; font-weight: bold;">${formatPkr(invoice.tip)}</td>
+      </tr>
+    `;
+  }
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Receipt-${invoice.invoiceNumber}</title>
+  <style>
+    @page { size: 80mm auto; margin: 0; }
+    @media print { html, body { width: 80mm !important; margin: 0 !important; padding: 0 !important; } }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Courier New', Courier, Monaco, monospace;
+      color: #000000; background: #ffffff; width: 72mm; margin: 0 auto;
+      padding: 3mm 0 5mm 0; font-size: 11px; line-height: 1.22;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    .brand-title { font-size: 13.5px; font-weight: bold; text-align: center; margin-bottom: 1.5px; }
+    .brand-meta { font-size: 9.5px; text-align: center; line-height: 1.2; color: #111; }
+    .divider { border-top: 1px dashed #000000; margin: 2.5px 0; width: 100%; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .meta-table td { padding: 1px 0; font-size: 10px; vertical-align: top; }
+    .items-table th { font-size: 9.5px; font-weight: bold; border-bottom: 1px dashed #000; padding: 2px 0; }
+    .items-table td { padding: 1.5px 0; vertical-align: top; }
+    .summary-table td { padding: 1.5px 0; font-size: 11px; }
+    .footer-note { text-align: center; font-size: 9px; line-height: 1.25; margin-top: 4px; color: #222; }
+  </style>
+</head>
+<body>
+  <div class="brand-title">${escapeHtml(branchName)}</div>
+  <div class="brand-meta">
+    ${escapeHtml(branchAddress)}<br>
+    ${branchPhone ? `${escapeHtml(branchPhone)}<br>` : ''}
+    ${taxReg ? `${escapeHtml(taxReg)}<br>` : ''}
+  </div>
+  <div class="divider"></div>
+  <table class="meta-table">
+    <tr>
+      <td colspan="2" style="text-align: center; font-weight: bold; font-size: 10.5px; padding-bottom: 2px;">
+        ${branch?.taxRegistrationNumber ? 'TAX INVOICE' : 'RETAIL INVOICE'}
+      </td>
+    </tr>
+    <tr>
+      <td style="width: 50%;"><strong>Inv #:</strong> ${escapeHtml(invoice.invoiceNumber)}</td>
+      <td style="text-align: right; width: 50%;">${escapeHtml(invoice.date)}${invoice.time ? ` ${escapeHtml(invoice.time)}` : ''}</td>
+    </tr>
+    <tr>
+      <td colspan="2"><strong>Client:</strong> ${escapeHtml(invoice.clientName || 'Walk-in Customer')}${invoice.clientPhone && invoice.clientPhone !== 'N/A' ? ` (${escapeHtml(invoice.clientPhone)})` : ''}</td>
+    </tr>
+    ${invoice.processedByName ? `<tr><td colspan="2"><strong>Cashier:</strong> ${escapeHtml(invoice.processedByName)}</td></tr>` : ''}
+  </table>
+  <div class="divider"></div>
+  <table class="items-table">
+    <thead>
+      <tr>
+        <th style="text-align: left; width: 58%;">ITEM / SERVICE</th>
+        <th style="text-align: center; width: 12%;">QTY</th>
+        <th style="text-align: right; width: 30%;">AMOUNT</th>
+      </tr>
+    </thead>
+    <tbody>${itemsHtml}</tbody>
+  </table>
+  <div class="divider"></div>
+  <table class="summary-table">
+    ${discountRow}
+    ${taxRow}
+    ${tipRow}
+    <tr>
+      <td style="text-align: left; font-weight: bold;">Total Payable:</td>
+      <td style="text-align: right; font-weight: bold;">${formatPkr(invoice.total)}</td>
+    </tr>
+    <tr>
+      <td style="text-align: left; font-weight: bold;">Paid Amount (${escapeHtml(methodSummary)}):</td>
+      <td style="text-align: right; font-weight: bold;">${formatPkr(invoice.amountPaid)}</td>
+    </tr>
+    <tr>
+      <td style="text-align: left; font-weight: bold; ${invoice.amountDue > 0 ? 'color: #b91c1c;' : ''}">Outstanding Balance:</td>
+      <td style="text-align: right; font-weight: bold; ${invoice.amountDue > 0 ? 'color: #b91c1c;' : ''}">${formatPkr(invoice.amountDue)}</td>
+    </tr>
+  </table>
+  <div class="divider"></div>
+  <div class="footer-note">
+    ${invoice.notes ? `<div style="font-weight: bold; margin-bottom: 2px;">Note: ${escapeHtml(invoice.notes)}</div>` : ''}
+    <div>Thank you for your visit!</div>
+    <div style="font-size: 8px; color: #555; margin-top: 1.5px;">Powered by Isysware Software Solutions</div>
+  </div>
+</body>
+</html>`;
+}
+
+function escapeHtml(str: string | undefined | null): string {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+export function printThermalReceipt(invoice: Invoice, branch: Branch | null): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const htmlContent = generateThermalReceiptHtml(invoice, branch);
+  const existingFrame = document.getElementById('pos-thermal-print-frame');
+  if (existingFrame && existingFrame.parentNode) existingFrame.parentNode.removeChild(existingFrame);
+
+  const iframe = document.createElement('iframe');
+  iframe.id = 'pos-thermal-print-frame';
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0'; iframe.style.bottom = '0';
+  iframe.style.width = '0'; iframe.style.height = '0';
+  iframe.style.border = '0'; iframe.style.visibility = 'hidden';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow?.document || iframe.contentDocument;
+  if (!doc || !iframe.contentWindow) return;
+  doc.open(); doc.write(htmlContent); doc.close();
+
+  const printWindow = iframe.contentWindow;
+  setTimeout(() => {
+    try { printWindow.focus(); printWindow.print(); } catch {}
+    finally { setTimeout(() => { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); }, 3000); }
+  }, 250);
+}
+
 export async function generateReceiptPdf(
-  element: HTMLElement,
-  invoiceNumber: string
+  invoiceOrElement: Invoice | HTMLElement,
+  branchOrInvoiceNo?: Branch | null | string,
+  maybeInvoice?: Invoice
 ): Promise<GeneratedReceipt> {
-  const safeInvoiceNo = (invoiceNumber || 'INV').replace(/[^a-zA-Z0-9_-]/g, '_');
+  let invoice: Invoice;
+  let branch: Branch | null = null;
+  if (invoiceOrElement && 'invoiceNumber' in invoiceOrElement) {
+    invoice = invoiceOrElement as Invoice;
+    branch = (typeof branchOrInvoiceNo === 'object' ? branchOrInvoiceNo : null) as Branch | null;
+  } else if (maybeInvoice) {
+    invoice = maybeInvoice;
+    branch = (typeof branchOrInvoiceNo === 'object' ? branchOrInvoiceNo : null) as Branch | null;
+  } else {
+    throw new Error('Invoice data is required to generate receipt PDF.');
+  }
+
+  const safeInvoiceNo = (invoice.invoiceNumber || 'INV').replace(/[^a-zA-Z0-9_-]/g, '_');
   const fileName = `Receipt-${safeInvoiceNo}.pdf`;
+  const branchName = (branch?.name || 'MEERUB SALON & SPA').toUpperCase();
+  const branchAddress = branch?.address ? `${branch.address}${branch?.city ? `, ${branch.city}` : ''}` : 'Salon & Spa';
+  const branchPhone = branch?.phone ? `Tel: ${branch.phone}` : '';
+  const taxReg = branch?.taxRegistrationNumber ? `${branch.taxAuthority || 'Tax Reg'}: ${branch.taxRegistrationNumber}` : '';
+  const lines = invoice.lineItems || invoice.lines || [];
+  const methodSummary = getPaymentMethodSummary(invoice);
 
-  // Render element to high-res canvas (scale: 2 for sharp crisp text and lines)
-  const canvas = await html2canvas(element, {
-    scale: 2,
-    useCORS: true,
-    allowTaint: true,
-    logging: false,
-    backgroundColor: '#ffffff',
-    windowWidth: 800,
-    onclone: (_clonedDoc, clonedEl) => {
-      // Clean styling on clone so PDF has no scrollbars or clipped regions
-      clonedEl.style.maxHeight = 'none';
-      clonedEl.style.height = 'auto';
-      clonedEl.style.overflow = 'visible';
-      clonedEl.style.boxShadow = 'none';
-      clonedEl.style.borderRadius = '0px';
-      clonedEl.style.border = 'none';
-      clonedEl.style.width = '380px';
-      clonedEl.style.margin = '0 auto';
-      clonedEl.style.padding = '16px';
-      clonedEl.style.backgroundColor = '#ffffff';
-    },
+  let estimatedHeight = 42;
+  lines.forEach((li) => {
+    estimatedHeight += 7;
+    if (li.staffName) estimatedHeight += 3;
+    const comps = li.packageComponentsSnapshot || li.packageComponents || [];
+    estimatedHeight += comps.length * 2.8;
   });
+  if (invoice.discount > 0) estimatedHeight += 3.5;
+  if (invoice.tax > 0) estimatedHeight += 3.5;
+  if (invoice.tip > 0) estimatedHeight += 3.5;
+  estimatedHeight += 24;
+  estimatedHeight += 18;
+  const pdfHeight = Math.max(85, Math.ceil(estimatedHeight));
 
-  // Calculate 80mm thermal receipt dimensions in mm
   const pdfWidth = 80;
-  const pdfHeight = Math.max(100, (canvas.height * pdfWidth) / canvas.width);
+  const leftMargin = 5; const rightMargin = 75; const center = 40;
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: [pdfWidth, pdfHeight], compress: true });
 
-  const pdf = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: [pdfWidth, pdfHeight],
-    compress: true,
+  let y = 7;
+  const dashLine = '--------------------------------------------';
+  pdf.setFont('courier', 'bold'); pdf.setFontSize(10.5);
+  pdf.text(branchName, center, y, { align: 'center' }); y += 4;
+  pdf.setFont('courier', 'normal'); pdf.setFontSize(7.2);
+  pdf.text(branchAddress, center, y, { align: 'center' }); y += 3.2;
+  if (branchPhone) { pdf.text(branchPhone, center, y, { align: 'center' }); y += 3.2; }
+  if (taxReg) { pdf.text(taxReg, center, y, { align: 'center' }); y += 3.2; }
+  pdf.text(dashLine, center, y, { align: 'center' }); y += 3.5;
+  pdf.setFont('courier', 'bold'); pdf.setFontSize(8.5);
+  pdf.text(branch?.taxRegistrationNumber ? 'TAX INVOICE' : 'RETAIL INVOICE', center, y, { align: 'center' }); y += 3.5;
+  pdf.setFont('courier', 'normal'); pdf.setFontSize(7.2);
+  pdf.text(`Inv #: ${invoice.invoiceNumber}`, leftMargin, y);
+  pdf.text(`${invoice.date}${invoice.time ? ` ${invoice.time}` : ''}`, rightMargin, y, { align: 'right' }); y += 3.2;
+  const clientText = `Client: ${invoice.clientName || 'Walk-in Customer'}${invoice.clientPhone && invoice.clientPhone !== 'N/A' ? ` (${invoice.clientPhone})` : ''}`;
+  pdf.text(clientText.substring(0, 42), leftMargin, y); y += 3.2;
+  if (invoice.processedByName) { pdf.text(`Cashier: ${invoice.processedByName}`, leftMargin, y); y += 3.2; }
+  pdf.text(dashLine, center, y, { align: 'center' }); y += 3.5;
+
+  pdf.setFont('courier', 'bold'); pdf.setFontSize(7.2);
+  pdf.text('ITEM / SERVICE', leftMargin, y); pdf.text('QTY', 51, y, { align: 'center' }); pdf.text('AMOUNT', rightMargin, y, { align: 'right' }); y += 2.2;
+  pdf.setFont('courier', 'normal'); pdf.text(dashLine, center, y, { align: 'center' }); y += 3.2;
+
+  lines.forEach((li) => {
+    pdf.setFont('courier', 'bold'); pdf.setFontSize(7.2);
+    const qtySuffix = li.quantity > 1 ? ` (${li.quantity}x)` : '';
+    const itemName = `${li.name}${qtySuffix}`;
+    pdf.text(itemName.length > 25 ? `${itemName.substring(0, 23)}..` : itemName, leftMargin, y);
+    pdf.setFont('courier', 'normal');
+    pdf.text(String(li.quantity), 51, y, { align: 'center' });
+    pdf.text(formatPkr(li.total || (li.unitPrice * li.quantity)), rightMargin, y, { align: 'right' }); y += 3;
+    if (li.staffName) { pdf.setFontSize(6.5); pdf.text(`  Stylist: ${li.staffName}`, leftMargin, y); y += 2.8; }
+    const comps = li.packageComponentsSnapshot || li.packageComponents || [];
+    comps.forEach((c) => {
+      pdf.setFontSize(6.2); pdf.text(`  • ${c.serviceName}${c.staffName ? ` (${c.staffName})` : ''}`, leftMargin, y); y += 2.6;
+    });
   });
 
-  const imgData = canvas.toDataURL('image/png', 1.0);
-  pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+  pdf.setFontSize(7.2); pdf.text(dashLine, center, y, { align: 'center' }); y += 3.2;
+  const printRow = (label: string, val: string, isBold = false) => {
+    if (isBold) pdf.setFont('courier', 'bold'); else pdf.setFont('courier', 'normal');
+    pdf.text(label, leftMargin, y); pdf.text(val, rightMargin, y, { align: 'right' }); y += 3.2;
+  };
+  if (invoice.discount > 0) printRow('Discount:', `- ${formatPkr(invoice.discount)}`);
+  if (invoice.tax > 0) printRow(`Sales Tax:`, formatPkr(invoice.tax));
+  if (invoice.tip > 0) printRow('Staff Gratuity / Tip:', formatPkr(invoice.tip));
+  printRow('Total Payable:', formatPkr(invoice.total), true);
+  printRow(`Paid Amount (${methodSummary}):`, formatPkr(invoice.amountPaid), true);
+  printRow('Outstanding Balance:', formatPkr(invoice.amountDue), true);
+  pdf.setFont('courier', 'normal'); pdf.setFontSize(6.8);
+  pdf.text(dashLine, center, y, { align: 'center' }); y += 3.2;
+  pdf.text(`Thank you for your visit!`, center, y, { align: 'center' }); y += 2.8;
+  pdf.text('Powered by Isysware Software Solutions', center, y, { align: 'center' });
 
   const blob = pdf.output('blob');
   const file = new File([blob], fileName, { type: 'application/pdf' });
   const dataUrl = URL.createObjectURL(blob);
-
-  // Also extract PNG image blob if possible for clipboard copy
-  let imageBlob: Blob | undefined;
-  try {
-    imageBlob = await new Promise<Blob | undefined>((resolve) => {
-      canvas.toBlob((b) => resolve(b || undefined), 'image/png');
-    });
-  } catch {
-    // Ignore canvas toBlob issues
-  }
-
-  return {
-    pdf,
-    blob,
-    file,
-    dataUrl,
-    fileName,
-    imageBlob,
-  };
+  return { pdf, blob, file, dataUrl, fileName };
 }
 
-/**
- * Direct download of the receipt PDF to cashier's computer.
- */
-export async function downloadReceiptPdf(
-  element: HTMLElement,
-  invoiceNumber: string
-): Promise<string> {
-  const generated = await generateReceiptPdf(element, invoiceNumber);
+export async function downloadReceiptPdf(invoiceOrElement: Invoice | HTMLElement, branchOrInvoiceNo?: Branch | null | string, maybeInvoice?: Invoice): Promise<string> {
+  const generated = await generateReceiptPdf(invoiceOrElement, branchOrInvoiceNo, maybeInvoice);
   generated.pdf.save(generated.fileName);
   return generated.fileName;
 }
 
 export interface ShareWhatsAppResult {
-  sharedDirectly: boolean;
-  downloaded: boolean;
-  fileName: string;
-  phone: string;
-  file: File;
+  sharedDirectly: boolean; downloaded: boolean; fileName: string; phone: string; file: File;
 }
 
-/**
- * Handles sharing the receipt PDF to customer WhatsApp:
- * 1. Generates the exact receipt PDF.
- * 2. Uses Web Share API if supported (directly sends PDF file to WhatsApp on mobile / tablets / modern Windows).
- * 3. On desktop browsers without Web Share file support:
- *    - Downloads the PDF file to cashier's PC.
- *    - Copies image of receipt to clipboard (if supported) so cashier can also press Ctrl+V in WhatsApp Web.
- *    - Opens WhatsApp chat directly with clean intro message.
- */
-export async function shareReceiptPdfViaWhatsApp({
-  element,
-  invoice,
-  branch,
-  targetPhone,
-}: {
-  element: HTMLElement;
-  invoice: Invoice;
-  branch: Branch | null;
-  targetPhone: string;
-}): Promise<ShareWhatsAppResult> {
+export async function shareReceiptPdfViaWhatsApp({ invoice, branch, targetPhone }: { invoice: Invoice; branch: Branch | null; targetPhone: string; }): Promise<ShareWhatsAppResult> {
   const cleanPhone = getCleanWhatsAppPhone(targetPhone);
-  if (!cleanPhone) {
-    throw new Error('Please enter a valid customer WhatsApp number.');
-  }
-
-  const generated = await generateReceiptPdf(element, invoice.invoiceNumber);
-
-  // Try Web Share API with file attachment (Mobile / Tablet / Modern desktop)
-  if (
-    typeof navigator !== 'undefined' &&
-    navigator.canShare &&
-    navigator.canShare({ files: [generated.file] })
-  ) {
-    try {
-      await navigator.share({
-        files: [generated.file],
-        title: `Receipt - ${invoice.invoiceNumber}`,
-        text: `Here is your official receipt for Invoice #${invoice.invoiceNumber} from ${branch?.name || 'our salon'}.`,
-      });
-      return {
-        sharedDirectly: true,
-        downloaded: false,
-        fileName: generated.fileName,
-        phone: cleanPhone,
-        file: generated.file,
-      };
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        // User cancelled native share sheet
-        return {
-          sharedDirectly: false,
-          downloaded: false,
-          fileName: generated.fileName,
-          phone: cleanPhone,
-          file: generated.file,
-        };
-      }
-      // Fall through to desktop download + open chat flow
-    }
-  }
-
-  // Desktop flow:
-  // 1. Download the PDF file directly to downloads folder
+  if (!cleanPhone) throw new Error('Please enter a valid customer WhatsApp number.');
+  const generated = await generateReceiptPdf(invoice, branch);
   generated.pdf.save(generated.fileName);
-
-  // 2. Try copying image to clipboard for instant Ctrl+V pasting in WhatsApp Web
-  if (generated.imageBlob && navigator.clipboard && (window as any).ClipboardItem) {
-    try {
-      await navigator.clipboard.write([
-        new ClipboardItem({ 'image/png': generated.imageBlob }),
-      ]);
-    } catch {
-      // Ignore clipboard write restrictions
-    }
-  }
-
-  // 3. Prepare formatted intro message for WhatsApp chat
-  const branchName = (branch?.name || 'SALON & SPA').toUpperCase();
-  const summaryText = `*${branchName} — OFFICIAL RECEIPT*
-Invoice No: *${invoice.invoiceNumber}*
-Date: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}
-Customer: ${invoice.clientName || 'Valued Customer'}
-Total Amount: *${formatCurrency(invoice.total)}*
-Amount Paid: *${formatCurrency(invoice.amountPaid)}*
-Balance Due: *${formatCurrency(invoice.amountDue)}*
-Status: *${invoice.status}*
-
-_Please find your official PDF Receipt attached above._
-Thank you for visiting! We look forward to seeing you again.`;
-
+  const branchName = (branch?.name || 'MEERUB SALON & SPA').toUpperCase();
+  const methodSummary = getPaymentMethodSummary(invoice);
+  const summaryText = `*${branchName} — OFFICIAL RECEIPT*\nInvoice No: *${invoice.invoiceNumber}*\nDate: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Payable:* ${formatCurrency(invoice.total)}\n*Paid Amount (${methodSummary}):* ${formatCurrency(invoice.amountPaid)}\n*Outstanding Balance:* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official PDF Receipt attached above._\nThank you for visiting!`;
   const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(summaryText)}`;
   window.open(waUrl, '_blank', 'noopener,noreferrer');
-
-  return {
-    sharedDirectly: false,
-    downloaded: true,
-    fileName: generated.fileName,
-    phone: cleanPhone,
-    file: generated.file,
-  };
+  return { sharedDirectly: false, downloaded: true, fileName: generated.fileName, phone: cleanPhone, file: generated.file };
 }

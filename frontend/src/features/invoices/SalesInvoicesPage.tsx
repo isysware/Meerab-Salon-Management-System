@@ -10,6 +10,7 @@ import {
 } from '@/types/salon';
 import { AccessDeniedView } from '@/features/scaffold/AccessDeniedView';
 import { ReceiptModal } from '@/features/pos/ReceiptModal';
+import { printThermalReceipt } from '@/features/pos/receiptPdf';
 import {
   downloadReportCsv,
   downloadReportExcel,
@@ -170,6 +171,23 @@ export const SalesInvoicesPage: React.FC = () => {
     };
 
     fetchReport(query);
+  };
+
+  const [printingInvoiceId, setPrintingInvoiceId] = useState<string | null>(null);
+
+  const handleQuickPrint = async (invoiceId: string) => {
+    setPrintingInvoiceId(invoiceId);
+    try {
+      const fullInvoice = await salonService.getInvoice(invoiceId);
+      if (fullInvoice) {
+        const branch = allBranches.find((b) => b.id === fullInvoice.branchId) || null;
+        printThermalReceipt(fullInvoice, branch);
+      }
+    } catch (err) {
+      console.error('Failed to load invoice receipt details for print:', err);
+    } finally {
+      setPrintingInvoiceId(null);
+    }
   };
 
   // Open Receipt Modal
@@ -769,6 +787,19 @@ export const SalesInvoicesPage: React.FC = () => {
                               title="View receipt"
                             >
                               <Eye className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickPrint(row.id)}
+                              disabled={printingInvoiceId === row.id}
+                              className="p-1 rounded text-slate-500 hover:text-[#0047AB] hover:bg-blue-50 transition-colors cursor-pointer"
+                              title="Print thermal receipt (80mm)"
+                            >
+                              {printingInvoiceId === row.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin text-[#0047AB]" />
+                              ) : (
+                                <Printer className="w-4 h-4" />
+                              )}
                             </button>
                             {['SUPER_ADMIN', 'ADMIN'].includes(user.role) && row.lifecycle !== 'VOIDED' && row.lifecycle !== 'REFUNDED' && (
                               <button

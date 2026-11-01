@@ -69,9 +69,15 @@ const runDTO = async (tx, id) => {
 };
 
 /** Build one statement per eligible staff member from unconsumed events in the window. */
-export const buildStatements = async (tx, branchId, startDate, endDate, staffId, payrollStaffIds) => {
-  const staffRows = await tx.staff.findMany({ where: { branchId, ...(payrollStaffIds ? { id: { in: payrollStaffIds } } : { isActive: true, ...(staffId ? { id: staffId } : {}) }) }, orderBy: { employeeCode: 'asc' } });
-  const eligible = payrollStaffIds ? staffRows : staffRows.filter((s) => isCompensationEligibleForCommission(s.compensationType));
+export const buildStatements = async (tx, branchId, startDate, endDate, staffId, payrollStaffIds, staffIds, compensationType) => {
+  const targetStaffIds = payrollStaffIds || (staffIds && staffIds.length > 0 ? staffIds : (staffId && staffId !== 'ALL' ? [staffId] : null));
+  const where = {
+    branchId,
+    ...(targetStaffIds ? { id: { in: targetStaffIds } } : { isActive: true }),
+    ...(compensationType && compensationType !== 'ALL' ? { compensationType } : {})
+  };
+  const staffRows = await tx.staff.findMany({ where, orderBy: { employeeCode: 'asc' } });
+  const eligible = targetStaffIds ? staffRows : staffRows.filter((s) => isCompensationEligibleForCommission(s.compensationType));
   const events = await tx.commissionEvent.findMany({
     where: { branchId, consumedByRunId: null, eventDate: { gte: dateOnly(startDate), lte: dateOnly(endDate) }, staffId: { in: eligible.map((s) => s.id) } },
     orderBy: [{ eventDate: 'asc' }, { createdAt: 'asc' }],
@@ -122,7 +128,15 @@ const Decimal_max0 = (d) => (d.lessThan(0) ? toDec(0) : d);
 export const listRuns = async (actor, { branchId } = {}) => {
   noAccountant(actor);
   const b = resolveReadBranch(actor, branchId);
-  const runs = await prisma.commissionRun.findMany({ where: b ? { branchId: b } : {}, include: runInclude, orderBy: { generatedAt: 'desc' } });
+  const runs = await prisma.commissionRun.findMany({
+    where: {
+      status: { not: 'DRAFT' },
+      commissionNumber: { not: 'DRAFT' },
+      ...(b ? { branchId: b } : {}),
+    },
+    include: runInclude,
+    orderBy: { generatedAt: 'desc' },
+  });
   const branches = new Map((await prisma.branch.findMany()).map((x) => [x.id, x.name]));
   const consumed = await prisma.commissionEvent.findMany({ where: { consumedByRunId: { in: runs.map((r) => r.id) } }, select: { id: true, consumedByRunId: true } });
   return runs.map((r) => toRunDTO(r, branches.get(r.branchId), consumed.filter((e) => e.consumedByRunId === r.id).map((e) => e.id)));
@@ -130,13 +144,13 @@ export const listRuns = async (actor, { branchId } = {}) => {
 
 // ── Preview / finalize / cancel ──────────────────────────────────────────────
 
-export const generatePreview = async (actor, { branchId: requested, startDate, endDate, staffId }) => {
+export const generatePreview = async (actor, { branchId: requested, startDate, endDate, staffId, staffIds, compensationType }) => {
   noAccountant(actor);
   if (startDate > endDate) throw badRequest('INVALID_RANGE', 'Start date must be on or before end date.');
   const branchId = resolveWriteBranch(actor, requested, 'Access Denied: Cannot generate commission for another branch.');
   return prisma.$transaction(async (tx) => {
     await lockCommissionBranch(tx, branchId);
-    const built = await buildStatements(tx, branchId, startDate, endDate, staffId);
+    const built = await buildStatements(tx, branchId, startDate, endDate, staffId, null, staffIds, compensationType);
     await tx.commissionRun.deleteMany({ where: { branchId, status: 'DRAFT', startDate: dateOnly(startDate), endDate: dateOnly(endDate) } });
     const run = await tx.commissionRun.create({
       data: {
@@ -162,7 +176,9 @@ export const finalizeRun = async (actor, runId) => {
 
     // Serialise finalizations per branch so two runs can never consume the same events.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`commission:${draft.branchId}`}::text))`;
-    const built = await buildStatements(tx, draft.branchId, ymd(draft.startDate), ymd(draft.endDate));
+    const draftStatements = await tx.commissionStatement.findMany({ where: { runId }, select: { staffId: true } });
+    const draftStaffIds = draftStatements.map((s) => s.staffId);
+    const built = await buildStatements(tx, draft.branchId, ymd(draft.startDate), ymd(draft.endDate), null, null, draftStaffIds.length > 0 ? draftStaffIds : null);
     const branch = await tx.branch.findUnique({ where: { id: draft.branchId } });
     const year = Number(ymd(draft.startDate).slice(0, 4));
     await tx.commissionStatement.deleteMany({ where: { runId } });
@@ -190,6 +206,14 @@ export const cancelRun = async (actor, runId, reason) => {
     const run = await tx.commissionRun.findUnique({ where: { id: runId }, include: { payments: true, statements: true } });
     if (!run) throw notFound('COMMISSION_NOT_FOUND', `Commission run '${runId}' not found.`);
     assertBranchAccess(actor, run.branchId, 'Access Denied: Cannot cancel commission run for another branch.');
+
+    // If this is an unfinalized draft, delete it completely so it leaves no footprint
+    if (run.status === 'DRAFT' || run.commissionNumber === 'DRAFT') {
+      await tx.commissionStatement.deleteMany({ where: { runId } });
+      await tx.commissionRun.delete({ where: { id: runId } });
+      return { id: runId, status: 'DELETED' };
+    }
+
     if (run.status === 'CANCELLED') throw conflict('ALREADY_CANCELLED', 'This commission run is already cancelled.');
     if (run.statements.some((s) => s.payrollPayslipId)) throw conflict('COMMISSION_LINKED_TO_PAYROLL', 'Cancel the linked payroll before cancelling this commission run.');
     if (run.payments.some((p) => p.status === 'COMPLETED')) throw conflict('HAS_PAYMENTS', 'Runs with payments cannot be cancelled until all payments are properly reversed.');

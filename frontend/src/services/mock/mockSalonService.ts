@@ -7739,7 +7739,9 @@ class MockSalonService implements SalonServiceContract {
     startDate: string,
     endDate: string,
     staffId?: string,
-    actor?: User
+    actor?: User,
+    staffIds?: string[],
+    compensationType?: string
   ): Promise<CommissionRun> {
     const authenticatedActor = this.getAuthenticatedActor(actor);
     if (authenticatedActor.role === 'ACCOUNTANT') {
@@ -7767,12 +7769,12 @@ class MockSalonService implements SalonServiceContract {
       }
     }
 
+    const targetStaffIds = staffIds && staffIds.length > 0 ? staffIds : (staffId && staffId !== 'ALL' ? [staffId] : null);
     const eligibleStaff = store.staff.filter(
       (s: StaffMember) =>
         s.branchId === branchId &&
-        s.isActive &&
-        isCompensationEligibleForCommission(s.compensationType) &&
-        (!staffId || s.id === staffId)
+        (targetStaffIds ? targetStaffIds.includes(s.id) : (s.isActive && isCompensationEligibleForCommission(s.compensationType))) &&
+        (!compensationType || compensationType === 'ALL' || s.compensationType === compensationType)
     );
 
     const statements: CommissionStatementRecord[] = [];
@@ -8090,6 +8092,12 @@ class MockSalonService implements SalonServiceContract {
       throw new Error('Access Denied: Cannot cancel commission run for another branch.');
     }
 
+    if (run.status === 'DRAFT' || run.commissionNumber === 'DRAFT') {
+      clonedStore.commissionRuns = (clonedStore.commissionRuns || []).filter((r: CommissionRun) => r.id !== commissionRunId);
+      mockStorage.saveStore(clonedStore);
+      return run;
+    }
+
     const activePayments = (clonedStore.commissionPayments || []).filter(
       (p: CommissionPayment) => p.commissionRunId === commissionRunId && p.status !== 'REVERSED'
     );
@@ -8195,7 +8203,7 @@ class MockSalonService implements SalonServiceContract {
     }
 
     const store = mockStorage.getStore();
-    let runs = store.commissionRuns || [];
+    let runs = (store.commissionRuns || []).filter((r: CommissionRun) => r.status !== 'DRAFT' && r.commissionNumber !== 'DRAFT');
 
     if (authenticatedActor.role === 'ADMIN') {
       runs = runs.filter((r: CommissionRun) => r.branchId === authenticatedActor.branchId);

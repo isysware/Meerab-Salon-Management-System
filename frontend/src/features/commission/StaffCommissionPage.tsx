@@ -30,6 +30,11 @@ import {
   Lock,
   Layers,
   Sparkles,
+  Banknote,
+  Building2,
+  Users,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 import { roundCurrency } from '../../lib/taxCalculations';
 import { AccessDeniedView } from '../scaffold/AccessDeniedView';
@@ -57,12 +62,17 @@ export const StaffCommissionPage: React.FC = () => {
   const [onlineAccounts, setOnlineAccounts] = useState<OnlineAccount[]>([]);
   const [cashDrawers, setCashDrawers] = useState<CashDrawer[]>([]);
 
-  // Filters
+  // Period & Generation Filtering
   const [selectedBranchId, setSelectedBranchId] = useState<string>(
     user.role === 'SUPER_ADMIN' ? (activeBranchId === 'ALL' ? (allBranches[0]?.id || '') : activeBranchId) : (user.branchId || '')
   );
+  const [periodType, setPeriodType] = useState<'MONTHLY' | 'DAILY' | 'CUSTOM'>('MONTHLY');
+  const [selectedMonth, setSelectedMonth] = useState<string>(todayStr.slice(0, 7));
+  const [singleDate, setSingleDate] = useState<string>(todayStr);
   const [startDate, setStartDate] = useState<string>(monthStartStr);
   const [endDate, setEndDate] = useState<string>(todayStr);
+  const [compensationTypeFilter, setCompensationTypeFilter] = useState<string>('ALL');
+  const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
   const [staffFilter, setStaffFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
@@ -145,6 +155,66 @@ export const StaffCommissionPage: React.FC = () => {
     }
   }, [effectiveBranchId]);
 
+  useEffect(() => {
+    if (periodType === 'MONTHLY') {
+      const [y, m] = selectedMonth.split('-').map(Number);
+      const lastDay = new Date(y, m, 0).getDate();
+      setStartDate(`${selectedMonth}-01`);
+      setEndDate(`${selectedMonth}-${String(lastDay).padStart(2, '0')}`);
+    } else if (periodType === 'DAILY') {
+      setStartDate(singleDate);
+      setEndDate(singleDate);
+    }
+  }, [periodType, selectedMonth, singleDate]);
+
+  const eligibleCommissionStaff = useMemo(() => {
+    return staffList.filter((s) => {
+      if (!s.isActive) return false;
+      const isEligible = ['MONTHLY_PLUS_COMMISSION', 'DAILY_PLUS_COMMISSION', 'COMMISSION_ONLY'].includes(s.compensationType);
+      if (!isEligible) return false;
+      if (compensationTypeFilter !== 'ALL' && s.compensationType !== compensationTypeFilter) return false;
+      return true;
+    });
+  }, [staffList, compensationTypeFilter]);
+
+  const alreadyGeneratedStaffIds = useMemo(() => {
+    const set = new Set<string>();
+    commissionRuns
+      .filter((r) => r.status !== 'CANCELLED' && r.status !== 'DRAFT' && r.commissionNumber !== 'DRAFT' && r.startDate <= endDate && r.endDate >= startDate)
+      .forEach((r) => {
+        r.statements.forEach((st) => set.add(st.staffId));
+      });
+    return set;
+  }, [commissionRuns, startDate, endDate]);
+
+  useEffect(() => {
+    if (eligibleCommissionStaff.length > 0) {
+      setSelectedStaffIds(eligibleCommissionStaff.map((s) => s.id));
+    } else {
+      setSelectedStaffIds([]);
+    }
+  }, [eligibleCommissionStaff]);
+
+  const handleToggleStaff = (staffId: string) => {
+    setSelectedStaffIds((prev) =>
+      prev.includes(staffId) ? prev.filter((id) => id !== staffId) : [...prev, staffId]
+    );
+  };
+
+  const handleSelectAllStaff = () => {
+    setSelectedStaffIds(eligibleCommissionStaff.map((s) => s.id));
+  };
+
+  const handleSelectUngeneratedStaff = () => {
+    setSelectedStaffIds(
+      eligibleCommissionStaff.filter((s) => !alreadyGeneratedStaffIds.has(s.id)).map((s) => s.id)
+    );
+  };
+
+  const handleClearStaffSelection = () => {
+    setSelectedStaffIds([]);
+  };
+
   // Derived Statistics
   const summaryStats = useMemo(() => {
     let eligibleNetSales = 0;
@@ -153,7 +223,7 @@ export const StaffCommissionPage: React.FC = () => {
     let outstanding = 0;
 
     commissionRuns
-      .filter((r) => r.status !== 'CANCELLED' && r.status !== 'DRAFT')
+      .filter((r) => r.status !== 'CANCELLED' && r.status !== 'DRAFT' && r.commissionNumber !== 'DRAFT')
       .forEach((r) => {
         finalizedCommission += r.totalCommissionPayable;
         paid += r.totalPaid;
@@ -171,9 +241,10 @@ export const StaffCommissionPage: React.FC = () => {
     };
   }, [commissionRuns]);
 
-  // Filtered runs for table
+  // Filtered runs for table (Only finalized commission runs: never unfinalized drafts or cancelled drafts)
   const displayRuns = useMemo(() => {
     return commissionRuns.filter((r) => {
+      if (r.status === 'DRAFT' || r.commissionNumber === 'DRAFT') return false;
       if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
       return true;
     });
@@ -188,18 +259,26 @@ export const StaffCommissionPage: React.FC = () => {
 
   // Generate Draft Preview
   const handleGeneratePreview = async () => {
-    if (user.role === 'SUPER_ADMIN' && !generationScope.validate()) return;
+    const targetBranch = effectiveBranchId;
+    if (!targetBranch) {
+      toast.error('Please select a branch.');
+      return;
+    }
+    if (selectedStaffIds.length === 0) {
+      toast.error('Please select at least one staff member to generate commission.');
+      return;
+    }
     try {
       setActionLoading(true);
       setFeedback(null);
       const preview = await salonService.generateCommissionPreview(
-        user.role === 'SUPER_ADMIN' ? generationScope.branchId : effectiveBranchId,
+        targetBranch,
         startDate,
         endDate,
-        user.role === 'SUPER_ADMIN'
-          ? (generationStaffId !== 'ALL' ? generationStaffId : undefined)
-          : (staffFilter !== 'ALL' ? staffFilter : undefined),
-        user
+        undefined,
+        user,
+        selectedStaffIds,
+        compensationTypeFilter !== 'ALL' ? compensationTypeFilter : undefined
       );
       setActiveDraft(preview);
       setShowGenerateForm(false);
@@ -237,6 +316,20 @@ export const StaffCommissionPage: React.FC = () => {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  // Discard & close draft preview without saving any zombie draft records
+  const handleClosePreview = async () => {
+    if (activeDraft && (activeDraft.status === 'DRAFT' || activeDraft.commissionNumber === 'DRAFT')) {
+      try {
+        await salonService.cancelCommissionRun(activeDraft.id, 'Discarded draft preview');
+      } catch (e) {
+        console.warn('Draft cleanup:', e);
+      }
+    }
+    setShowPreviewModal(false);
+    setActiveDraft(null);
+    await loadData();
   };
 
   // Open Payment Modal
@@ -513,14 +606,35 @@ export const StaffCommissionPage: React.FC = () => {
         </div>
       </div>
 
-      {/* ── 3. FILTER TOOLBAR (FROSTED GLASS CARD) ── */}
-      <div className="p-5 sm:p-6 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] space-y-4">
-        <div className="flex items-center gap-2 text-slate-800 font-bold text-sm tracking-wide">
-          <Filter className="w-4 h-4 text-[#B82E69]" />
-          <span>Commission Run Filters & Date Range</span>
+      {/* ── 3. COMMISSION GENERATION & STAFF SELECTION PANEL ── */}
+      <div className="p-5 sm:p-6 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-rose-100/60">
+          <div className="flex items-center gap-2 text-slate-900 font-bold text-sm tracking-wide">
+            <Sparkles className="w-4 h-4 text-[#B82E69]" />
+            <span>Generate Staff Commission</span>
+          </div>
+
+          {/* Period Type Segmented Controls */}
+          <div className="flex items-center p-1 bg-slate-100/80 rounded-xl border border-slate-200/60 text-xs font-semibold">
+            {(['MONTHLY', 'DAILY', 'CUSTOM'] as const).map((type) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setPeriodType(type)}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                  periodType === type
+                    ? 'bg-white text-[#B82E69] shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {type === 'MONTHLY' ? 'Monthly' : type === 'DAILY' ? 'Daily' : 'Custom Range'}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-3.5 items-end">
+        {/* Filters Row */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5 items-end">
           {user.role === 'SUPER_ADMIN' && (
             <div className="min-w-0">
               <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Branch</label>
@@ -538,71 +652,195 @@ export const StaffCommissionPage: React.FC = () => {
             </div>
           )}
 
-          <div className="min-w-0">
-            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Commission Month</label>
-            <input
-              type="month"
-              value={startDate.slice(0, 7) === endDate.slice(0, 7) ? startDate.slice(0, 7) : ''}
-              onChange={(e) => {
-                const m = e.target.value;
-                if (!m) return;
-                const [y, mo] = m.split('-').map(Number);
-                setStartDate(`${m}-01`);
-                setEndDate(`${m}-${String(new Date(y, mo, 0).getDate()).padStart(2, '0')}`);
-              }}
-              className="w-full text-xs rounded-xl border border-white/80 bg-white/80 hover:bg-white px-3 py-2 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/20 focus:border-[#B82E69] shadow-2xs font-medium transition-all"
-            />
-          </div>
+          {/* Conditional Date Pickers based on Period Type */}
+          {periodType === 'MONTHLY' && (
+            <div className="min-w-0">
+              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Select Month</label>
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="w-full text-xs rounded-xl border border-white/80 bg-white/80 hover:bg-white px-3 py-2 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/20 focus:border-[#B82E69] shadow-2xs font-medium transition-all"
+              />
+            </div>
+          )}
 
-          <div className="min-w-0">
-            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Start Date</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-full text-xs rounded-xl border border-white/80 bg-white/80 hover:bg-white px-3 py-2 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/20 focus:border-[#B82E69] shadow-2xs font-medium transition-all"
-            />
-          </div>
+          {periodType === 'DAILY' && (
+            <div className="min-w-0">
+              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Select Date</label>
+              <input
+                type="date"
+                value={singleDate}
+                onChange={(e) => setSingleDate(e.target.value)}
+                className="w-full text-xs rounded-xl border border-white/80 bg-white/80 hover:bg-white px-3 py-2 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/20 focus:border-[#B82E69] shadow-2xs font-medium transition-all"
+              />
+            </div>
+          )}
 
-          <div className="min-w-0">
-            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">End Date</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="w-full text-xs rounded-xl border border-white/80 bg-white/80 hover:bg-white px-3 py-2 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/20 focus:border-[#B82E69] shadow-2xs font-medium transition-all"
-            />
-          </div>
+          {periodType === 'CUSTOM' && (
+            <>
+              <div className="min-w-0">
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Start Date</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full text-xs rounded-xl border border-white/80 bg-white/80 hover:bg-white px-3 py-2 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/20 focus:border-[#B82E69] shadow-2xs font-medium transition-all"
+                />
+              </div>
+              <div className="min-w-0">
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">End Date</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full text-xs rounded-xl border border-white/80 bg-white/80 hover:bg-white px-3 py-2 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/20 focus:border-[#B82E69] shadow-2xs font-medium transition-all"
+                />
+              </div>
+            </>
+          )}
 
+          {/* Compensation Type Dropdown */}
           <div className="min-w-0">
-            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Employee</label>
+            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Compensation Type</label>
             <select
-              value={staffFilter}
-              onChange={(e) => setStaffFilter(e.target.value)}
+              value={compensationTypeFilter}
+              onChange={(e) => setCompensationTypeFilter(e.target.value)}
               className="w-full text-xs rounded-xl border border-white/80 bg-white/80 hover:bg-white px-3 py-2 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/20 focus:border-[#B82E69] shadow-2xs font-medium transition-all cursor-pointer"
             >
-              <option value="ALL">All Eligible Staff</option>
-              {staffList
-                .filter(
-                  (s) =>
-                    s.compensationType === 'MONTHLY_PLUS_COMMISSION' ||
-                    s.compensationType === 'DAILY_PLUS_COMMISSION' ||
-                    s.compensationType === 'COMMISSION_ONLY'
-                )
-                .map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} ({s.commissionRate}%)
-                  </option>
-                ))}
+              <option value="ALL">All Eligible Types</option>
+              <option value="MONTHLY_PLUS_COMMISSION">Monthly + Commission</option>
+              <option value="DAILY_PLUS_COMMISSION">Daily + Commission</option>
+              <option value="COMMISSION_ONLY">Commission Only</option>
             </select>
           </div>
+        </div>
 
-          <div className="min-w-0">
-            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Run Status</label>
+        {/* Staff Selection Grid with Multi-Select Actions */}
+        <div className="space-y-3 pt-2 border-t border-rose-100/40">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-[#B82E69]" />
+              <span className="text-xs font-bold text-slate-800">
+                Eligible Staff Members ({selectedStaffIds.length} of {eligibleCommissionStaff.length} selected)
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-xs">
+              <button
+                type="button"
+                onClick={handleSelectAllStaff}
+                className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-[11px] transition-all cursor-pointer"
+              >
+                Select All
+              </button>
+              <button
+                type="button"
+                onClick={handleSelectUngeneratedStaff}
+                className="px-2.5 py-1 rounded-lg border border-amber-200 bg-amber-50/70 hover:bg-amber-100/70 text-amber-800 font-semibold text-[11px] transition-all cursor-pointer"
+              >
+                Select Ungenerated
+              </button>
+              <button
+                type="button"
+                onClick={handleClearStaffSelection}
+                className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 font-semibold text-[11px] transition-all cursor-pointer"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+
+          {eligibleCommissionStaff.length === 0 ? (
+            <div className="p-6 text-center text-xs text-slate-400 bg-white/40 rounded-xl border border-slate-200/50">
+              No commission-eligible staff found for this branch or compensation filter.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+              {eligibleCommissionStaff.map((staff) => {
+                const isSelected = selectedStaffIds.includes(staff.id);
+                const isGenerated = alreadyGeneratedStaffIds.has(staff.id);
+                return (
+                  <div
+                    key={staff.id}
+                    onClick={() => handleToggleStaff(staff.id)}
+                    className={`p-3 rounded-xl border text-xs transition-all cursor-pointer flex items-start gap-2.5 select-none ${
+                      isSelected
+                        ? 'border-[#B82E69] bg-[#FDF2F5]/80 shadow-2xs'
+                        : 'border-slate-200/80 bg-white/60 hover:bg-white hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="pt-0.5 shrink-0 text-[#B82E69]">
+                      {isSelected ? <CheckSquare className="w-4 h-4 text-[#B82E69]" /> : <Square className="w-4 h-4 text-slate-300" />}
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="font-bold text-slate-900 truncate block">{staff.name}</span>
+                        {isGenerated && (
+                          <span className="text-[9px] font-semibold bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded-full shrink-0">
+                            Generated
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 truncate">{staff.employeeCode} • {staff.designation || 'Stylist'}</p>
+                      <div className="flex items-center gap-1.5 pt-0.5">
+                        <span className="text-[10px] font-mono font-bold text-[#B82E69] bg-white/80 px-1.5 py-0.5 rounded border border-rose-100">
+                          {staff.commissionRate}%
+                        </span>
+                        <span className="text-[9px] text-slate-500 truncate">
+                          {staff.compensationType === 'MONTHLY_PLUS_COMMISSION' ? 'Monthly+Comm' : staff.compensationType === 'DAILY_PLUS_COMMISSION' ? 'Daily+Comm' : 'Comm Only'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Action Row */}
+          <div className="pt-3 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-rose-100/40">
+            <div className="text-xs text-slate-500 font-medium">
+              Active Period: <strong className="text-slate-800">{startDate}</strong> to <strong className="text-slate-800">{endDate}</strong>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleGeneratePreview}
+              disabled={actionLoading || selectedStaffIds.length === 0}
+              className="w-full sm:w-auto h-9 px-5 font-semibold gap-2 shadow-xs text-xs sm:text-sm bg-gradient-to-r from-[#B82E69] to-[#9D2558] hover:from-[#9D2558] hover:to-[#831F4A] disabled:opacity-50 text-white rounded-xl transition-all flex items-center justify-center cursor-pointer"
+            >
+              {actionLoading ? (
+                <>
+                  <Clock className="w-4 h-4 animate-spin" />
+                  <span>Calculating Net Attributions...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" />
+                  <span>Generate Commission ({selectedStaffIds.length} Staff)</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── 4. DEDICATED "MANAGE COMMISSION RUNS" SECTION ── */}
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-[20px] border border-white/90 bg-white/60 backdrop-blur-md">
+          <div className="flex items-center gap-2">
+            <Award className="w-4 h-4 text-[#B82E69]" />
+            <h2 className="text-sm font-bold text-slate-900 tracking-wide">Manage Commission Runs</h2>
+            <span className="text-xs text-slate-500">({displayRuns.length} total)</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Filter Status:</label>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full text-xs rounded-xl border border-white/80 bg-white/80 hover:bg-white px-3 py-2 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/20 focus:border-[#B82E69] shadow-2xs font-medium transition-all cursor-pointer"
+              className="text-xs rounded-xl border border-white/80 bg-white px-3 py-1.5 text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/20 focus:border-[#B82E69] shadow-2xs font-medium cursor-pointer"
             >
               <option value="ALL">All Statuses</option>
               <option value="FINALIZED">Finalized</option>
@@ -612,7 +850,6 @@ export const StaffCommissionPage: React.FC = () => {
             </select>
           </div>
         </div>
-      </div>
 
       {/* Main Commission Runs List */}
       <div className="space-y-6">
@@ -821,6 +1058,7 @@ export const StaffCommissionPage: React.FC = () => {
           ))
         )}
       </div>
+      </div>
 
       {/* ========================================================================= */}
       {/* MODAL 1: PREVIEW & FINALIZATION MODAL                                     */}
@@ -863,7 +1101,7 @@ export const StaffCommissionPage: React.FC = () => {
                   </p>
                 </div>
               </div>
-              <button onClick={() => setShowPreviewModal(false)} className="p-2 text-slate-400 hover:text-slate-600">
+              <button onClick={handleClosePreview} className="p-2 text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -941,10 +1179,10 @@ export const StaffCommissionPage: React.FC = () => {
               </p>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => setShowPreviewModal(false)}
-                  className="px-4 py-2 border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl text-xs font-medium"
+                  onClick={handleClosePreview}
+                  className="px-4 py-2 border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl text-xs font-medium cursor-pointer"
                 >
-                  Close
+                  Cancel / Discard Draft
                 </button>
                 <button
                   onClick={handleFinalizeCommission}
@@ -1083,24 +1321,26 @@ export const StaffCommissionPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setPaymentForm({ ...paymentForm, method: 'CASH' })}
-                    className={`p-3 rounded-xl border text-center font-medium transition-all ${
+                    className={`p-3 rounded-xl border text-center font-medium transition-all flex items-center justify-center gap-2 ${
                       paymentForm.method === 'CASH'
                         ? 'border-purple-600 bg-purple-50/50 text-purple-700 ring-2 ring-purple-500'
                         : 'border-slate-200 bg-slate-50 text-slate-600'
                     }`}
                   >
-                    Cash (Open Drawer)
+                    <Banknote className="w-4 h-4 text-emerald-600" />
+                    <span>Cash (Open Drawer)</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setPaymentForm({ ...paymentForm, method: 'ONLINE' })}
-                    className={`p-3 rounded-xl border text-center font-medium transition-all ${
+                    className={`p-3 rounded-xl border text-center font-medium transition-all flex items-center justify-center gap-2 ${
                       paymentForm.method === 'ONLINE'
                         ? 'border-purple-600 bg-purple-50/50 text-purple-700 ring-2 ring-purple-500'
                         : 'border-slate-200 bg-slate-50 text-slate-600'
                     }`}
                   >
-                    Bank / Online Account
+                    <Building2 className="w-4 h-4 text-blue-600" />
+                    <span>Bank / Online Account</span>
                   </button>
                 </div>
               </div>
