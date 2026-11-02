@@ -1,5 +1,14 @@
-// AUTO-PORTED from frontend src/lib/attendanceCalculations.ts (types stripped with esbuild). Keep logic identical to the frontend.
+import Decimal from 'decimal.js';
 import { roundCurrency } from "./taxCalculations.js";
+
+Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
+const d = (v) => new Decimal(v ?? 0);
+
+function getCalendarDaysInMonth(yearMonth) {
+  const [yearStr, monthStr] = yearMonth.split("-");
+  return new Date(parseInt(yearStr, 10), parseInt(monthStr, 10), 0).getDate();
+}
+
 function parseTimeToMinutes(timeStr) {
   if (!timeStr || !timeStr.trim()) return 0;
   const clean = timeStr.trim().toUpperCase();
@@ -20,6 +29,7 @@ function parseTimeToMinutes(timeStr) {
   const minutes = parseInt(mStr || "0", 10) || 0;
   return hours * 60 + minutes;
 }
+
 function formatMinutesToTime(totalMinutes) {
   let normalized = totalMinutes % (24 * 60);
   if (normalized < 0) normalized += 24 * 60;
@@ -30,6 +40,7 @@ function formatMinutesToTime(totalMinutes) {
   else if (hours > 12) hours -= 12;
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${period}`;
 }
+
 function evaluateLateness(checkInTimeStr, scheduledStartTimeStr, lateGraceMinutes = 15) {
   if (!checkInTimeStr || !scheduledStartTimeStr) {
     return { isLate: false, lateMinutes: 0 };
@@ -42,6 +53,7 @@ function evaluateLateness(checkInTimeStr, scheduledStartTimeStr, lateGraceMinute
   }
   return { isLate: true, lateMinutes: diff };
 }
+
 function evaluateEarlyExit(checkOutTimeStr, scheduledEndTimeStr, earlyGraceMinutes = 15, isOvernightShift = false) {
   if (!checkOutTimeStr || !scheduledEndTimeStr) {
     return { isEarlyExit: false, earlyExitMinutes: 0 };
@@ -58,6 +70,7 @@ function evaluateEarlyExit(checkOutTimeStr, scheduledEndTimeStr, earlyGraceMinut
   }
   return { isEarlyExit: true, earlyExitMinutes: diff };
 }
+
 function calculateWorkedHours(checkInTimeStr, checkOutTimeStr, isOvernightShift = false) {
   if (!checkInTimeStr || !checkOutTimeStr) return 0;
   const inMin = parseTimeToMinutes(checkInTimeStr);
@@ -66,8 +79,9 @@ function calculateWorkedHours(checkInTimeStr, checkOutTimeStr, isOvernightShift 
     outMin += 24 * 60;
   }
   const workedMinutes = Math.max(0, outMin - inMin);
-  return roundCurrency(workedMinutes / 60);
+  return d(workedMinutes).dividedBy(60).toNumber();
 }
+
 function calculateScheduledHours(startTimeStr, endTimeStr, isOvernightShift = false) {
   if (!startTimeStr || !endTimeStr) return 8;
   const inMin = parseTimeToMinutes(startTimeStr);
@@ -75,10 +89,11 @@ function calculateScheduledHours(startTimeStr, endTimeStr, isOvernightShift = fa
   if (isOvernightShift || outMin < inMin) {
     outMin += 24 * 60;
   }
-  return roundCurrency(Math.max(0, outMin - inMin) / 60);
+  return d(Math.max(0, outMin - inMin)).dividedBy(60).toNumber();
 }
-function calculateDeductionSnapshot(staff, isLate, lateMinutes, isEarlyExit, earlyExitMinutes) {
-  const calculatedAt = (/* @__PURE__ */ new Date()).toISOString();
+
+function calculateDeductionSnapshot(staff, isLate, lateMinutes, isEarlyExit, earlyExitMinutes, workDate) {
+  const calculatedAt = new Date().toISOString();
   if (staff.compensationType === "COMMISSION_ONLY") {
     return {
       calculatedAt,
@@ -94,62 +109,72 @@ function calculateDeductionSnapshot(staff, isLate, lateMinutes, isEarlyExit, ear
       notes: "Commission Only staff have zero salary deductions; commission and tips are protected."
     };
   }
-  let effectiveDailyBase = 0;
+
+  let effectiveDailyBase = d(0);
+  let divisorUsed = undefined;
+
   if (staff.compensationType === "DAILY_SALARY" || staff.compensationType === "DAILY_PLUS_COMMISSION") {
-    effectiveDailyBase = staff.dailySalaryRate || 0;
+    effectiveDailyBase = d(staff.dailySalaryRate || 0);
   } else if (staff.compensationType === "MONTHLY_SALARY" || staff.compensationType === "MONTHLY_PLUS_COMMISSION") {
-    const divisor = staff.payrollDivisor && staff.payrollDivisor > 0 ? staff.payrollDivisor : 26;
-    effectiveDailyBase = roundCurrency((staff.baseSalary || 0) / divisor);
+    const ym = workDate ? String(workDate).slice(0, 7) : new Date().toISOString().slice(0, 7);
+    divisorUsed = getCalendarDaysInMonth(ym);
+    effectiveDailyBase = d(staff.baseSalary || 0).dividedBy(divisorUsed);
   }
-  let lateDeductionAmount = 0;
+
+  let lateDeductionAmount = d(0);
   if (isLate && staff.lateInDeduction?.enabled) {
     if (staff.lateInDeduction.type === "FIXED") {
-      lateDeductionAmount = roundCurrency(staff.lateInDeduction.amount || 0);
+      lateDeductionAmount = d(staff.lateInDeduction.amount || 0);
     } else if (staff.lateInDeduction.type === "PERCENTAGE") {
-      const pct = (staff.lateInDeduction.amount || 0) / 100;
-      lateDeductionAmount = roundCurrency(effectiveDailyBase * pct);
+      const pct = d(staff.lateInDeduction.amount || 0).dividedBy(100);
+      lateDeductionAmount = effectiveDailyBase.times(pct);
     }
   }
-  let earlyExitDeductionAmount = 0;
+
+  let earlyExitDeductionAmount = d(0);
   if (isEarlyExit && staff.earlyExitDeduction?.enabled) {
     if (staff.earlyExitDeduction.type === "FIXED") {
-      earlyExitDeductionAmount = roundCurrency(staff.earlyExitDeduction.amount || 0);
+      earlyExitDeductionAmount = d(staff.earlyExitDeduction.amount || 0);
     } else if (staff.earlyExitDeduction.type === "PERCENTAGE") {
-      const pct = (staff.earlyExitDeduction.amount || 0) / 100;
-      earlyExitDeductionAmount = roundCurrency(effectiveDailyBase * pct);
+      const pct = d(staff.earlyExitDeduction.amount || 0).dividedBy(100);
+      earlyExitDeductionAmount = effectiveDailyBase.times(pct);
     }
   }
-  let totalDeductionAmount = 0;
+
+  let totalDeductionAmount = d(0);
   const policy = staff.combinationPolicy || "HIGHEST_ONLY";
   if (policy === "BOTH") {
-    totalDeductionAmount = roundCurrency(lateDeductionAmount + earlyExitDeductionAmount);
+    totalDeductionAmount = lateDeductionAmount.plus(earlyExitDeductionAmount);
   } else {
-    totalDeductionAmount = Math.max(lateDeductionAmount, earlyExitDeductionAmount);
+    totalDeductionAmount = Decimal.max(lateDeductionAmount, earlyExitDeductionAmount);
   }
+
   let notes = "";
   if (isLate && isEarlyExit) {
-    notes = `Late by ${lateMinutes}m & Early exit by ${earlyExitMinutes}m. Applied policy: ${policy}.`;
+    notes = `Late by ${lateMinutes}m & Early exit by ${earlyExitMinutes}m. Applied policy: ${policy}. Daily base: PKR ${effectiveDailyBase.toString()} (Divisor: ${divisorUsed || 'Daily'}).`;
   } else if (isLate) {
-    notes = `Late arrival by ${lateMinutes}m.`;
+    notes = `Late arrival by ${lateMinutes}m. Daily base: PKR ${effectiveDailyBase.toString()} (Divisor: ${divisorUsed || 'Daily'}).`;
   } else if (isEarlyExit) {
-    notes = `Early departure by ${earlyExitMinutes}m.`;
+    notes = `Early departure by ${earlyExitMinutes}m. Daily base: PKR ${effectiveDailyBase.toString()} (Divisor: ${divisorUsed || 'Daily'}).`;
   } else {
     notes = "On time attendance. No deductions.";
   }
+
   return {
     calculatedAt,
     compensationType: staff.compensationType,
     baseSalary: staff.baseSalary || 0,
     dailySalaryRate: staff.dailySalaryRate || 0,
-    payrollDivisor: staff.payrollDivisor,
-    effectiveDailyBase,
-    lateDeductionAmount,
-    earlyExitDeductionAmount,
-    totalDeductionAmount,
+    payrollDivisor: divisorUsed || staff.payrollDivisor,
+    effectiveDailyBase: effectiveDailyBase.toNumber(),
+    lateDeductionAmount: lateDeductionAmount.toNumber(),
+    earlyExitDeductionAmount: earlyExitDeductionAmount.toNumber(),
+    totalDeductionAmount: totalDeductionAmount.toNumber(),
     combinationPolicy: policy,
     notes
   };
 }
+
 function evaluateLeaveAllowance(staff, existingLeaves, targetDate, branchHolidays = []) {
   const period = staff.leaveAllowancePeriod || "MONTHLY";
   const allowed = staff.allowedLeaveDays ?? staff.leaveAllowanceDays;
@@ -186,6 +211,7 @@ function evaluateLeaveAllowance(staff, existingLeaves, targetDate, branchHoliday
     remainingDays
   };
 }
+
 function isWorkingDay(dateStr, staff, branchHolidays = []) {
   const holiday = branchHolidays.find(
     (h) => (h.branchId === "ALL" || h.branchId === staff.branchId) && h.date === dateStr
@@ -193,7 +219,7 @@ function isWorkingDay(dateStr, staff, branchHolidays = []) {
   if (holiday) {
     return { isWorking: false, reason: `Holiday: ${holiday.title}` };
   }
-  const dateObj = /* @__PURE__ */ new Date(dateStr + "T12:00:00Z");
+  const dateObj = new Date(dateStr + "T12:00:00Z");
   const dayOfWeek = dateObj.getUTCDay();
   if (staff.joiningDate && staff.joiningDate > dateStr) {
     return { isWorking: false, reason: "Prior to employment start date" };
@@ -203,6 +229,7 @@ function isWorkingDay(dateStr, staff, branchHolidays = []) {
   }
   return { isWorking: true };
 }
+
 export {
   calculateDeductionSnapshot,
   calculateScheduledHours,

@@ -36,6 +36,7 @@ const LeaveManagementContent: React.FC = () => {
   const [designationFilter, setDesignationFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [allowOverride, setAllowOverride] = useState(false);
   const actionScope = useBranchAction(showLeaveModal, loadLeaveAction);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -121,6 +122,10 @@ const LeaveManagementContent: React.FC = () => {
       return;
     }
     if (leaveForm.endDate < leaveForm.startDate || !leaveForm.reason.trim()) { toast.error('Enter a valid date range and leave reason.'); return; }
+    if (leaveForm.type === 'PAID' && leaveStaffPreview?.isConfigured && leaveStaffPreview.remainingDays <= 0 && !allowOverride) {
+      toast.error('Paid leave quota exhausted for this employee. Check "Approve with Admin Override" or switch to Unpaid Leave.');
+      return;
+    }
     setSaving(true);
     try {
       const bId = selectedStaff.branchId;
@@ -132,6 +137,7 @@ const LeaveManagementContent: React.FC = () => {
           endDate: leaveForm.endDate,
           type: leaveForm.type,
           reason: leaveForm.reason,
+          allowOverride,
         },
         user || undefined
       );
@@ -182,6 +188,7 @@ const LeaveManagementContent: React.FC = () => {
                 type: 'PAID',
                 reason: '',
               });
+              setAllowOverride(false);
               setShowLeaveModal(true);
             }}
             className="h-9 px-4 inline-flex items-center gap-1.5 rounded-xl bg-[#B82E69] hover:bg-[#A02358] text-white text-xs font-semibold shadow-xs cursor-pointer transition-all shrink-0"
@@ -561,6 +568,7 @@ const LeaveManagementContent: React.FC = () => {
                     </span>
                   </div>
                   {leaveStaffPreview.isConfigured ? (
+                    <>
                     <div className="grid grid-cols-3 gap-2 pt-1">
                       <div>
                         <span className="text-slate-400 text-[10px]">Allowed:</span>
@@ -572,9 +580,32 @@ const LeaveManagementContent: React.FC = () => {
                       </div>
                       <div>
                         <span className="text-slate-400 text-[10px]">Remaining:</span>
-                        <div className="font-bold text-emerald-600">{leaveStaffPreview.remainingDays} days</div>
+                        <div className={`font-bold ${leaveStaffPreview.remainingDays <= 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          {leaveStaffPreview.remainingDays} days {leaveStaffPreview.remainingDays <= 0 ? '(Exhausted)' : ''}
+                        </div>
                       </div>
                     </div>
+                    {leaveForm.type === 'PAID' && leaveStaffPreview.remainingDays <= 0 && (
+                      <div className="mt-2.5 p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs space-y-1 text-amber-900">
+                        <div className="font-semibold text-amber-950 flex items-center gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>Leave Quota Exhausted</span>
+                        </div>
+                        <p className="text-[11px] text-amber-800">
+                          Is employee ki {leaveStaffPreview.allowedDays} {leaveStaffPreview.period.toLowerCase()} paid leaves limit khatam ho chuki hai. Super Admin / Admin hone ke nate aap Override ke sath mark kar sakte hain.
+                        </p>
+                        <label className="flex items-center gap-2 font-semibold text-xs text-amber-950 pt-1 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={allowOverride}
+                            onChange={(e) => setAllowOverride(e.target.checked)}
+                            className="rounded text-[#B82E69] focus:ring-[#B82E69]"
+                          />
+                          <span>Approve with Admin Override (Allow exceeding quota)</span>
+                        </label>
+                      </div>
+                    )}
+                    </>
                   ) : (
                     <div className="text-amber-800 font-medium text-xs">
                       Paid leave allowance: <strong>Not configured</strong> (Must use unpaid leave or configure staff profile first).

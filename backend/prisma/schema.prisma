@@ -1770,8 +1770,8 @@ model Payslip {
   payslipNumber String  @default("DRAFT")
   staffId       String
   snapshot      Json    // full PayslipRecord calculation (frontend shape)
-  netPayable    Decimal @db.Decimal(14, 2)
-  grossPayable  Decimal @db.Decimal(14, 2)
+  netPayable    Decimal @db.Decimal(18, 4)
+  grossPayable  Decimal @db.Decimal(18, 4)
 
   run      PayrollRun       @relation(fields: [runId], references: [id], onDelete: Cascade)
   payments PayrollPayment[]

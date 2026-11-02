@@ -157,7 +157,9 @@ function computeSampleDeductionPreview(
   if (compType === 'DAILY_SALARY' || compType === 'DAILY_PLUS_COMMISSION') {
     dailyBasePay = dailySalaryRate;
   } else if (compType === 'MONTHLY_SALARY' || compType === 'MONTHLY_PLUS_COMMISSION') {
-    dailyBasePay = payrollDivisor > 0 ? baseSalary / payrollDivisor : 0;
+    const now = new Date();
+    const daysInCurrentMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    dailyBasePay = baseSalary / daysInCurrentMonth;
   }
 
   let latePenalty = 0;
@@ -1367,7 +1369,7 @@ export const StaffDirectoryPage: React.FC = () => {
                   <span>3. Working Schedule & Shift</span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   <Input
                     label="Scheduled Start Time *"
                     type="time"
@@ -1385,49 +1387,202 @@ export const StaffDirectoryPage: React.FC = () => {
                   />
 
                   <Input
-                    label="Late Arrival Grace (Minutes) *"
+                    label="Late Arrival Grace (Mins) *"
                     type="number"
                     min="0"
                     required
                     value={formData.lateGraceMinutes}
                     onChange={(e) => setFormData({ ...formData, lateGraceMinutes: Number(e.target.value) })}
                   />
-                </div>
-              </div>
 
-              {/* SECTION 4: PAID LEAVE POLICY */}
-              <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3.5">
-                <div className="flex items-center gap-2 text-slate-800 font-semibold text-xs uppercase tracking-wider border-b border-slate-200 pb-2">
-                  <Calendar className="w-4 h-4 text-[#9D2558]" />
-                  <span>4. Paid Leave Policy</span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Input
-                    label="Paid Leave Days Allowance *"
+                    label="Early Exit Grace (Mins) *"
                     type="number"
                     min="0"
                     required
-                    value={formData.allowedLeaveDays}
-                    onChange={(e) => setFormData({ ...formData, allowedLeaveDays: Number(e.target.value) })}
+                    value={formData.earlyGraceMinutes}
+                    onChange={(e) => setFormData({ ...formData, earlyGraceMinutes: Number(e.target.value) })}
                   />
-
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1.5">Leave Allowance Period *</label>
-                    <Select
-                      value={formData.leaveAllowancePeriod}
-                      onValueChange={(val: LeaveAllowancePeriod) => setFormData({ ...formData, leaveAllowancePeriod: val })}
-                    >
-                      <SelectTrigger className="h-10 text-xs">
-                        <SelectValue placeholder="Period" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="MONTHLY">Monthly Entitlement</SelectItem>
-                        <SelectItem value="YEARLY">Yearly Entitlement</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
                 </div>
+              </div>
+
+              {/* SECTION 4: ATTENDANCE PENALTY RULES (LATE IN & EARLY EXIT PRICE CUT) */}
+              <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3.5">
+                <div className="flex items-center gap-2 text-slate-800 font-semibold text-xs uppercase tracking-wider border-b border-slate-200 pb-2">
+                  <AlertCircle className="w-4 h-4 text-[#9D2558]" />
+                  <span>4. Attendance Penalty Rules (Late In & Early Exit Price Cut)</span>
+                </div>
+
+                {formData.compensationType === 'COMMISSION_ONLY' ? (
+                  <div className="p-3 bg-slate-100 border border-slate-200 rounded-lg text-slate-600 text-xs">
+                    Commission-Only staff have zero salary deductions; commission and tips are protected.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {/* Late In Penalty Card */}
+                    <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs font-semibold text-slate-800">Late In Penalty (Price Cut)</p>
+                          <p className="text-[11px] text-slate-500">Apply deduction if staff arrives after grace period ({formData.lateGraceMinutes} mins)</p>
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={formData.lateInEnabled}
+                            onChange={(e) => setFormData({ ...formData, lateInEnabled: e.target.checked })}
+                            className="rounded border-slate-300 text-[#9D2558] focus:ring-[#9D2558] w-4 h-4"
+                          />
+                          <span>Enable Late Cut</span>
+                        </label>
+                      </div>
+
+                      {formData.lateInEnabled && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Cut Calculation Type *</label>
+                            <Select
+                              value={formData.lateInType}
+                              onValueChange={(val) => setFormData({ ...formData, lateInType: val })}
+                            >
+                              <SelectTrigger className="h-9 text-xs">
+                                <SelectValue placeholder="Select type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="FIXED">Fixed Price Cut (PKR)</SelectItem>
+                                <SelectItem value="PERCENTAGE">Percentage of Daily Rate (%)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Input
+                              label={formData.lateInType === 'PERCENTAGE' ? "Late Cut Rate (%) *" : "Late Cut Price (PKR) *"}
+                              type="number"
+                              min="0"
+                              step={formData.lateInType === 'PERCENTAGE' ? "0.1" : "1"}
+                              value={formData.lateInAmount}
+                              onChange={(e) => setFormData({ ...formData, lateInAmount: Number(e.target.value) })}
+                              placeholder={formData.lateInType === 'PERCENTAGE' ? "e.g. 10" : "e.g. 500"}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Early Exit Penalty Card */}
+                    <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs font-semibold text-slate-800">Early Exit Penalty (Price Cut)</p>
+                          <p className="text-[11px] text-slate-500">Apply deduction if staff leaves before scheduled shift end ({formData.earlyGraceMinutes} mins grace)</p>
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={formData.earlyExitEnabled}
+                            onChange={(e) => setFormData({ ...formData, earlyExitEnabled: e.target.checked })}
+                            className="rounded border-slate-300 text-[#9D2558] focus:ring-[#9D2558] w-4 h-4"
+                          />
+                          <span>Enable Early Exit Cut</span>
+                        </label>
+                      </div>
+
+                      {formData.earlyExitEnabled && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-100">
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Cut Calculation Type *</label>
+                            <Select
+                              value={formData.earlyExitType}
+                              onValueChange={(val) => setFormData({ ...formData, earlyExitType: val })}
+                            >
+                              <SelectTrigger className="h-9 text-xs">
+                                <SelectValue placeholder="Select type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="FIXED">Fixed Price Cut (PKR)</SelectItem>
+                                <SelectItem value="PERCENTAGE">Percentage of Daily Rate (%)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Input
+                              label={formData.earlyExitType === 'PERCENTAGE' ? "Early Exit Cut Rate (%) *" : "Early Exit Cut Price (PKR) *"}
+                              type="number"
+                              min="0"
+                              step={formData.earlyExitType === 'PERCENTAGE' ? "0.1" : "1"}
+                              value={formData.earlyExitAmount}
+                              onChange={(e) => setFormData({ ...formData, earlyExitAmount: Number(e.target.value) })}
+                              placeholder={formData.earlyExitType === 'PERCENTAGE' ? "e.g. 10" : "e.g. 500"}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Multiple Occurrence Policy */}
+                    {(formData.lateInEnabled || formData.earlyExitEnabled) && (
+                      <div className="p-3 bg-white border border-slate-200 rounded-xl">
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Same-Day Multiple Occurrence Policy</label>
+                        <Select
+                          value={formData.combinationPolicy}
+                          onValueChange={(val) => setFormData({ ...formData, combinationPolicy: val })}
+                        >
+                          <SelectTrigger className="h-9 text-xs">
+                            <SelectValue placeholder="Select Policy" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="BOTH">Apply Both (Deduct Late In + Early Exit)</SelectItem>
+                            <SelectItem value="HIGHEST_ONLY">Highest Only (Deduct the larger cut)</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 5: PAID LEAVE POLICY */}
+              <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3.5">
+                <div className="flex items-center gap-2 text-slate-800 font-semibold text-xs uppercase tracking-wider border-b border-slate-200 pb-2">
+                  <Calendar className="w-4 h-4 text-[#9D2558]" />
+                  <span>5. Paid Leave Policy</span>
+                </div>
+
+                {formData.compensationType.startsWith('DAILY') ? (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs">
+                    <p className="font-semibold mb-1">Strict Worked-Days Model (Daily Contract)</p>
+                    <p className="text-[11px] text-amber-800">
+                      Daily staff earn strictly for verified worked days (1.0 for full day, 0.5 for half day). Non-worked days, leaves, and holidays earn Rs. 0 and are never deducted. Paid leave allowance is disabled for daily contracts.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Input
+                      label="Paid Leave Days Allowance *"
+                      type="number"
+                      min="0"
+                      required
+                      value={formData.allowedLeaveDays}
+                      onChange={(e) => setFormData({ ...formData, allowedLeaveDays: Number(e.target.value) })}
+                    />
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1.5">Leave Allowance Period *</label>
+                      <Select
+                        value={formData.leaveAllowancePeriod}
+                        onValueChange={(val: LeaveAllowancePeriod) => setFormData({ ...formData, leaveAllowancePeriod: val })}
+                      >
+                        <SelectTrigger className="h-10 text-xs">
+                          <SelectValue placeholder="Period" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="MONTHLY">Monthly Entitlement</SelectItem>
+                          <SelectItem value="YEARLY">Yearly Entitlement</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* SECTION 5: STAFF PORTAL ACCESS (OPTIONAL) */}
@@ -1435,7 +1590,7 @@ export const StaffDirectoryPage: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-slate-800 font-semibold text-xs uppercase tracking-wider">
                     <KeyRound className="w-4 h-4 text-[#9D2558]" />
-                    <span>5. Self-Service Portal Login (Optional)</span>
+                    <span>6. Self-Service Portal Login (Optional)</span>
                   </div>
                   <div className="flex items-center space-x-2">
                     <Checkbox
@@ -1554,7 +1709,14 @@ export const StaffDirectoryPage: React.FC = () => {
                 <p className="text-slate-600">
                   Early Exit: {selectedStaff.earlyExitDeduction?.enabled ? `${selectedStaff.earlyExitDeduction.amount} (${selectedStaff.earlyExitDeduction.type})` : 'Disabled'}
                 </p>
-                <p className="text-slate-500 text-[10px]">Payroll Divisor: {selectedStaff.payrollDivisor || 30} days | Combination: {selectedStaff.combinationPolicy || 'BOTH'}</p>
+                <p className="text-slate-500 text-[10px]">
+                  {selectedStaff.compensationType?.startsWith('DAILY')
+                    ? 'Contract: Strict Worked Days (No non-worked pay or deductions)'
+                    : selectedStaff.compensationType === 'COMMISSION_ONLY'
+                    ? 'Contract: Commission Only'
+                    : 'Divisor Model: Actual Calendar Days in Month (28/29/30/31)'}{' '}
+                  | Combination: {selectedStaff.combinationPolicy || 'BOTH'}
+                </p>
               </div>
             </div>
 

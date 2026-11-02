@@ -42,6 +42,7 @@ import {
   Building2,
 } from 'lucide-react';
 import { roundCurrency } from '../../lib/taxCalculations';
+import { formatCurrency } from '../../lib/formatters';
 import { AccessDeniedView } from '../scaffold/AccessDeniedView';
 import { PayrollExtrasPanel } from './PayrollExtrasPanel';
 import { useRouter } from '../../context/RouterContext';
@@ -162,6 +163,10 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
   // Cancel / Reversal Form
   const [cancelReason, setCancelReason] = useState<string>('');
   const [runToCancel, setRunToCancel] = useState<PayrollRun | null>(null);
+  const [payslipToDelete, setPayslipToDelete] = useState<{ run: PayrollRun; payslip: PayslipRecord } | null>(null);
+  const [singleDeleteReason, setSingleDeleteReason] = useState<string>('');
+  const [showSingleDeleteModal, setShowSingleDeleteModal] = useState<boolean>(false);
+  const [isCancellingAllMonthRuns, setIsCancellingAllMonthRuns] = useState<boolean>(false);
   const [paymentToReverse, setPaymentToReverse] = useState<{ id: string; amount: number; staffName: string } | null>(null);
   const [reverseReason, setReverseReason] = useState<string>('');
 
@@ -303,6 +308,23 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
     return set;
   }, [payrollRuns, runType, selectedYear, selectedMonthNum, startDate, endDate]);
 
+  // Active Draft Runs for current month/branch
+  const draftRuns = useMemo(() => {
+    const targetMonth = runType === 'MONTHLY' ? `${selectedYear}-${selectedMonthNum}` : startDate.slice(0, 7);
+    return payrollRuns.filter((r) => r.status === 'DRAFT' && r.month === targetMonth);
+  }, [payrollRuns, runType, selectedYear, selectedMonthNum, startDate]);
+
+  // Draft Payslip Rows for the main table view
+  const draftPayslipRows = useMemo(() => {
+    const list: { run: PayrollRun; payslip: PayslipRecord }[] = [];
+    draftRuns.forEach((r) => {
+      r.payslips.forEach((p) => {
+        list.push({ run: r, payslip: p });
+      });
+    });
+    return list;
+  }, [draftRuns]);
+
   // Active advance map by staffId
   const staffLoanMap = useMemo(() => {
     const map = new Map<string, SalaryAdvance>();
@@ -441,11 +463,11 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
           includeDaily: true,
         }
       );
-      // Immediately finalize payroll (no preview box modal!)
-      const finalized = await salonService.finalizePayroll(preview.id, user);
-      setPayrollRuns((runs) => [finalized, ...runs.filter((run) => run.id !== finalized.id)]);
-
-      toast.success(`Salary ${finalized.payrollNumber} successfully generated for ${finalized.employeeCount} staff!`);
+      // Save as DRAFT in database and state (do NOT immediately finalize!)
+      setPayrollRuns((runs) => [preview, ...runs.filter((run) => run.id !== preview.id)]);
+      toast.success(`Draft salary successfully generated for ${preview.employeeCount} staff! It is now saved in Drafts until finalized or deleted.`);
+      navigate('/accounts/salary/manage');
+      await loadData();
 
       // Immediately navigate to Manage Salaries page
       navigate('/accounts/salary/manage');
@@ -611,15 +633,71 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
     }
   };
 
-  // Cancel Unpaid Run
-  const handleCancelRun = async () => {
-    if (!runToCancel || !cancelReason.trim()) return;
+  // Finalize an active Draft Payroll Run
+  const handleFinalizeDraftRun = async (runId: string) => {
     try {
       setActionLoading(true);
-      await salonService.cancelPayrollRun(runToCancel.id, cancelReason, user);
-      toast.success(`Payroll run ${runToCancel.payrollNumber} cancelled and attendance/overtime released.`);
+      const finalized = await salonService.finalizePayroll(runId, user);
+      setPayrollRuns((runs) => [finalized, ...runs.filter((r) => r.id !== runId)]);
+      toast.success(`Payroll ${finalized.payrollNumber} successfully finalized! Moved to Finalized Salary Register.`);
+      await loadData();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to finalize draft payroll.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Finalize all active draft runs for this period
+  const handleFinalizeAllDraftRuns = async () => {
+    try {
+      setActionLoading(true);
+      for (const dr of draftRuns) {
+        await salonService.finalizePayroll(dr.id, user);
+      }
+      toast.success(`All ${draftRuns.length} draft payroll run(s) successfully finalized!`);
+      await loadData();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to finalize draft payroll.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Discard / Delete all active draft runs for this period
+  const handleDeleteAllDraftRuns = async () => {
+    try {
+      setActionLoading(true);
+      for (const dr of draftRuns) {
+        await salonService.cancelPayrollRun(dr.id, 'Draft deleted by admin', user);
+      }
+      toast.success('All draft salaries discarded and removed.');
+      await loadData();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete draft payroll.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Cancel Unpaid Run(s) - All Delete
+  const handleCancelRun = async () => {
+    if (!cancelReason.trim()) return;
+    try {
+      setActionLoading(true);
+      if (isCancellingAllMonthRuns) {
+        const uniqueRunIds = Array.from(new Set(generatedPayslipRows.map((r) => r.run.id)));
+        for (const rId of uniqueRunIds) {
+          await salonService.cancelPayrollRun(rId, cancelReason, user);
+        }
+        toast.success(`All ${uniqueRunIds.length} payroll run(s) cancelled and attendance/overtime released.`);
+      } else if (runToCancel) {
+        await salonService.cancelPayrollRun(runToCancel.id, cancelReason, user);
+        toast.success(`Payroll run ${runToCancel.payrollNumber} cancelled and attendance/overtime released.`);
+      }
       setShowCancelModal(false);
       setRunToCancel(null);
+      setIsCancellingAllMonthRuns(false);
       setCancelReason('');
       await loadData();
     } catch (err: any) {
@@ -627,6 +705,58 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
     } finally {
       setActionLoading(false);
     }
+  };
+
+  // Delete Single Staff Salary
+  const handleDeleteSinglePayslip = async () => {
+    if (!payslipToDelete || !singleDeleteReason.trim()) return;
+    try {
+      setActionLoading(true);
+      await salonService.cancelPayslip(payslipToDelete.payslip.id, singleDeleteReason, user);
+      toast.success(`Salary for ${payslipToDelete.payslip.staffName} deleted successfully. Attendance and overtime locks released.`);
+      setShowSingleDeleteModal(false);
+      setPayslipToDelete(null);
+      setSingleDeleteReason('');
+      await loadData();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to delete employee salary.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Exclude staff from draft preview before finalizing
+  const handleRemoveStaffFromDraft = async (staffId: string) => {
+    if (!activeDraft) return;
+    const targetPs = activeDraft.payslips.find((p) => p.staffId === staffId);
+    const updatedPayslips = activeDraft.payslips.filter((p) => p.staffId !== staffId);
+    if (updatedPayslips.length === 0) {
+      try {
+        await salonService.cancelPayrollRun(activeDraft.id, 'Draft cleared', user);
+      } catch (e) {
+        // ignore
+      }
+      setActiveDraft(null);
+      setShowPreviewModal(false);
+      toast.success('All employees removed. Draft preview cleared.');
+      return;
+    }
+
+    if (targetPs && targetPs.id) {
+      try {
+        await salonService.cancelPayslip(targetPs.id, 'Excluded from draft', user);
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    setActiveDraft({
+      ...activeDraft,
+      payslips: updatedPayslips,
+      employeeCount: updatedPayslips.length,
+      totalPayable: updatedPayslips.reduce((s, p) => s + (p.netPayable || 0), 0),
+    });
+    toast.success(`Removed ${targetPs?.staffName || 'employee'} from draft preview.`);
   };
 
   // Reverse Payment
@@ -1184,6 +1314,155 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
             </button>
           </div>
 
+          {/* Draft Salaries Table - Persistent until finalized or deleted */}
+          {draftPayslipRows.length > 0 && (
+            <div className="rounded-[24px] border border-amber-200/90 bg-white/85 backdrop-blur-2xl shadow-[0_10px_35px_rgba(245,158,11,0.05),inset_0_1.5px_2px_rgba(255,255,255,1)] overflow-hidden">
+              {/* Draft Gradient Banner */}
+              <div className="bg-gradient-to-r from-amber-600 via-amber-700 to-amber-800 text-white px-5 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 font-bold text-sm tracking-wide text-white">
+                  <Clock className="w-4 h-4 stroke-[2.5]" />
+                  <span>Draft Salary Register (Pending Finalization)</span>
+                  <span className="text-[11px] font-bold bg-white/20 text-white px-2.5 py-0.5 rounded-full ml-1">
+                    {draftPayslipRows.length} Draft Payslips
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDeleteAllDraftRuns}
+                    disabled={actionLoading}
+                    title="Discard all draft salaries"
+                    className="px-3 py-1.5 bg-white/15 hover:bg-rose-600 text-white text-xs font-semibold rounded-xl border border-white/25 shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Discard All Drafts</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleFinalizeAllDraftRuns}
+                    disabled={actionLoading}
+                    title="Finalize and lock all draft salaries"
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Finalize All Drafts</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-transparent overflow-x-auto">
+                <table className="report-records w-full text-left border-collapse min-w-[1100px] text-xs font-sans">
+                  <thead>
+                    <tr className="bg-amber-50/70 text-amber-900 text-[11px] font-semibold border-b border-amber-100 tracking-wider">
+                      <th className="py-3.5 px-4 text-left whitespace-nowrap">Staff</th>
+                      <th className="py-3.5 px-3 text-center whitespace-nowrap">{runType === 'MONTHLY' ? 'Salary Month' : 'Period'}</th>
+                      <th className="py-3.5 px-2 text-center whitespace-nowrap">Present Days</th>
+                      <th className="py-3.5 px-2 text-center whitespace-nowrap">Absent Days</th>
+                      <th className="py-3.5 px-2 text-center whitespace-nowrap">Paid Leave</th>
+                      <th className="py-3.5 px-2 text-center whitespace-nowrap">Unpaid Leave</th>
+                      <th className="py-3.5 px-2 text-center whitespace-nowrap">Holidays</th>
+                      <th className="py-3.5 px-2 text-center whitespace-nowrap">Weekly Offs</th>
+                      <th className="py-3.5 px-2 text-center whitespace-nowrap">OT Hours</th>
+                      <th className="py-3.5 px-4 text-right whitespace-nowrap">Basic</th>
+                      <th className="py-3.5 px-3 text-right whitespace-nowrap">Late/Early Cut</th>
+                      <th className="py-3.5 px-4 text-right whitespace-nowrap">Salary Generated</th>
+                      <th className="py-3.5 px-3 text-center whitespace-nowrap">Status</th>
+                      <th className="py-3.5 px-4 text-center whitespace-nowrap">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-dashed divide-amber-100 text-xs">
+                    {draftPayslipRows.map(({ run, payslip: p }) => {
+                      const periodDisplay =
+                        run.runType === 'DAILY'
+                          ? run.startDate || run.month
+                          : run.runType === 'CUSTOM_RANGE'
+                          ? `${run.startDate} to ${run.endDate}`
+                          : `${run.startDate || `${run.month}-01`} to ${run.endDate || run.month}`;
+
+                      return (
+                        <tr key={`${run.id}_${p.id}`} className="hover:bg-amber-50/30 transition-colors border-b border-dashed border-amber-100">
+                          <td className="py-3.5 px-4 whitespace-nowrap">
+                            <div className="font-semibold text-slate-800">{p.staffName}</div>
+                            <div className="text-[11px] text-slate-400">
+                              {p.employeeCode || p.staffId} • {p.designation}
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-3 text-center whitespace-nowrap font-medium text-slate-600">
+                            {periodDisplay}
+                          </td>
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-slate-700">
+                            {p.presentDays ?? 0}
+                            {p.workedWeeklyOffDays ? (
+                              <span className="block text-[9px] text-indigo-600 font-normal">
+                                +{p.workedWeeklyOffDays} off-work
+                              </span>
+                            ) : null}
+                          </td>
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-rose-600">
+                            {p.absentDays ?? 0}
+                          </td>
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-emerald-600">
+                            {p.paidLeaveDays ?? 0}
+                          </td>
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-amber-600">
+                            {p.unpaidLeaveDays ?? 0}
+                          </td>
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-purple-600">
+                            {p.paidHolidayDays ?? p.holidayDays ?? 0}
+                          </td>
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-blue-600">
+                            {p.paidWeeklyOffDays ?? p.weeklyOffDays ?? 0}
+                          </td>
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-indigo-700">
+                            {(p.approvedOvertimeHours ?? (p.approvedOvertimeMinutes ? p.approvedOvertimeMinutes / 60 : 0)).toFixed(1)}h
+                          </td>
+                          <td className="py-3.5 px-4 text-right font-mono tabular-nums text-slate-700">
+                            {((p.effectiveBaseSalary ?? p.baseEarnings) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3.5 px-3 text-right font-mono tabular-nums text-rose-600 font-medium">
+                            {(p.lateEarlyDeductions || p.attendancePenaltyDeductions || 0) > 0
+                              ? `-${(p.lateEarlyDeductions || p.attendancePenaltyDeductions || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                              : '0.00'}
+                          </td>
+                          <td className="py-3.5 px-4 text-right font-mono tabular-nums text-amber-800 font-bold">
+                            {(p.netPayable || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3.5 px-3 text-center whitespace-nowrap">
+                            <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                              DRAFT
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleFinalizeDraftRun(run.id)}
+                                disabled={actionLoading}
+                                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-2xs transition-all whitespace-nowrap cursor-pointer flex items-center gap-1"
+                              >
+                                <Lock className="w-3 h-3" />
+                                <span>Finalize</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveStaffFromDraft(p.staffId)}
+                                disabled={actionLoading}
+                                title={`Delete ${p.staffName} from draft`}
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* Generated Salaries Table - Only displayed if salaries have been generated */}
           {generatedPayslipRows.length > 0 ? (
             <div className="rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] overflow-hidden">
@@ -1196,6 +1475,22 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                     {generatedPayslipRows.length} Payslips
                   </span>
                 </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCancellingAllMonthRuns(true);
+                      setRunToCancel(generatedPayslipRows[0]?.run || null);
+                      setCancelReason('');
+                      setShowCancelModal(true);
+                    }}
+                    title="Delete / Cancel all finalized salaries in this list"
+                    className="px-3 py-1.5 bg-white/15 hover:bg-red-600/90 text-white text-xs font-semibold rounded-xl border border-white/25 shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete All Salaries</span>
+                  </button>
+                </div>
               </div>
 
               <div className="bg-transparent overflow-x-auto">
@@ -1204,14 +1499,15 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                     <tr className="bg-[#FAF8F9]/80 text-[#78616C] text-[11px] font-semibold border-b border-white/80 tracking-wider">
                       <th className="py-3.5 px-4 text-left whitespace-nowrap">Staff</th>
                       <th className="py-3.5 px-3 text-center whitespace-nowrap">{runType === 'MONTHLY' ? 'Salary Month' : 'Period'}</th>
-                      <th className="py-3.5 px-2 text-center whitespace-nowrap" title="Paid attendance days; each completed half day counts as 0.5">Present</th>
-                      <th className="py-3.5 px-2 text-center whitespace-nowrap">Half Day</th>
+                      <th className="py-3.5 px-2 text-center whitespace-nowrap">Present Days</th>
+                      <th className="py-3.5 px-2 text-center whitespace-nowrap">Absent Days</th>
                       <th className="py-3.5 px-2 text-center whitespace-nowrap">Paid Leave</th>
                       <th className="py-3.5 px-2 text-center whitespace-nowrap">Unpaid Leave</th>
-                      <th className="py-3.5 px-2 text-center whitespace-nowrap">Absent</th>
-                      <th className="py-3.5 px-2 text-center whitespace-nowrap">Late</th>
-                      <th className="py-3.5 px-2 text-center whitespace-nowrap">Early Exit</th>
+                      <th className="py-3.5 px-2 text-center whitespace-nowrap">Holidays</th>
+                      <th className="py-3.5 px-2 text-center whitespace-nowrap">Weekly Offs</th>
+                      <th className="py-3.5 px-2 text-center whitespace-nowrap">OT Hours</th>
                       <th className="py-3.5 px-4 text-right whitespace-nowrap">Basic</th>
+                      <th className="py-3.5 px-3 text-right whitespace-nowrap">Late/Early Cut</th>
                       <th className="py-3.5 px-4 text-right whitespace-nowrap">Salary Generated</th>
                       <th className="py-3.5 px-4 text-right whitespace-nowrap">Amount Paid</th>
                       <th className="py-3.5 px-4 text-right whitespace-nowrap">Loan Repayment</th>
@@ -1252,28 +1548,38 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                             {periodDisplay}
                           </td>
                           <td className="py-3.5 px-2 text-center font-mono tabular-nums text-slate-700">
-                            {p.presentDays ?? (p as any).attendanceStats?.presentDays ?? 0}
+                            {p.presentDays ?? 0}
+                            {p.workedWeeklyOffDays ? (
+                              <span className="block text-[9px] text-indigo-600 font-normal">
+                                +{p.workedWeeklyOffDays} off-work
+                              </span>
+                            ) : null}
                           </td>
-                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-slate-700">
-                            {p.halfDayDays ?? (p as any).attendanceStats?.halfDays ?? 0}
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-rose-600">
+                            {p.absentDays ?? 0}
                           </td>
-                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-slate-700">
-                            {p.paidLeaveDays ?? (p as any).attendanceStats?.paidLeaveDays ?? 0}
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-emerald-600">
+                            {p.paidLeaveDays ?? 0}
                           </td>
-                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-slate-700">
-                            {p.unpaidLeaveDays ?? (p as any).attendanceStats?.unpaidLeaveDays ?? 0}
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-amber-600">
+                            {p.unpaidLeaveDays ?? 0}
                           </td>
-                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-slate-700">
-                            {p.absentDays ?? (p as any).attendanceStats?.absentDays ?? 0}
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-purple-600">
+                            {p.paidHolidayDays ?? p.holidayDays ?? 0}
                           </td>
-                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-slate-700">
-                            {p.lateDays ?? (p as any).attendanceStats?.lateDays ?? 0}
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-blue-600">
+                            {p.paidWeeklyOffDays ?? p.weeklyOffDays ?? 0}
                           </td>
-                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-slate-700">
-                            {p.earlyExitDays ?? (p as any).attendanceStats?.earlyExitDays ?? 0}
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-indigo-700">
+                            {(p.approvedOvertimeHours ?? (p.approvedOvertimeMinutes ? p.approvedOvertimeMinutes / 60 : 0)).toFixed(1)}h
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums text-slate-700">
                             {((p.effectiveBaseSalary ?? p.baseEarnings) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="py-3.5 px-3 text-right font-mono tabular-nums text-rose-600 font-medium">
+                            {(p.lateEarlyDeductions || p.attendancePenaltyDeductions || 0) > 0
+                              ? `-${(p.lateEarlyDeductions || p.attendancePenaltyDeductions || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                              : '0.00'}
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums text-[#B82E69] font-bold">
                             {(p.netPayable || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -1320,10 +1626,11 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setRunToCancel(run);
-                                  setShowCancelModal(true);
+                                  setPayslipToDelete({ run, payslip: p });
+                                  setSingleDeleteReason('');
+                                  setShowSingleDeleteModal(true);
                                 }}
-                                title="Cancel Payroll Run"
+                                title={`Delete Salary for ${p.staffName}`}
                                 className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -1434,18 +1741,25 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                     <tr>
                       <th className="py-2.5 px-3">Employee</th>
                       <th className="py-2.5 px-3">Type</th>
-                      <th className="py-2.5 px-2 text-center">Days (P/L/A)</th>
+                      <th className="py-2.5 px-2 text-center whitespace-nowrap">Present Days</th>
+                      <th className="py-2.5 px-2 text-center whitespace-nowrap">Absent Days</th>
+                      <th className="py-2.5 px-2 text-center whitespace-nowrap">Paid Leave</th>
+                      <th className="py-2.5 px-2 text-center whitespace-nowrap">Unpaid Leave</th>
+                      <th className="py-2.5 px-2 text-center whitespace-nowrap">Holidays</th>
+                      <th className="py-2.5 px-2 text-center whitespace-nowrap">Weekly Offs</th>
+                      <th className="py-2.5 px-2 text-center whitespace-nowrap">OT Hours</th>
                       <th className="py-2.5 px-3 text-right">Base Earnings</th>
                       <th className="py-2.5 px-3 text-right">Paid Leave</th>
                       <th className="py-2.5 px-3 text-right">Absence Ded.</th>
-                      <th className="py-2.5 px-3 text-right">Penalties</th>
+                      <th className="py-2.5 px-3 text-right">Late/Early Cut</th>
                       <th className="py-2.5 px-3 text-right">Overtime</th>
                       <th className="py-2.5 px-3 text-right">Allow./Bonus/Holiday</th>
-                      <th className="py-2.5 px-3 text-right">Commission</th>
+                      
                       <th className="py-2.5 px-3 text-right">Other Ded.</th>
                       <th className="py-2.5 px-3 text-right">Loan</th>
                       <th className="py-2.5 px-3 text-right font-bold">Net Payable</th>
                       <th className="py-2.5 px-3 text-center">Status</th>
+                      <th className="py-2.5 px-2 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1466,8 +1780,31 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                             {p.compensationType.replace(/_/g, ' ')}
                           </span>
                         </td>
-                        <td className="py-2.5 px-2 text-center font-mono">
-                          {p.presentDays}/{p.paidLeaveDays}/{p.absentDays}
+                        <td className="py-2.5 px-2 text-center font-mono font-medium text-slate-800">
+                          {p.presentDays}
+                          {p.workedWeeklyOffDays ? (
+                            <span className="block text-[9px] text-indigo-600 font-normal">
+                              +{p.workedWeeklyOffDays} off-work
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="py-2.5 px-2 text-center font-mono text-rose-600">
+                          {p.absentDays}
+                        </td>
+                        <td className="py-2.5 px-2 text-center font-mono text-emerald-600">
+                          {p.paidLeaveDays}
+                        </td>
+                        <td className="py-2.5 px-2 text-center font-mono text-amber-600">
+                          {p.unpaidLeaveDays}
+                        </td>
+                        <td className="py-2.5 px-2 text-center font-mono text-purple-600">
+                          {p.paidHolidayDays ?? (p as any).holidayDays ?? 0}
+                        </td>
+                        <td className="py-2.5 px-2 text-center font-mono text-blue-600">
+                          {p.paidWeeklyOffDays ?? (p as any).weeklyOffDays ?? 0}
+                        </td>
+                        <td className="py-2.5 px-2 text-center font-mono text-indigo-700">
+                          {(p.approvedOvertimeHours ?? (p.approvedOvertimeMinutes ? p.approvedOvertimeMinutes / 60 : 0)).toFixed(1)}h
                         </td>
                         <td className="py-2.5 px-3 text-right font-medium">Rs. {p.baseEarnings.toLocaleString()}<BaseExplanation payslip={p} /></td>
                         <td className="py-2.5 px-3 text-right text-emerald-600">{money(p.leaveEarnings, '+')}</td>
@@ -1475,13 +1812,13 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                           {p.absenceDeductions > 0 ? `-Rs. ${p.absenceDeductions.toLocaleString()}` : '0'}
                         </td>
                         <td className="py-2.5 px-3 text-right text-rose-600">
-                          {money(p.attendancePenaltyDeductions, '-')}
+                          {money((p as any).lateEarlyDeductions || p.attendancePenaltyDeductions, '-')}
                         </td>
                         <td className="py-2.5 px-3 text-right text-indigo-600">
                           {p.approvedOvertimeAmount > 0 ? `+Rs. ${p.approvedOvertimeAmount.toLocaleString()}` : '0'}
                         </td>
                         <td className="py-2.5 px-3 text-right text-emerald-600">{money(plusExtras(p), '+')}</td>
-                        <td className="py-2.5 px-3 text-right text-emerald-600">{money(p.commissionPayable ?? 0, '+')}</td>
+                        
                         <td className="py-2.5 px-3 text-right text-rose-600">{money(p.otherDeductions ?? 0, '-')}</td>
                         <td className="py-2.5 px-3 text-right text-rose-600">{money(p.advanceRecoveryAmount ?? 0, '-')}</td>
                         <td className="py-2.5 px-3 text-right font-bold text-slate-900">
@@ -1497,6 +1834,16 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                               Blocked
                             </span>
                           )}
+                        </td>
+                        <td className="py-2.5 px-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveStaffFromDraft(p.staffId)}
+                            title={`Exclude ${p.staffName} from draft`}
+                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -1529,10 +1876,7 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                         .toLocaleString()}
                     </span>
                   </div>
-                  <div className="flex justify-between text-slate-600">
-                    <span>Unpaid Commission:</span>
-                    <span className="font-semibold text-emerald-600">+Rs. {activeDraft.payslips.reduce((sum, p) => sum + (p.commissionPayable ?? 0), 0).toLocaleString()}</span>
-                  </div>
+                  
                   <div className="border-t border-slate-200 pt-1.5 flex justify-between font-bold text-sm text-slate-900">
                     <span>Total Net Payable:</span>
                     <span className="text-indigo-600">Rs. {activeDraft.totalPayable.toLocaleString()}</span>
@@ -1595,8 +1939,16 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                   {selectedPayslip.calculationDetails.formula}
                 </p>
                 <div className="grid grid-cols-2 gap-2 text-indigo-900">
-                  <div>Absence Divisor: /{selectedPayslip.calculationDetails.divisorUsed}</div>
-                  <div>Deduction Rate: Rs. {(selectedPayslip.calculationDetails.dailyRateUsed || 0).toFixed(2)}</div>
+                  <div>
+                    {selectedPayslip.compensationType?.startsWith('DAILY')
+                      ? `Contract Model: ${selectedPayslip.calculationDetails.divisorRule || 'Strict Worked Days'}`
+                      : `Absence Divisor: ${selectedPayslip.calculationDetails.divisorRule || `Actual Calendar Days (/${selectedPayslip.calculationDetails.divisorUsed})`}`}
+                  </div>
+                  <div>
+                    {selectedPayslip.compensationType?.startsWith('DAILY')
+                      ? `Daily Rate: ${formatCurrency(selectedPayslip.calculationDetails.dailyRateUsed || selectedPayslip.effectiveDailyRate)}/day`
+                      : `Deduction Rate: ${formatCurrency(selectedPayslip.calculationDetails.dailyRateUsed || selectedPayslip.effectiveDailyRate)}/day`}
+                  </div>
                   <div className="col-span-2"><BaseExplanation payslip={selectedPayslip} /></div>
                   {selectedPayslip.calculationDetails.prorationApplied && (
                     <div className="col-span-2 text-amber-700 font-medium">
@@ -1655,6 +2007,14 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                   <div className="p-2 bg-slate-50 rounded-lg">
                     <span className="text-slate-400 block text-[11px]">Unpaid Leave</span>
                     <span className="text-sm font-bold text-rose-600">{selectedPayslip.unpaidLeaveDays ?? 0}</span>
+                  </div>
+                  <div className="p-2 bg-rose-50/70 border border-rose-100 rounded-lg">
+                    <span className="text-rose-600 block text-[11px] font-medium">Late / Early Cut</span>
+                    <span className="text-sm font-bold text-rose-700">
+                      {(selectedPayslip.lateEarlyDeductions || selectedPayslip.attendancePenaltyDeductions || 0) > 0
+                        ? `-Rs. ${(selectedPayslip.lateEarlyDeductions || selectedPayslip.attendancePenaltyDeductions || 0).toLocaleString()}`
+                        : 'Rs. 0'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1732,14 +2092,6 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                 </div>
                 <div className="border-t border-slate-200 pt-2 flex justify-between text-sm font-bold text-slate-900">
                   <span>Net Salary Payable:</span>
-                  <span>Rs. {(selectedPayslip.salaryNetPayable ?? selectedPayslip.netPayable).toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-emerald-700">
-                  <span>{selectedPayslip.status === 'DRAFT' ? 'Eligible Commission (preview):' : 'Finalized Commission:'}</span>
-                  <span>+Rs. {(selectedPayslip.commissionPayable ?? 0).toLocaleString()}</span>
-                </div>
-                <div className="border-t border-slate-200 pt-2 flex justify-between text-sm font-bold text-slate-900">
-                  <span>Combined Net Payable:</span>
                   <span className="text-indigo-600">Rs. {selectedPayslip.netPayable.toLocaleString()}</span>
                 </div>
               </div>
@@ -2196,6 +2548,70 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
       )}
 
       {/* ========================================================================= */}
+      {/* MODAL 4B: DELETE SINGLE STAFF SALARY MODAL                                */}
+      {/* ========================================================================= */}
+      {showSingleDeleteModal && payslipToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-xl w-full max-w-md overflow-x-hidden overflow-y-auto flex flex-col p-6 space-y-4 text-xs max-h-[calc(100dvh-2rem)] overscroll-contain">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-rose-50 text-rose-600 rounded-xl">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Delete Staff Salary</h3>
+                <p className="text-slate-500 font-medium">
+                  {payslipToDelete.payslip.staffName} ({payslipToDelete.payslip.employeeCode || payslipToDelete.payslip.staffId})
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 space-y-1">
+              <p className="font-semibold text-amber-900">
+                Sirf is employee ({payslipToDelete.payslip.staffName}) ki salary delete hogi:
+              </p>
+              <p>• Baki tamam employees ki salaries register mein mehfooz rahengi.</p>
+              <p>• Is employee ke locked attendance days, overtime hours aur loan recovery release ho jayengi.</p>
+              <p>• Agar is payslip ki payment ho chuki hai, toh pehle payment reverse karni hogi.</p>
+            </div>
+
+            <div>
+              <label className="block text-slate-700 font-medium mb-1">Reason for Deletion *</label>
+              <textarea
+                value={singleDeleteReason}
+                onChange={(e) => setSingleDeleteReason(e.target.value)}
+                placeholder="e.g. Attendance punch correction required, wrong rate configured..."
+                rows={3}
+                className="w-full border border-slate-200 rounded-xl p-3 text-xs focus:ring-2 focus:ring-rose-500"
+                required
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSingleDeleteModal(false);
+                  setPayslipToDelete(null);
+                  setSingleDeleteReason('');
+                }}
+                className="px-4 py-2 border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl font-medium cursor-pointer"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteSinglePayslip}
+                disabled={actionLoading || !singleDeleteReason.trim()}
+                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-xl font-semibold shadow-sm cursor-pointer"
+              >
+                {actionLoading ? 'Deleting...' : `Delete ${payslipToDelete.payslip.staffName}'s Salary`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
       {/* MODAL 5: CANCEL PAYROLL RUN MODAL                                         */}
       {/* ========================================================================= */}
       {showCancelModal && runToCancel && (
@@ -2206,8 +2622,12 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                 <Ban className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-slate-900">Cancel Payroll Run</h3>
-                <p className="text-slate-500">{runToCancel.payrollNumber}</p>
+                <h3 className="text-base font-bold text-slate-900">
+                  {isCancellingAllMonthRuns ? 'Cancel All Salaries (Entire Period)' : 'Cancel Payroll Run'}
+                </h3>
+                <p className="text-slate-500">
+                  {isCancellingAllMonthRuns ? `${generatedPayslipRows.length} staff payslips will be cancelled` : runToCancel.payrollNumber}
+                </p>
               </div>
             </div>
 
@@ -2243,7 +2663,7 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                 disabled={actionLoading || !cancelReason.trim()}
                 className="px-5 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-xl font-semibold shadow-sm"
               >
-                Confirm Cancellation
+                {actionLoading ? 'Cancelling...' : isCancellingAllMonthRuns ? `Cancel All (${generatedPayslipRows.length}) Salaries` : 'Confirm Cancellation'}
               </button>
             </div>
           </div>
@@ -2272,73 +2692,31 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
             </div>
 
             <form onSubmit={handleSavePolicy} className="p-6 space-y-4 text-xs">
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">
-                  Monthly Absence / Unpaid Leave Divisor
+              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl space-y-1">
+                <label className="block text-indigo-950 font-bold">
+                  Monthly Staff Divisor: Actual Calendar Days Model
                 </label>
-                <select
-                  value={String(policyForm.monthlyAbsenceDivisor || 30)}
-                  onChange={(e) =>
-                    setPolicyForm({
-                      ...policyForm,
-                      monthlyAbsenceDivisor: (isNaN(Number(e.target.value))
-                        ? e.target.value
-                        : Number(e.target.value)) as any,
-                    })
-                  }
-                  className="w-full border-slate-200 rounded-xl px-3 py-2 bg-slate-50"
-                >
-                  <option value="30">30 Days Divisor (Standard Salon Rule)</option>
-                  <option value="26">26 Days Divisor (Working Days Only)</option>
-                  <option value="CALENDAR_DAYS">Actual Calendar Days in Month (28/29/30/31)</option>
-                  <option value="WORKING_DAYS">Actual Scheduled Working Days in Month</option>
-                </select>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Determines daily deduction rate: (Base Salary ÷ Divisor) × Absent Days.
+                <p className="text-[11px] text-indigo-800 leading-relaxed">
+                  Daily deduction & proration rates are strictly derived from actual calendar days in the month (28 in Feb non-leap, 29 in Feb leap, 30 in Apr/Jun/Sep/Nov, 31 in Jan/Mar/May/Jul/Aug/Oct/Dec). Full calendar month = 100% of configured monthly salary.
                 </p>
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">
-                  Daily Staff Paid Leave Eligibility
-                </label>
-                <div className="flex items-center gap-4 mt-1">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="dailyPaidLeave"
-                      checked={policyForm.dailyStaffPaidLeaveEligibility === true}
-                      onChange={() => setPolicyForm({ ...policyForm, dailyStaffPaidLeaveEligibility: true })}
-                      className="text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span>Eligible for Approved Paid Leave</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="dailyPaidLeave"
-                      checked={policyForm.dailyStaffPaidLeaveEligibility === false}
-                      onChange={() => setPolicyForm({ ...policyForm, dailyStaffPaidLeaveEligibility: false })}
-                      className="text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span>Present Days Only</span>
-                  </label>
+                <div className="text-[10px] text-indigo-700 font-mono bg-white/70 px-2 py-1 rounded border border-indigo-100 mt-1">
+                  Formula: Daily Rate = Monthly Base Salary ÷ Actual Calendar Days
                 </div>
               </div>
 
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">Mid-Month Proration Method</label>
-                <select
-                  value={policyForm.prorationMethod || 'CALENDAR_DAYS'}
-                  onChange={(e) => setPolicyForm({ ...policyForm, prorationMethod: e.target.value as any })}
-                  className="w-full border-slate-200 rounded-xl px-3 py-2 bg-slate-50"
-                >
-                  <option value="CALENDAR_DAYS">Prorate by Calendar Days (Employed Days ÷ Month Days)</option>
-                  <option value="WORKING_DAYS">Prorate by Working Days (Scheduled Days ÷ Total Working Days)</option>
-                  <option value="FIXED_26">Fixed 26-Day Divisor Proration</option>
-                </select>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Applied when an employee joins or exits mid-month or changes compensation tier.
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1">
+                <label className="block text-amber-950 font-bold">
+                  Daily Staff Contract: Strict Worked-Days Only
+                </label>
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  Applies to Daily Salary & Daily + Commission contracts. Earned base = configured dailySalaryRate × verified worked-day equivalents (1.0 for full day, 0.5 for half day). Non-worked days, leaves, and holidays earn Rs. 0 and are never deducted.
+                </p>
+              </div>
+
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                <label className="block text-slate-800 font-semibold mb-1">Mid-Month Proration Method</label>
+                <p className="text-[11px] text-slate-600">
+                  Prorated dynamically by actual calendar days (Employed Days ÷ Month Calendar Days).
                 </p>
               </div>
 
@@ -2346,21 +2724,11 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={policyForm.nonWorkedWeeklyOffPaid ?? false}
-                    onChange={(e) => setPolicyForm({ ...policyForm, nonWorkedWeeklyOffPaid: e.target.checked })}
-                    className="rounded text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span>Pay non-worked weekly offs for daily-rate employees</span>
-                </label>
-
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
                     checked={policyForm.nonWorkedHolidayPaid ?? true}
                     onChange={(e) => setPolicyForm({ ...policyForm, nonWorkedHolidayPaid: e.target.checked })}
                     className="rounded text-indigo-600 focus:ring-indigo-500"
                   />
-                  <span>Pay gazetted holidays for all employees</span>
+                  <span>Pay gazetted holidays for monthly salaried staff</span>
                 </label>
               </div>
 
@@ -2432,7 +2800,12 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
 
               <div className="space-y-2">
                 {/* 1. Base Salary & Proration */}
-                <p className="text-xs text-slate-600">Divisor: /{selectedPayslip.calculationDetails?.divisorUsed}. {selectedPayslip.calculationDetails?.prorationFormula || selectedPayslip.calculationDetails?.formula}</p>
+                <p className="text-xs text-slate-600">
+                  {selectedPayslip.compensationType?.startsWith('DAILY')
+                    ? `Strict Worked Days Model. Daily Rate: ${formatCurrency(selectedPayslip.calculationDetails?.dailyRateUsed || selectedPayslip.effectiveDailyRate)}/day. `
+                    : `Divisor: Actual Calendar Days (/${selectedPayslip.calculationDetails?.divisorUsed}). Daily Rate: ${formatCurrency(selectedPayslip.calculationDetails?.dailyRateUsed || selectedPayslip.effectiveDailyRate)}/day. `}
+                  {selectedPayslip.calculationDetails?.prorationFormula || selectedPayslip.calculationDetails?.formula}
+                </p>
                 <div className="flex justify-between py-1 border-b border-slate-100">
                   <span className="text-slate-600">Contractual Base Salary</span>
                   <span className="font-semibold text-slate-900">Rs. {(selectedPayslip.effectiveBaseSalary ?? selectedPayslip.baseEarnings).toLocaleString()}</span>
@@ -2500,10 +2873,10 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                     <span className="font-semibold">-Rs. {selectedPayslip.absenceDeductions.toLocaleString()}</span>
                   </div>
                 )}
-                {selectedPayslip.attendancePenaltyDeductions > 0 && (
+                {((selectedPayslip.lateEarlyDeductions || selectedPayslip.attendancePenaltyDeductions || 0) > 0) && (
                   <div className="flex justify-between py-1 border-b border-slate-100 text-rose-600">
                     <span>Late & Early Attendance Penalties</span>
-                    <span className="font-semibold">-Rs. {selectedPayslip.attendancePenaltyDeductions.toLocaleString()}</span>
+                    <span className="font-semibold">-Rs. {(selectedPayslip.lateEarlyDeductions || selectedPayslip.attendancePenaltyDeductions || 0).toLocaleString()}</span>
                   </div>
                 )}
                 {(selectedPayslip.adjustments ?? []).filter((a) => a.type === 'DEDUCTION').map((a) => (
@@ -2535,14 +2908,6 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                 {/* 4. Net Salary Payable */}
                 <div className="pt-2 flex justify-between font-bold text-sm text-slate-900 border-t-2 border-slate-900">
                   <span>Net Salary Payable</span>
-                  <span>Rs. {(selectedPayslip.salaryNetPayable ?? selectedPayslip.netPayable).toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-slate-100 text-emerald-700">
-                  <span>{selectedPayslip.status === 'DRAFT' ? 'Eligible Commission (preview)' : 'Finalized Commission'}</span>
-                  <span>+Rs. {(selectedPayslip.commissionPayable ?? 0).toLocaleString()}</span>
-                </div>
-                <div className="pt-2 flex justify-between font-bold text-sm text-slate-900 border-t-2 border-slate-900">
-                  <span>Combined Net Payable</span>
                   <span className="text-indigo-600">Rs. {selectedPayslip.netPayable.toLocaleString()}</span>
                 </div>
 

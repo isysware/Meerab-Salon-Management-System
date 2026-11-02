@@ -80,7 +80,7 @@ const resolveStaffFilter = (actor, staffId) => {
 };
 
 /** Lateness, early exit, worked hours and deduction preview for one day. */
-const evaluateDay = (staffDTO, checkIn, checkOut, isOvernight, status) => {
+const evaluateDay = (staffDTO, checkIn, checkOut, isOvernight, status, workDate) => {
   if (checkOut && !isOvernight && checkIn && parseTimeToMinutes(checkOut) < parseTimeToMinutes(checkIn)) {
     throw badRequest('INVALID_PUNCH', 'Check-out time cannot be earlier than check-in time unless marked as an overnight shift.');
   }
@@ -95,7 +95,7 @@ const evaluateDay = (staffDTO, checkIn, checkOut, isOvernight, status) => {
     isLate, lateMinutes, isEarlyExit: early.isEarlyExit, earlyExitMinutes: early.earlyExitMinutes,
     workedHours: worked,
     scheduledHours: sched,
-    calculationSnapshot: calculateDeductionSnapshot(staffDTO, isLate, lateMinutes, early.isEarlyExit, early.earlyExitMinutes),
+    calculationSnapshot: calculateDeductionSnapshot(staffDTO, isLate, lateMinutes, early.isEarlyExit, early.earlyExitMinutes, workDate),
     isMissingPunch: status === 'HALF_DAY' ? false : (!checkIn || !checkOut),
   };
 };
@@ -135,7 +135,7 @@ export const createAttendance = async (input, actor) => {
 
     const dto = toStaffDTO(staff);
     const isOvernight = input.isOvernightShift ?? staff.isOvernightShift;
-    const day = evaluateDay(dto, input.checkIn, input.checkOut, isOvernight, input.status);
+    const day = evaluateDay(dto, input.checkIn, input.checkOut, isOvernight, input.status, input.date);
     const source = input.source || 'MANUAL';
     const record = await tx.attendanceRecord.create({
       data: {
@@ -171,7 +171,7 @@ export const correctAttendance = async (id, input, actor) =>
       checkIn: r.checkIn, checkOut: r.checkOut ?? undefined, status: r.status, workedHours: num(r.workedHours),
       isLate: r.isLate, lateMinutes: r.lateMinutes, isEarlyExit: r.isEarlyExit, earlyExitMinutes: r.earlyExitMinutes,
     });
-    const day = evaluateDay(toStaffDTO(staff), input.checkIn, input.checkOut, record.isOvernightShift, input.status || record.status);
+    const day = evaluateDay(toStaffDTO(staff), input.checkIn, input.checkOut, record.isOvernightShift, input.status || record.status, ymd(record.workDate));
     const updated = await tx.attendanceRecord.update({
       where: { id },
       data: {
@@ -266,7 +266,7 @@ export const markAllAttendance = async ({ branchId: requested, date, status = 'P
       const isOvernight = s.isOvernightShift;
 
       if (status === 'PRESENT') {
-        const day = evaluateDay(toStaffDTO(s), cIn, cOut, isOvernight);
+        const day = evaluateDay(toStaffDTO(s), cIn, cOut, isOvernight, undefined, date);
         await tx.attendanceRecord.create({
           data: {
             branchId,
@@ -353,7 +353,7 @@ export const bulkSaveAttendance = async ({ branchId: requested, date, records },
       if (status === 'PRESENT' || status === 'HALF_DAY') {
         if (checkOut && !checkIn) throw badRequest('INVALID_PUNCH', 'Enter check-in before check-out.');
         const dto = toStaffDTO(staff);
-        const day = evaluateDay(dto, checkIn, checkOut, staff.isOvernightShift, status);
+        const day = evaluateDay(dto, checkIn, checkOut, staff.isOvernightShift, status, date);
         isLate = day.isLate;
         lateMinutes = day.lateMinutes;
         isEarlyExit = day.isEarlyExit;
@@ -478,7 +478,7 @@ export const importCSV = async ({ branchId: requested, rows }, actor) => {
         await assertPayrollPeriodOpen(tx, staff.id, row.date);
         const leave = await tx.leaveRecord.findFirst({ where: { staffId: staff.id, status: 'APPROVED', startDate: { lte: dateOnly(row.date) }, endDate: { gte: dateOnly(row.date) } } });
         if (leave) throw conflict('ON_LEAVE', 'Cannot import attendance during approved leave.');
-        day = evaluateDay(toStaffDTO(staff), row.checkIn, row.checkOut, staff.isOvernightShift);
+        day = evaluateDay(toStaffDTO(staff), row.checkIn, row.checkOut, staff.isOvernightShift, undefined, row.date);
       } catch (e) {
         rejected += 1;
         details.push({ ...row, ...match, status: 'INVALID', rejectionReason: e.message });
@@ -558,8 +558,12 @@ export const markLeave = async (input, actor) =>
       }
       for (const [period, days] of periods) {
         const allowance = evaluateLeaveAllowance(dto, existingLeaves, days[0], holidays);
-        if (!allowance.isConfigured) throw badRequest('NO_ALLOWANCE', `Cannot mark paid leave: Paid leave allowance is not configured for ${staff.name}. Use unpaid leave or configure allowance first.`);
-        if (days.length > allowance.remainingDays) throw conflict('ALLOWANCE_EXCEEDED', `Cannot mark paid leave: ${staff.name} only has ${allowance.remainingDays} paid leave day(s) remaining for ${period} (requested: ${days.length} days).`);
+        if (!allowance.isConfigured && !input.allowOverride) {
+          throw badRequest('NO_ALLOWANCE', `Cannot mark paid leave: Paid leave allowance is not configured for ${staff.name}. Use unpaid leave or configure allowance first.`);
+        }
+        if (days.length > allowance.remainingDays && !input.allowOverride) {
+          throw conflict('ALLOWANCE_EXCEEDED', `Cannot mark paid leave: ${staff.name} only has ${allowance.remainingDays} paid leave day(s) remaining for ${period} (requested: ${days.length} days).`);
+        }
       }
     }
 
@@ -640,4 +644,73 @@ export const personalAttendance = async (actor) => {
     leaves: leaves.map((l) => toLeaveDTO(l, staff)),
     summary: { staffName: staff.name, roleTitle: staff.roleTitle, startTime: staff.startTime, endTime: staff.endTime, isOvernightShift: staff.isOvernightShift, allowance },
   };
+};
+
+export const getBranchLeaveAllowances = async (actor, { branchId, date } = {}) => {
+  const bId = actor.role === 'STAFF' ? actor.branchId : resolveReadBranch(actor, branchId);
+  const targetDate = date || await getBusinessDate();
+  const staffList = await prisma.staff.findMany({
+    where: { ...(bId ? { branchId: bId } : {}), isActive: true },
+  });
+
+  const holidays = await prisma.branchHoliday.findMany({
+    where: { ...(bId ? { branchId: { in: [bId, 'ALL'] } } : {}) },
+  });
+
+  const year = Number(targetDate.slice(0, 4));
+  const yearStart = dateOnly(`${year}-01-01`);
+  const yearEnd = dateOnly(`${year}-12-31`);
+
+  const staffIds = staffList.map((s) => s.id);
+  const leaves = await prisma.leaveRecord.findMany({
+    where: {
+      staffId: { in: staffIds },
+      status: 'APPROVED',
+      startDate: { lte: yearEnd },
+      endDate: { gte: yearStart },
+    },
+  });
+
+  const paidAttendance = await prisma.attendanceRecord.findMany({
+    where: {
+      staffId: { in: staffIds },
+      status: 'PAID_LEAVE',
+      workDate: { gte: yearStart, lte: yearEnd },
+    },
+    select: { id: true, staffId: true, workDate: true, leaveId: true },
+  });
+
+  const result = {};
+  for (const staff of staffList) {
+    const dto = toStaffDTO(staff);
+    const staffLeaves = leaves.filter((l) => l.staffId === staff.id);
+    const staffAtt = paidAttendance.filter((a) => a.staffId === staff.id);
+
+    const engineLeaves = staffLeaves.map((l) => ({
+      staffId: l.staffId,
+      status: l.status,
+      type: l.type,
+      startDate: ymd(l.startDate),
+      endDate: ymd(l.endDate),
+      totalDays: l.totalDays,
+    }));
+
+    const standaloneAtt = staffAtt.filter((a) => !a.leaveId);
+    for (const att of standaloneAtt) {
+      const dStr = ymd(att.workDate);
+      engineLeaves.push({
+        staffId: staff.id,
+        status: 'APPROVED',
+        type: 'PAID',
+        startDate: dStr,
+        endDate: dStr,
+        totalDays: 1,
+      });
+    }
+
+    const allowance = evaluateLeaveAllowance(dto, engineLeaves, targetDate, holidays);
+    result[staff.id] = allowance;
+  }
+
+  return result;
 };

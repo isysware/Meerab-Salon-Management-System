@@ -31,11 +31,21 @@ const labelClass = 'block text-[11px] font-bold text-slate-500 uppercase trackin
 const formatPKR = (amt: number, withSign = false) => {
   const num = Number(amt) || 0;
   const abs = Math.abs(num);
-  const formatted = abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const hasSubCents = Math.abs(abs * 100 - Math.round(abs * 100)) > 0.0001;
+  const formatted = abs.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: hasSubCents ? 4 : 2,
+  });
   if (withSign) {
     return num >= 0 ? `+${formatted}` : `-${formatted}`;
   }
   return formatted;
+};
+
+const formatExportNum = (amt: number) => {
+  const num = Number(amt) || 0;
+  const hasSubCents = Math.abs(num * 100 - Math.round(num * 100)) > 0.0001;
+  return hasSubCents ? num.toFixed(4) : num.toFixed(2);
 };
 
 export const StaffSalaryReportPage: React.FC = () => {
@@ -141,11 +151,11 @@ export const StaffSalaryReportPage: React.FC = () => {
       r.staffName,
       r.employeeCode,
       r.branchName,
-      r.basic.toFixed(2),
-      r.gross.toFixed(2),
-      r.net.toFixed(2),
-      r.paid.toFixed(2),
-      r.outstanding.toFixed(2),
+      formatExportNum(r.basic),
+      formatExportNum(r.gross),
+      formatExportNum(r.net),
+      formatExportNum(r.paid),
+      formatExportNum(r.outstanding),
       r.status,
     ]);
 
@@ -183,11 +193,11 @@ export const StaffSalaryReportPage: React.FC = () => {
       r.staffName,
       r.employeeCode,
       r.branchName,
-      r.basic.toFixed(2),
-      r.gross.toFixed(2),
-      r.net.toFixed(2),
-      r.paid.toFixed(2),
-      r.outstanding.toFixed(2),
+      formatExportNum(r.basic),
+      formatExportNum(r.gross),
+      formatExportNum(r.net),
+      formatExportNum(r.paid),
+      formatExportNum(r.outstanding),
       r.status,
     ]);
 
@@ -478,6 +488,13 @@ export const StaffSalaryReportPage: React.FC = () => {
                     <th className="py-3.5 px-4 whitespace-nowrap">Payslip #</th>
                     <th className="py-3.5 px-4">Staff</th>
                     <th className="py-3.5 px-4">Branch</th>
+                    <th className="py-3.5 px-2 text-center whitespace-nowrap">Present Days</th>
+                    <th className="py-3.5 px-2 text-center whitespace-nowrap">Absent Days</th>
+                    <th className="py-3.5 px-2 text-center whitespace-nowrap">Paid Leave</th>
+                    <th className="py-3.5 px-2 text-center whitespace-nowrap">Unpaid Leave</th>
+                    <th className="py-3.5 px-2 text-center whitespace-nowrap">Holidays</th>
+                    <th className="py-3.5 px-2 text-center whitespace-nowrap">Weekly Offs</th>
+                    <th className="py-3.5 px-2 text-center whitespace-nowrap">OT Hours</th>
                     <th className="py-3.5 px-4 text-right">Basic</th>
                     <th className="py-3.5 px-4 text-right">Gross</th>
                     <th className="py-3.5 px-4 text-right">Net Salary</th>
@@ -518,7 +535,47 @@ export const StaffSalaryReportPage: React.FC = () => {
                             {row.branchName || 'Main Branch'}
                           </td>
 
-                          {/* 6. Basic */}
+                          {/* Present Days */}
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-slate-700 whitespace-nowrap">
+                            {row.presentDays ?? 0}
+                            {row.workedWeeklyOffDays ? (
+                              <span className="block text-[9px] text-indigo-600 font-normal">
+                                +{row.workedWeeklyOffDays} off-work
+                              </span>
+                            ) : null}
+                          </td>
+
+                          {/* Absent Days */}
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-rose-600 whitespace-nowrap">
+                            {row.absentDays ?? 0}
+                          </td>
+
+                          {/* Paid Leave */}
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-emerald-600 whitespace-nowrap">
+                            {row.paidLeaveDays ?? 0}
+                          </td>
+
+                          {/* Unpaid Leave */}
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-amber-600 whitespace-nowrap">
+                            {row.unpaidLeaveDays ?? 0}
+                          </td>
+
+                          {/* Holidays */}
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-purple-600 whitespace-nowrap">
+                            {row.holidayDays ?? row.paidHolidayDays ?? 0}
+                          </td>
+
+                          {/* Weekly Offs */}
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-blue-600 whitespace-nowrap">
+                            {row.weeklyOffDays ?? row.paidWeeklyOffDays ?? 0}
+                          </td>
+
+                          {/* Overtime Hours */}
+                          <td className="py-3.5 px-2 text-center font-mono tabular-nums text-indigo-700 whitespace-nowrap">
+                            {row.overtimeHours ? `${row.overtimeHours.toFixed(1)}h` : '0h'}
+                          </td>
+
+                          {/* Basic */}
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums text-slate-600 whitespace-nowrap">
                             {formatPKR(row.basic)}
                           </td>
@@ -564,7 +621,7 @@ export const StaffSalaryReportPage: React.FC = () => {
                     })
                   ) : (
                     <tr>
-                      <td colSpan={11} className="py-12 text-center text-slate-400 font-medium">
+                      <td colSpan={18} className="py-12 text-center text-slate-400 font-medium">
                         No salary records found for the selected branch, dates, and filters.
                       </td>
                     </tr>

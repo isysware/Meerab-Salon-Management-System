@@ -103,6 +103,15 @@ export const lockPayrollExtras = async (tx, runId, month, payslip) => {
 };
 
 /** Cancel run: unlock adjustments and release recoveries (advances become ACTIVE again). */
+/** Cancel single staff payslip: unlock adjustments and release recoveries for that staff only. */
+export const releasePayrollExtrasForStaff = async (tx, runId, staffId) => {
+  await tx.payrollAdjustment.updateMany({ where: { payrollRunId: runId, staffId }, data: { payrollRunId: null } });
+  const recs = await tx.advanceRecovery.findMany({ where: { payrollRunId: runId, staffId, status: 'ACTIVE' } });
+  if (!recs.length) return;
+  await tx.advanceRecovery.updateMany({ where: { payrollRunId: runId, staffId, status: 'ACTIVE' }, data: { status: 'RELEASED' } });
+  await tx.salaryAdvance.updateMany({ where: { id: { in: [...new Set(recs.map((r) => r.advanceId))] }, status: 'RECOVERED' }, data: { status: 'ACTIVE' } });
+};
+
 export const releasePayrollExtras = async (tx, runId) => {
   await tx.payrollAdjustment.updateMany({ where: { payrollRunId: runId }, data: { payrollRunId: null } });
   const recs = await tx.advanceRecovery.findMany({ where: { payrollRunId: runId, status: 'ACTIVE' } });

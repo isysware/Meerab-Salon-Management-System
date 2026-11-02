@@ -525,6 +525,8 @@ export interface SalonServiceContract {
   importAttendanceCSV(branchId: string, rows: CSVAttendanceImportRow[], actor?: User): Promise<CSVAttendanceImportResult>;
 
   getLeaves(branchId: string | 'ALL', staffId?: string, actor?: User): Promise<LeaveRecord[]>;
+  getLeaveAllowances(branchId: string | 'ALL', date: string, actor?: User): Promise<Record<string, import('../types/salon').LeaveAllowanceSummary>>;
+
   markLeave(input: CreateLeaveInput, actor?: User): Promise<LeaveRecord>;
   cancelLeave(id: string, reason: string, actor?: User): Promise<LeaveRecord>;
 
@@ -549,6 +551,7 @@ export interface SalonServiceContract {
   finalizePayroll(payrollRunId: string, actor?: User): Promise<PayrollRun>;
   recordPayrollPayment(input: RecordPayrollPaymentInput, actor?: User): Promise<{ payrollRun: PayrollRun; payment: PayrollPayment }>;
   cancelPayrollRun(payrollRunId: string, reason: string, actor?: User): Promise<PayrollRun>;
+  cancelPayslip(payslipId: string, reason: string, actor?: User): Promise<{ deletedPayslipId: string; runCancelled: boolean; run?: PayrollRun }>;
   reversePayrollPayment(paymentId: string, reason: string, actor?: User): Promise<PayrollPayment>;
   addManualDeduction(
     payslipId: string,

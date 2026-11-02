@@ -45,7 +45,18 @@ export const staffSalaryReport = async (actor, q) => {
       payslipId: ps.id, payslipNumber: ps.payslipNumber, payrollNumber: ps.run.payrollNumber, period: ps.run.month,
       staffId: ps.staffId, staffName: s.staffName, employeeCode: s.employeeCode, designation: s.designation,
       branchId: ps.run.branchId, branchName: branches.get(ps.run.branchId), compensationType: s.compensationType,
-      basic: round2(toDec(s.baseEarnings ?? 0).plus(s.leaveEarnings ?? 0).plus(s.holidayEarnings ?? 0)).toNumber(),
+      presentDays: num(s.presentDays ?? 0),
+      absentDays: num(s.absentDays ?? 0),
+      paidLeaveDays: num(s.paidLeaveDays ?? 0),
+      unpaidLeaveDays: num(s.unpaidLeaveDays ?? 0),
+      holidayDays: num(s.holidayDays ?? s.paidHolidayDays ?? 0),
+      paidHolidayDays: num(s.paidHolidayDays ?? 0),
+      weeklyOffDays: num(s.weeklyOffDays ?? s.paidWeeklyOffDays ?? 0),
+      paidWeeklyOffDays: num(s.paidWeeklyOffDays ?? 0),
+      workedWeeklyOffDays: num(s.workedWeeklyOffDays ?? 0),
+      workedHolidayDays: num(s.workedHolidayDays ?? 0),
+      overtimeHours: num(s.approvedOvertimeHours ?? (s.approvedOvertimeMinutes ? s.approvedOvertimeMinutes / 60 : 0)),
+      basic: toDec(s.baseEarnings ?? 0).plus(s.leaveEarnings ?? 0).plus(s.holidayEarnings ?? 0).toNumber(),
       attendance: num(s.attendanceImpact ?? -((s.absenceDeductions ?? 0) + (s.attendancePenaltyDeductions ?? 0))),
       overtime: num(s.approvedOvertimeAmount ?? 0), allowances: num(s.allowancesTotal ?? 0),
       deductions: otherDeductions.toNumber(), advanceRecovery: num(s.advanceRecoveryAmount ?? 0),
@@ -59,7 +70,7 @@ export const staffSalaryReport = async (actor, q) => {
   if (q.paymentMethod && q.paymentMethod !== 'ALL') rows = rows.filter((r) => r.paid > 0);
   rows.sort((a, b2) => b2.period.localeCompare(a.period) || a.employeeCode.localeCompare(b2.employeeCode));
 
-  const totals = Object.fromEntries(['basic', 'attendance', 'overtime', 'allowances', 'deductions', 'advanceRecovery', 'gross', 'net', 'paid', 'outstanding']
+  const totals = Object.fromEntries(['presentDays', 'absentDays', 'paidLeaveDays', 'unpaidLeaveDays', 'holidayDays', 'weeklyOffDays', 'overtimeHours', 'basic', 'attendance', 'overtime', 'allowances', 'deductions', 'advanceRecovery', 'gross', 'net', 'paid', 'outstanding']
     .map((f) => [f, sumBy(rows, (r) => r[f]).toNumber()]));
   return {
     filters: { branchId: b ?? 'ALL', fromMonth, toMonth, staffId: q.staffId, designation: q.designation, paymentStatus: q.paymentStatus, paymentMethod: q.paymentMethod },

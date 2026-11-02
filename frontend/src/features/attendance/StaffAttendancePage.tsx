@@ -10,6 +10,7 @@ import {
   CSVAttendanceImportRow,
   CSVAttendanceImportResult,
   AttendancePolicyConfig,
+  LeaveAllowanceSummary,
 } from '../../types/salon';
 import {
   Clock,
@@ -20,6 +21,7 @@ import {
   X,
   Save,
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   Upload,
   FileSpreadsheet,
@@ -114,6 +116,17 @@ export const StaffAttendancePage: React.FC = () => {
   const [rawAttendanceList, setRawAttendanceList] = useState<AttendanceRecord[]>([]);
   const [rows, setRows] = useState<EditableAttendanceRow[]>([]);
   const [attendancePolicy, setAttendancePolicy] = useState<AttendancePolicyConfig | null>(null);
+  const [leaveAllowances, setLeaveAllowances] = useState<Record<string, LeaveAllowanceSummary>>({});
+  const [quotaAlertModal, setQuotaAlertModal] = useState<{
+    isOpen: boolean;
+    staffId: string;
+    staffName: string;
+    employeeCode: string;
+    allowedDays: number;
+    usedDays: number;
+    period: 'MONTHLY' | 'YEARLY';
+    previousStatus: EditableAttendanceRow['status'];
+  } | null>(null);
 
   // Modals state (EOD finalize & CSV import)
   const [showFinalizeModal, setShowFinalizeModal] = useState<boolean>(false);
@@ -131,11 +144,13 @@ export const StaffAttendancePage: React.FC = () => {
     if (!branchIdToLoad) return;
     try {
       setLoading(true);
-      const [allStaff, attRecords, attPolicy] = await Promise.all([
+      const [allStaff, attRecords, attPolicy, allowances] = await Promise.all([
         salonService.getStaff(branchIdToLoad),
         salonService.getAttendance(branchIdToLoad, dateToLoad, undefined, user || undefined),
         salonService.getAttendancePolicy(branchIdToLoad).catch(() => null),
+        salonService.getLeaveAllowances(branchIdToLoad, dateToLoad, user || undefined).catch(() => ({})),
       ]);
+      setLeaveAllowances(allowances || {});
 
       const activeStaff = allStaff.filter((s) => s.isActive);
       setRawStaffList(activeStaff);
@@ -316,27 +331,55 @@ export const StaffAttendancePage: React.FC = () => {
     toast.success(`Marked all ${categoryFilter === 'ALL' ? '' : categoryFilter} staff as ${targetStatus}!`);
   };
 
-  // Handler: Update row status
-  const handleRowStatusChange = (staffId: string, newStatus: EditableAttendanceRow['status']) => {
+  // Apply status change helper
+  const applyStatusChange = (staffId: string, newStatus: EditableAttendanceRow['status'], isOverride = false) => {
     setRows((prev) =>
       prev.map((r) => {
         if (r.staffId !== staffId) return r;
         let cIn = r.checkIn;
         let cOut = r.checkOut;
-        if (newStatus === 'ABSENT' || newStatus === 'HOLIDAY' || newStatus === 'WEEKLY_OFF') {
+        if (newStatus === 'ABSENT' || newStatus === 'HOLIDAY' || newStatus === 'WEEKLY_OFF' || newStatus === 'PAID_LEAVE' || newStatus === 'UNPAID_LEAVE') {
           cIn = '';
           cOut = '';
+        }
+        let note = r.notes;
+        if (isOverride && newStatus === 'PAID_LEAVE') {
+          note = (note ? note.replace(/Admin Override: Paid leave quota exceeded\s*\|?\s*/g, '') : '');
+          note = (note ? note + ' | ' : '') + 'Admin Override: Paid leave quota exceeded';
         }
         return {
           ...r,
           status: newStatus,
           checkIn: cIn,
           checkOut: cOut,
+          notes: note,
           isModified: true,
           isAutoAbsent: false,
         };
       })
     );
+  };
+
+  // Handler: Update row status with Leave Quota Check & Alert
+  const handleRowStatusChange = (staffId: string, newStatus: EditableAttendanceRow['status']) => {
+    if (newStatus === 'PAID_LEAVE') {
+      const allowance = leaveAllowances[staffId];
+      if (allowance && allowance.isConfigured && allowance.remainingDays <= 0) {
+        const currentRow = rows.find((r) => r.staffId === staffId);
+        setQuotaAlertModal({
+          isOpen: true,
+          staffId,
+          staffName: currentRow?.name || 'Staff',
+          employeeCode: currentRow?.employeeCode || '',
+          allowedDays: allowance.allowedDays,
+          usedDays: allowance.usedDays,
+          period: allowance.period,
+          previousStatus: currentRow?.status || 'SELECT_STATUS',
+        });
+        return;
+      }
+    }
+    applyStatusChange(staffId, newStatus, false);
   };
 
   // Handler: Update row check-in time
@@ -1003,6 +1046,92 @@ export const StaffAttendancePage: React.FC = () => {
       </div>
 
       {/* ── MODAL: FINALIZE DAY (EOD) ───────────────────────────────────────── */}
+      {/* ========================================================================= */}
+      {/* ── PREMIUM MODAL: LEAVE QUOTA EXHAUSTED (VALIDATION & OVERRIDE) ────────── */}
+      {/* ========================================================================= */}
+      {quotaAlertModal && quotaAlertModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col p-6 space-y-4 text-xs border border-white/80">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200/60 flex items-center justify-center text-amber-600 shrink-0 shadow-2xs">
+                <AlertTriangle className="w-6 h-6 stroke-[2.2]" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200/50">
+                  Quota Validation Warning
+                </span>
+                <h3 className="text-base font-bold text-slate-900 mt-1">Paid Leave Quota Exhausted</h3>
+                <p className="text-slate-500 font-medium">
+                  {quotaAlertModal.staffName} ({quotaAlertModal.employeeCode})
+                </p>
+              </div>
+            </div>
+
+            {/* Leave Quota Metrics Badge */}
+            <div className="grid grid-cols-3 gap-2 bg-slate-50/80 p-3 rounded-2xl border border-slate-200/80 text-center">
+              <div>
+                <span className="text-slate-400 text-[10px] block font-medium">Allowed Quota</span>
+                <span className="font-bold text-slate-800 text-sm">{quotaAlertModal.allowedDays} Days</span>
+                <span className="text-[9px] text-slate-400 block font-medium uppercase">{quotaAlertModal.period}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 text-[10px] block font-medium">Already Taken</span>
+                <span className="font-bold text-rose-600 text-sm">{quotaAlertModal.usedDays} Days</span>
+                <span className="text-[9px] text-rose-400 block font-medium">Utilized</span>
+              </div>
+              <div>
+                <span className="text-slate-400 text-[10px] block font-medium">Remaining</span>
+                <span className="font-bold text-rose-700 text-sm">0 Days</span>
+                <span className="text-[9px] text-rose-500 font-bold block uppercase">EXHAUSTED</span>
+              </div>
+            </div>
+
+            <div className="p-3 bg-amber-50/80 border border-amber-200/80 rounded-2xl text-amber-900 space-y-1.5 leading-relaxed">
+              <p className="font-semibold text-xs text-amber-950 flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                Is staff member ki paid leaves limit khatam ho chuki hai.
+              </p>
+              <p className="text-[11px] text-amber-800">
+                Chunkay aap Super Admin / Admin hain, aap chahein toh isay <strong>Paid Leave (Override)</strong> ke tor par tasdeeq kar sakte hain, ya phir <strong>Unpaid Leave</strong> mein tabdeel kar sakte hain.
+              </p>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex flex-col sm:flex-row items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setQuotaAlertModal(null)}
+                className="w-full sm:w-auto px-4 py-2 border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl font-medium cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  applyStatusChange(quotaAlertModal.staffId, 'UNPAID_LEAVE', false);
+                  toast.info(`Switched to Unpaid Leave for ${quotaAlertModal.staffName}.`);
+                  setQuotaAlertModal(null);
+                }}
+                className="w-full sm:w-auto px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded-xl font-semibold cursor-pointer transition-all"
+              >
+                Switch to Unpaid Leave
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  applyStatusChange(quotaAlertModal.staffId, 'PAID_LEAVE', true);
+                  toast.success(`Admin Override: Paid Leave approved for ${quotaAlertModal.staffName}.`);
+                  setQuotaAlertModal(null);
+                }}
+                className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-[#B82E69] to-[#A02358] hover:from-[#A02358] hover:to-[#8E1F4D] text-white rounded-xl font-semibold shadow-xs cursor-pointer transition-all"
+              >
+                Proceed with Paid Leave (Override)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showFinalizeModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-5 border border-slate-200 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">

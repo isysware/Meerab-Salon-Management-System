@@ -6406,6 +6406,19 @@ class MockSalonService implements SalonServiceContract {
     return leave;
   }
 
+  async getLeaveAllowances(branchId: string | 'ALL', date: string, actor?: User): Promise<Record<string, any>> {
+    const clonedStore: any = JSON.parse(JSON.stringify(mockStorage.getStore()));
+    const staffList = (clonedStore.staff || []).filter((s: any) => branchId === 'ALL' || s.branchId === branchId);
+    const leaves = clonedStore.leaves || [];
+    const holidays = clonedStore.holidays || [];
+    const res: Record<string, any> = {};
+    for (const staff of staffList) {
+      const staffLeaves = leaves.filter((l: any) => l.staffId === staff.id);
+      res[staff.id] = evaluateLeaveAllowance(staff, staffLeaves, date, holidays);
+    }
+    return res;
+  }
+
   async getLeaves(branchId: string | 'ALL', staffId?: string, actor?: User): Promise<LeaveRecord[]> {
     const authenticatedActor = this.getAuthenticatedActor(actor);
     if (authenticatedActor.role === 'ACCOUNTANT') {
@@ -7525,6 +7538,67 @@ class MockSalonService implements SalonServiceContract {
     mockStorage.saveStore(clonedStore);
 
     return { payrollRun: run, payment: paymentRecord };
+  }
+
+  async cancelPayslip(payslipId: string, reason: string, actor?: User): Promise<{ deletedPayslipId: string; runCancelled: boolean; run?: PayrollRun }> {
+    const authenticatedActor = this.getAuthenticatedActor(actor);
+    if (authenticatedActor.role === 'ACCOUNTANT') {
+      throw new Error('Access Denied: Accountants are not authorized to cancel payslips.');
+    }
+    if (authenticatedActor.role === 'STAFF') {
+      throw new Error('Access Denied: Staff members cannot cancel payslips.');
+    }
+    if (!reason?.trim()) {
+      throw new Error('A cancellation reason is required.');
+    }
+
+    const clonedStore: StorageSchema = JSON.parse(JSON.stringify(mockStorage.getStore()));
+    let targetRun: PayrollRun | undefined;
+    let targetPayslipIndex = -1;
+
+    for (const r of (clonedStore.payrollRuns || [])) {
+      const idx = (r.payslips || []).findIndex((p: any) => p.id === payslipId);
+      if (idx !== -1) {
+        targetRun = r;
+        targetPayslipIndex = idx;
+        break;
+      }
+    }
+
+    if (!targetRun || targetPayslipIndex === -1) {
+      throw new Error(`Payslip '${payslipId}' not found.`);
+    }
+
+    const targetPs = targetRun.payslips[targetPayslipIndex];
+    if (targetPs.paidAmount && targetPs.paidAmount > 0) {
+      throw new Error(`Cannot delete salary for ${targetPs.staffName || 'this staff'} because it has completed payments. Please reverse payments first.`);
+    }
+
+    // Release overtime for this staff
+    for (const ot of clonedStore.overtime) {
+      if (ot.payrollId === targetRun.id && ot.staffId === targetPs.staffId) {
+        ot.payrollId = undefined;
+      }
+    }
+
+    // Remove payslip
+    targetRun.payslips.splice(targetPayslipIndex, 1);
+    targetRun.employeeCount = targetRun.payslips.length;
+    targetRun.totalPayable = targetRun.payslips.reduce((s: number, p: any) => s + (p.netPayable || 0), 0);
+    targetRun.totalOutstanding = targetRun.payslips.reduce((s: number, p: any) => s + (p.outstandingAmount || 0), 0);
+
+    let runCancelled = false;
+    if (targetRun.payslips.length === 0) {
+      targetRun.status = 'CANCELLED';
+      targetRun.cancellationReason = reason.trim();
+      targetRun.cancelledAt = mockStorage.getSystemDate();
+      targetRun.cancelledByUserId = authenticatedActor.id;
+      targetRun.cancelledByName = authenticatedActor.name;
+      runCancelled = true;
+    }
+
+    mockStorage.saveStore(clonedStore);
+    return { deletedPayslipId: payslipId, runCancelled, run: targetRun };
   }
 
   async cancelPayrollRun(payrollRunId: string, reason: string, actor?: User): Promise<PayrollRun> {

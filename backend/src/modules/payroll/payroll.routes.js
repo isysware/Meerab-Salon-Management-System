@@ -33,6 +33,8 @@ router.post('/preview', validate(z.object({
 })), send((req) => s.generatePreview(req.user, req.body), 201));
 router.post('/runs/:id/finalize', send((req) => s.finalizeRun(req.user, req.params.id)));
 router.post('/runs/:id/cancel', validate(reason), send((req) => s.cancelRun(req.user, req.params.id, req.body.reason)));
+router.post('/payslips/:id/cancel', validate(reason), send((req) => s.cancelPayslip(req.user, req.params.id, req.body.reason)));
+router.delete('/payslips/:id', send((req) => s.cancelPayslip(req.user, req.params.id, req.query.reason || 'Staff salary cancelled')));
 router.post('/payments', idempotency, validate(z.object({
   payrollRunId: z.string().min(1), payslipId: z.string().min(1), amount: z.number().positive('Payment amount must be greater than zero.'),
   method: z.enum(['CASH', 'ONLINE']), onlineAccountId: z.string().optional(), cashDrawerId: z.string().optional(),

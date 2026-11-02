@@ -1,14 +1,36 @@
-export function formatCurrency(amount: number | undefined | null, currency = 'PKR'): string {
-  if (amount === undefined || amount === null || isNaN(amount)) {
-    return 'PKR 0.00';
+export function formatCurrency(
+  amount: number | string | undefined | null,
+  currency = 'PKR',
+  maxFractionDigits?: number
+): string {
+  if (amount === undefined || amount === null || amount === '') {
+    return `${currency} 0.00`;
   }
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  if (isNaN(num)) {
+    return `${currency} 0.00`;
+  }
+
+  // Preserve up to 4 decimal places if amount contains sub-cents (e.g. 1000.3333)
+  const hasSubCents =
+    maxFractionDigits !== undefined
+      ? maxFractionDigits > 2
+      : Math.abs(num * 100 - Math.round(num * 100)) > 0.0001;
+
+  const maxDigits =
+    maxFractionDigits !== undefined
+      ? maxFractionDigits
+      : hasSubCents
+      ? 4
+      : 2;
+
   // Format as PKR with en-PK locale
   const formatted = new Intl.NumberFormat('en-PK', {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
+    maximumFractionDigits: maxDigits,
+  }).format(num);
 
-  return `PKR ${formatted}`;
+  return `${currency} ${formatted}`;
 }
 
 export function formatNumber(value: number | undefined | null): string {
@@ -91,4 +113,3 @@ export function isValidPhoneNumber(phone: string): boolean {
   const digits = normalizePhoneDigits(phone);
   return digits.length >= 10 && digits.length <= 15;
 }
-

@@ -40,7 +40,7 @@ const importSchema = z.object({
   }).passthrough()).min(1, 'The import file has no rows.').max(5000),
 });
 const leaveSchema = z.object({
-  staffId: z.string().min(1), branchId: z.string().optional(), startDate: ymd, endDate: ymd, type: z.enum(['PAID', 'UNPAID']), reason: reason('leave'),
+  staffId: z.string().min(1), branchId: z.string().optional(), startDate: ymd, endDate: ymd, type: z.enum(['PAID', 'UNPAID']), reason: reason('leave'), allowOverride: z.boolean().optional(),
 });
 const cancelSchema = z.object({ reason: reason('cancellation') });
 const holidaySchema = z.object({ branchId: z.string().optional(), date: ymd, title: z.string().trim().min(1, 'Holiday title is required.') });
@@ -72,6 +72,7 @@ const bulkSaveSchema = z.object({
 // ── /attendance ──────────────────────────────────────────────────────────────
 export const attendanceRoutes = Router();
 attendanceRoutes.use(authenticate);
+attendanceRoutes.get('/leave-allowances', authorize(...READERS, 'ACCOUNTANT'), send((req) => a.getBranchLeaveAllowances(req.user, req.query)));
 attendanceRoutes.get('/',               authorize(...READERS, 'ACCOUNTANT'), validate(listQuery, 'query'), send((req) => a.listAttendance(req.user, req.query)));
 attendanceRoutes.get('/me',             authorize('STAFF'), send((req) => a.personalAttendance(req.user)));
 attendanceRoutes.post('/',              authorize(...ADMINS), validate(createSchema), send((req) => a.createAttendance(req.body, req.user), 201));

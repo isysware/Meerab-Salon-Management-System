@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import {
   StaffMember,
   AttendanceDeductionSnapshot,
@@ -5,6 +6,14 @@ import {
   BranchHoliday,
 } from '../types/salon';
 import { roundCurrency } from './taxCalculations';
+
+Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
+const d = (v: any) => new Decimal(v ?? 0);
+
+export function getCalendarDaysInMonth(yearMonth: string): number {
+  const [yearStr, monthStr] = yearMonth.split('-');
+  return new Date(parseInt(yearStr, 10), parseInt(monthStr, 10), 0).getDate();
+}
 
 /**
  * Parses time string like "09:00 AM", "9:30 PM", "14:15", or "09:00" to minutes from midnight (0-1439).
@@ -149,14 +158,15 @@ export function calculateScheduledHours(
 /**
  * Generates an auditable deduction preview snapshot based on staff's effective compensation policy.
  * Important: Commission-only staff never have salary penalties deducted from commission or tips.
- * Monthly staff percentage rules require an explicit divisor (e.g. 26 or 30).
+ * Monthly staff daily rate derives dynamically from actual calendar days (28/29/30/31).
  */
 export function calculateDeductionSnapshot(
   staff: StaffMember,
   isLate: boolean,
   lateMinutes: number,
   isEarlyExit: boolean,
-  earlyExitMinutes: number
+  earlyExitMinutes: number,
+  workDate?: string
 ): AttendanceDeductionSnapshot {
   const calculatedAt = new Date().toISOString();
 
@@ -177,51 +187,53 @@ export function calculateDeductionSnapshot(
     };
   }
 
-  // Calculate effective daily base salary
-  let effectiveDailyBase = 0;
+  let effectiveDailyBase = d(0);
+  let divisorUsed: number | undefined = undefined;
+
   if (staff.compensationType === 'DAILY_SALARY' || staff.compensationType === 'DAILY_PLUS_COMMISSION') {
-    effectiveDailyBase = staff.dailySalaryRate || 0;
+    effectiveDailyBase = d(staff.dailySalaryRate || 0);
   } else if (staff.compensationType === 'MONTHLY_SALARY' || staff.compensationType === 'MONTHLY_PLUS_COMMISSION') {
-    const divisor = staff.payrollDivisor && staff.payrollDivisor > 0 ? staff.payrollDivisor : 26;
-    effectiveDailyBase = roundCurrency((staff.baseSalary || 0) / divisor);
+    const ym = workDate ? String(workDate).slice(0, 7) : new Date().toISOString().slice(0, 7);
+    divisorUsed = getCalendarDaysInMonth(ym);
+    effectiveDailyBase = d(staff.baseSalary || 0).dividedBy(divisorUsed);
   }
 
-  let lateDeductionAmount = 0;
+  let lateDeductionAmount = d(0);
   if (isLate && staff.lateInDeduction?.enabled) {
     if (staff.lateInDeduction.type === 'FIXED') {
-      lateDeductionAmount = roundCurrency(staff.lateInDeduction.amount || 0);
+      lateDeductionAmount = d(staff.lateInDeduction.amount || 0);
     } else if (staff.lateInDeduction.type === 'PERCENTAGE') {
-      const pct = (staff.lateInDeduction.amount || 0) / 100;
-      lateDeductionAmount = roundCurrency(effectiveDailyBase * pct);
+      const pct = d(staff.lateInDeduction.amount || 0).dividedBy(100);
+      lateDeductionAmount = effectiveDailyBase.times(pct);
     }
   }
 
-  let earlyExitDeductionAmount = 0;
+  let earlyExitDeductionAmount = d(0);
   if (isEarlyExit && staff.earlyExitDeduction?.enabled) {
     if (staff.earlyExitDeduction.type === 'FIXED') {
-      earlyExitDeductionAmount = roundCurrency(staff.earlyExitDeduction.amount || 0);
+      earlyExitDeductionAmount = d(staff.earlyExitDeduction.amount || 0);
     } else if (staff.earlyExitDeduction.type === 'PERCENTAGE') {
-      const pct = (staff.earlyExitDeduction.amount || 0) / 100;
-      earlyExitDeductionAmount = roundCurrency(effectiveDailyBase * pct);
+      const pct = d(staff.earlyExitDeduction.amount || 0).dividedBy(100);
+      earlyExitDeductionAmount = effectiveDailyBase.times(pct);
     }
   }
 
-  let totalDeductionAmount = 0;
+  let totalDeductionAmount = d(0);
   const policy = staff.combinationPolicy || 'HIGHEST_ONLY';
   if (policy === 'BOTH') {
-    totalDeductionAmount = roundCurrency(lateDeductionAmount + earlyExitDeductionAmount);
+    totalDeductionAmount = lateDeductionAmount.plus(earlyExitDeductionAmount);
   } else {
     // HIGHEST_ONLY
-    totalDeductionAmount = Math.max(lateDeductionAmount, earlyExitDeductionAmount);
+    totalDeductionAmount = Decimal.max(lateDeductionAmount, earlyExitDeductionAmount);
   }
 
   let notes = '';
   if (isLate && isEarlyExit) {
-    notes = `Late by ${lateMinutes}m & Early exit by ${earlyExitMinutes}m. Applied policy: ${policy}.`;
+    notes = `Late by ${lateMinutes}m & Early exit by ${earlyExitMinutes}m. Applied policy: ${policy}. Daily base: PKR ${effectiveDailyBase.toString()} (Divisor: ${divisorUsed || 'Daily'}).`;
   } else if (isLate) {
-    notes = `Late arrival by ${lateMinutes}m.`;
+    notes = `Late arrival by ${lateMinutes}m. Daily base: PKR ${effectiveDailyBase.toString()} (Divisor: ${divisorUsed || 'Daily'}).`;
   } else if (isEarlyExit) {
-    notes = `Early departure by ${earlyExitMinutes}m.`;
+    notes = `Early departure by ${earlyExitMinutes}m. Daily base: PKR ${effectiveDailyBase.toString()} (Divisor: ${divisorUsed || 'Daily'}).`;
   } else {
     notes = 'On time attendance. No deductions.';
   }
@@ -231,11 +243,11 @@ export function calculateDeductionSnapshot(
     compensationType: staff.compensationType,
     baseSalary: staff.baseSalary || 0,
     dailySalaryRate: staff.dailySalaryRate || 0,
-    payrollDivisor: staff.payrollDivisor,
-    effectiveDailyBase,
-    lateDeductionAmount,
-    earlyExitDeductionAmount,
-    totalDeductionAmount,
+    payrollDivisor: divisorUsed || staff.payrollDivisor,
+    effectiveDailyBase: effectiveDailyBase.toNumber(),
+    lateDeductionAmount: lateDeductionAmount.toNumber(),
+    earlyExitDeductionAmount: earlyExitDeductionAmount.toNumber(),
+    totalDeductionAmount: totalDeductionAmount.toNumber(),
     combinationPolicy: policy,
     notes,
   };

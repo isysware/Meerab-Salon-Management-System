@@ -1553,6 +1553,15 @@ export interface CreateLeaveInput {
   endDate: string;
   type: 'PAID' | 'UNPAID';
   reason: string;
+  allowOverride?: boolean;
+}
+
+export interface LeaveAllowanceSummary {
+  isConfigured: boolean;
+  allowedDays: number;
+  period: 'MONTHLY' | 'YEARLY';
+  usedDays: number;
+  remainingDays: number;
 }
 
 export interface CSVAttendanceImportRow {
@@ -1674,7 +1683,9 @@ export interface PayrollPayment {
 
 export interface PayslipCalculationDetails {
   formula: string;
-  divisorUsed: number;
+  divisorUsed?: number;
+  divisorRule?: string;
+  monthlyCalculationVersion?: number;
   prorationApplied?: boolean;
   prorationFormula?: string;
   prorationDays?: number;
@@ -1732,6 +1743,12 @@ export interface PayslipRecord {
   exitDate?: string;
   paidHolidayDays?: number;
   paidWeeklyOffDays?: number;
+  holidayDays?: number;
+  weeklyOffDays?: number;
+  workedWeeklyOffDays?: number;
+  workedHolidayDays?: number;
+  workedDayEquivalents?: number;
+  approvedOvertimeHours?: number;
   holidayEarnings?: number;
   attendanceImpact?: number;
   allowanceLines?: { id: string; name: string; amount: number }[];
@@ -1910,6 +1927,17 @@ export interface StaffSalaryReportRow {
   branchId: string;
   branchName?: string;
   compensationType: CompensationType;
+  presentDays?: number;
+  absentDays?: number;
+  paidLeaveDays?: number;
+  unpaidLeaveDays?: number;
+  holidayDays?: number;
+  weeklyOffDays?: number;
+  paidHolidayDays?: number;
+  paidWeeklyOffDays?: number;
+  workedWeeklyOffDays?: number;
+  workedHolidayDays?: number;
+  overtimeHours?: number;
   basic: number;
   attendance: number;
   overtime: number;
@@ -1929,6 +1957,7 @@ export interface StaffSalaryReportRow {
 }
 
 export interface StaffSalaryReportTotals {
+  presentDays?: number; absentDays?: number; paidLeaveDays?: number; unpaidLeaveDays?: number; holidayDays?: number; weeklyOffDays?: number; overtimeHours?: number;
   basic: number; attendance: number; overtime: number; allowances: number; deductions: number;
   advanceRecovery: number; gross: number; net: number; paid: number; outstanding: number;
 }

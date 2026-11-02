@@ -12,7 +12,7 @@ import { round2, toDec } from '../../lib/money.js';
 import { nextSequence, nextPeriodSequence } from '../../lib/sequence.js';
 import { num, opt, iso } from '../../lib/dto.js';
 import { evaluateEmployeePayroll, getCalendarDaysInMonth, getDatesInRange, resolveTermsAt } from '../../lib/calculations/payrollCalculations.js';
-import { advanceBalance, loadPayrollExtras, lockPayrollExtras, releasePayrollExtras } from './payroll.extras.service.js';
+import { advanceBalance, loadPayrollExtras, lockPayrollExtras, releasePayrollExtras, releasePayrollExtrasForStaff } from './payroll.extras.service.js';
 import { payoutMoney, reverseMoney } from '../cash/cash.service.js';
 import { getPayrollPolicy } from '../settings/settings.service.js';
 import { toStaffDTO } from '../staff/staff.mapper.js';
@@ -38,20 +38,29 @@ export const toPaymentDTO = (p) => ({
 const toPayslipDTO = (ps, run) => {
   const completed = (ps.payments ?? []).filter((p) => p.status === 'COMPLETED');
   const salaryPaid = completedAmount(completed);
-  const paid = round2(completed.reduce((s, p) => s.plus(p.amount).plus(p.commissionAmount ?? 0), toDec(0)));
-  const commission = toDec(ps.snapshot.commissionPayable ?? 0);
-  const net = toDec(ps.netPayable).plus(commission);
+  // Preserve legacy finalized payments if commission was historically paid in payroll
+  const legacyCommissionPaid = completed.reduce((s, p) => s.plus(p.commissionAmount ?? 0), toDec(0));
+  const hasLegacyCommission = legacyCommissionPaid.greaterThan(0);
+
+  const paid = hasLegacyCommission
+    ? round2(completed.reduce((s, p) => s.plus(p.amount).plus(p.commissionAmount ?? 0), toDec(0)))
+    : salaryPaid;
+  const commission = hasLegacyCommission ? toDec(ps.snapshot.commissionPayable ?? 0) : toDec(0);
+  const net = hasLegacyCommission ? toDec(ps.netPayable).plus(commission) : toDec(ps.netPayable);
   const outstanding = round2(net.minus(paid));
   const status = run.status === 'DRAFT' || run.status === 'CANCELLED' ? run.status
     : outstanding.lessThanOrEqualTo(0) && net.greaterThan(0) ? 'PAID' : paid.greaterThan(0) ? 'PARTIALLY_PAID' : 'FINALIZED';
   const snapshot = ps.snapshot;
   const money = (value) => num(value ?? 0).toLocaleString();
-  const formula = `Base (Rs. ${money(snapshot.baseEarnings)}) + Paid Leave/Holidays (Rs. ${money((snapshot.leaveEarnings ?? 0) + (snapshot.holidayEarnings ?? 0))}) + OT (Rs. ${money(snapshot.approvedOvertimeAmount)}) + Allowances (Rs. ${money(snapshot.allowancesTotal)}) + Commission (Rs. ${money(commission)}) - Deductions (Rs. ${money((snapshot.absenceDeductions ?? 0) + (snapshot.attendancePenaltyDeductions ?? 0) + (snapshot.otherDeductions ?? 0))}) - Loan (Rs. ${money(snapshot.advanceRecoveryAmount)}) = Net Payable (Rs. ${money(net)})`;
+  const formula = hasLegacyCommission
+    ? `Base (Rs. ${money(snapshot.baseEarnings)}) + Paid Leave/Holidays (Rs. ${money((snapshot.leaveEarnings ?? 0) + (snapshot.holidayEarnings ?? 0))}) + OT (Rs. ${money(snapshot.approvedOvertimeAmount)}) + Allowances (Rs. ${money(snapshot.allowancesTotal)}) + Legacy Commission (Rs. ${money(commission)}) - Deductions (Rs. ${money((snapshot.absenceDeductions ?? 0) + (snapshot.attendancePenaltyDeductions ?? 0) + (snapshot.otherDeductions ?? 0))}) - Loan (Rs. ${money(snapshot.advanceRecoveryAmount)}) = Net Payable (Rs. ${money(net)})`
+    : (snapshot.calculationDetails?.formula || `Base (Rs. ${money(snapshot.baseEarnings)}) + Paid Leave/Holidays (Rs. ${money((snapshot.leaveEarnings ?? 0) + (snapshot.holidayEarnings ?? 0))}) + OT (Rs. ${money(snapshot.approvedOvertimeAmount)}) + Allowances (Rs. ${money(snapshot.allowancesTotal)}) - Deductions (Rs. ${money((snapshot.absenceDeductions ?? 0) + (snapshot.attendancePenaltyDeductions ?? 0) + (snapshot.otherDeductions ?? 0))}) - Loan (Rs. ${money(snapshot.advanceRecoveryAmount)}) = Net Payable (Rs. ${money(net)})`);
+
   return {
     ...ps.snapshot, id: ps.id, payrollRunId: ps.runId, payslipNumber: ps.payslipNumber, netPayable: net.toNumber(),
     salaryNetPayable: num(ps.netPayable), salaryPaidAmount: salaryPaid.toNumber(), commissionPayable: commission.toNumber(), combinedNetPayable: net.toNumber(),
     paidAmount: paid.toNumber(), outstandingAmount: outstanding.toNumber(), status,
-    calculationDetails: { ...snapshot.calculationDetails, formula: snapshot.calculationDetails?.monthlyCalculationVersion === 2 ? `${snapshot.calculationDetails.formula}; Commission (Rs. ${money(commission)}); Combined Net (Rs. ${money(net)})` : formula },
+    calculationDetails: { ...snapshot.calculationDetails, formula },
     payments: (ps.payments ?? []).sort((a, b) => a.paidAt - b.paidAt).map(toPaymentDTO),
   };
 };
@@ -262,7 +271,7 @@ export const generatePreview = async (actor, { branchId: requested, month: reqMo
     });
     if (!results.length) throw badRequest('NO_ELIGIBLE_STAFF', 'No employees match this payroll period and compensation type.');
 
-    const commissions = await payrollCommission(tx, actor, branchId, month, results.filter((r) => combinedContract(r.payslip.compensationType)).map((r) => r.staff.id), false, { startDate: effStartDate, endDate: effEndDate });
+    // Salary does not include commission; commission is managed separately via Commission page.
     // Replace only an equivalent draft; preserve drafts for other employees, types and periods.
     await tx.payrollRun.deleteMany({ where: { branchId, month, status: 'DRAFT', AND: [
       { policySnapshot: { path: ['startDate'], equals: effStartDate } },
@@ -289,8 +298,8 @@ export const generatePreview = async (actor, { branchId: requested, month: reqMo
         generatedByName: actor.name,
         payslips: {
           create: results.map((r) => ({
-            staffId: r.staff.id, snapshot: { ...r.payslip, commissionPayable: commissions.get(r.staff.id)?.amount ?? 0, canFinalize: r.canFinalize, blockReason: r.blockReason },
-            netPayable: round2(r.payslip.netPayable), grossPayable: round2(r.payslip.grossPayable),
+            staffId: r.staff.id, snapshot: { ...r.payslip, commissionPayable: 0, canFinalize: r.canFinalize, blockReason: r.blockReason },
+            netPayable: toDec(r.payslip.netPayable), grossPayable: toDec(r.payslip.grossPayable),
           })),
         },
       },
@@ -345,22 +354,17 @@ export const finalizeRun = async (actor, runId) => {
       }
     }
 
-    const commissions = await payrollCommission(tx, actor, draft.branchId, draft.month, results.filter((r) => combinedContract(r.payslip.compensationType)).map((r) => r.staff.id), true, { ...draft.policySnapshot, startDate: actualStart, endDate: actualEnd });
+    // Salary does not include commission; commission is managed separately via Commission page.
 
     const branch = await tx.branch.findUnique({ where: { id: draft.branchId } });
     await tx.payslip.deleteMany({ where: { runId } });
     for (const r of results) {
-      const commission = commissions.get(r.staff.id) ?? { amount: 0, statements: [] };
       const payslip = await tx.payslip.create({
         data: {
           runId, staffId: r.staff.id, payslipNumber: await nextPeriodSequence(tx, branch.code, 'PS', draft.month),
-          snapshot: { ...r.payslip, commissionPayable: commission.amount, commissionLinks: commission.statements, canFinalize: true, blockReason: undefined }, netPayable: round2(r.payslip.netPayable), grossPayable: round2(r.payslip.grossPayable),
+          snapshot: { ...r.payslip, commissionPayable: 0, commissionLinks: [], canFinalize: true, blockReason: undefined }, netPayable: toDec(r.payslip.netPayable), grossPayable: toDec(r.payslip.grossPayable),
         },
       });
-      if (commission.statements.length) {
-        const linked = await tx.commissionStatement.updateMany({ where: { id: { in: commission.statements.map((s) => s.id) }, payrollPayslipId: null }, data: { payrollPayslipId: payslip.id } });
-        if (linked.count !== commission.statements.length) throw conflict('COMMISSION_ALREADY_LINKED', 'Commission is already linked to another payroll.');
-      }
       // Lock the overtime consumed by this payslip so it can never be paid twice.
       if (r.payslip.consumedOvertimeIds?.length) {
         const claimed = await tx.overtimeRecord.updateMany({ where: { id: { in: r.payslip.consumedOvertimeIds }, status: 'APPROVED', payrollRunId: null }, data: { payrollRunId: runId } });
@@ -391,6 +395,89 @@ export const finalizeRun = async (actor, runId) => {
     });
     await auditLog(tx, { userId: actor.id, userName: actor.name, action: 'PAYROLL_FINALIZED', entity: 'PayrollRun', entityId: runId, branchId: draft.branchId, after: { month: draft.month } });
     return runDTO(tx, runId);
+  });
+};
+
+export const cancelPayslip = async (actor, payslipId, reason) => {
+  noAccountant(actor);
+  return prisma.$transaction(async (tx) => {
+    const ps = await tx.payslip.findUnique({
+      where: { id: payslipId },
+      include: {
+        run: { include: { payslips: true, payments: true } },
+        payments: true,
+      },
+    });
+    if (!ps) throw notFound('PAYSLIP_NOT_FOUND', `Payslip '${payslipId}' not found.`);
+    assertBranchAccess(actor, ps.run.branchId, 'Access Denied: Cannot cancel payslip for another branch.');
+    if (ps.run.status === 'CANCELLED') throw conflict('ALREADY_CANCELLED', 'The payroll run containing this payslip is already cancelled.');
+
+    if (ps.payments.some((p) => p.status === 'COMPLETED')) {
+      throw conflict('HAS_PAYMENTS', `Cannot delete salary for ${ps.snapshot?.staffName || 'this staff'} because it has completed payments. Please reverse payments first.`);
+    }
+
+    // 1. Release overtime locked by this payslip
+    if (ps.snapshot?.consumedOvertimeIds?.length) {
+      await tx.overtimeRecord.updateMany({
+        where: { id: { in: ps.snapshot.consumedOvertimeIds }, payrollRunId: ps.runId },
+        data: { payrollRunId: null },
+      });
+    }
+    await tx.overtimeRecord.updateMany({
+      where: { payrollRunId: ps.runId, staffId: ps.staffId },
+      data: { payrollRunId: null },
+    });
+
+    // 2. Release payroll adjustments & advance recoveries for this staff only
+    await releasePayrollExtrasForStaff(tx, ps.runId, ps.staffId);
+
+    // 3. Release commission links if any
+    const createdIds = (ps.snapshot?.commissionLinks ?? []).filter((s) => s.createdByPayroll).map((s) => s.id);
+    if (createdIds.length) {
+      const created = await tx.commissionStatement.findMany({ where: { id: { in: createdIds } }, select: { runId: true } });
+      const commissionRunIds = [...new Set(created.map((s) => s.runId))];
+      await tx.commissionStatement.updateMany({ where: { payrollPayslipId: ps.id }, data: { payrollPayslipId: null } });
+      await tx.commissionEvent.updateMany({ where: { consumedByRunId: { in: commissionRunIds } }, data: { consumedByRunId: null } });
+      await tx.commissionRun.updateMany({
+        where: { id: { in: commissionRunIds } },
+        data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledByUserId: actor.id, cancelledByName: actor.name, cancellationReason: reason },
+      });
+    }
+
+    // 4. Audit log
+    await auditLog(tx, {
+      userId: actor.id,
+      userName: actor.name,
+      action: 'PAYSLIP_DELETED',
+      entity: 'Payslip',
+      entityId: ps.id,
+      branchId: ps.run.branchId,
+      after: { staffId: ps.staffId, staffName: ps.snapshot?.staffName, reason },
+    });
+
+    // 5. Clean up reversed payments on this payslip if any
+    await tx.payrollPayment.deleteMany({ where: { payslipId: ps.id } });
+
+    // 6. Delete the payslip record
+    await tx.payslip.delete({ where: { id: ps.id } });
+
+    // 7. Check if any payslips remain in this run
+    const remainingCount = ps.run.payslips.length - 1;
+    if (remainingCount <= 0) {
+      await tx.payrollRun.update({
+        where: { id: ps.runId },
+        data: {
+          status: 'CANCELLED',
+          cancellationReason: reason || 'All staff payslips cancelled',
+          cancelledAt: new Date(),
+          cancelledByUserId: actor.id,
+          cancelledByName: actor.name,
+        },
+      });
+      return { deletedPayslipId: ps.id, runCancelled: true, runId: ps.runId };
+    }
+
+    return { deletedPayslipId: ps.id, runCancelled: false, run: await runDTO(tx, ps.runId) };
   });
 };
 
@@ -452,11 +539,10 @@ export const recordPayment = async (actor, input) => {
     }
     const branch = await tx.branch.findUnique({ where: { id: run.branchId } });
     const paymentNumber = await nextSequence(tx, branch.code, 'PAYMT', Number((await getBusinessDate(tx)).slice(0, 4)));
-    // Salary first for partial payments. Both ledgers retain their own amounts and movements.
+    // Salary payments strictly pay salary. Commission is paid through Commission page.
     const salaryOutstanding = toDec(ps.netPayable).minus(completedAmount(ps.payments));
     const salaryAmount = amount.lessThan(salaryOutstanding) ? amount : salaryOutstanding;
-    const commissionAmount = round2(amount.minus(salaryAmount));
-    if (commissionAmount.greaterThan(0)) await assertCommissionAvailable(tx, run.branchId, ps.staffId, commissionAmount);
+    const commissionAmount = round2(toDec(0));
     const source = salaryAmount.greaterThan(0) ? await payoutMoney(tx, actor, {
       branchId: run.branchId, method: input.method, onlineAccountId: input.onlineAccountId, amount: salaryAmount, type: 'PAYROLL_PAYOUT',
       sourceModule: 'PAYROLL', sourceId: ps.id, reference: paymentNumber, description: `Salary ${run.month} — ${slip.staffName}`,
