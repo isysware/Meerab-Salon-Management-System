@@ -162,18 +162,21 @@ export const ManualOvertimePage: React.FC = () => {
   }, [filteredRecords]);
 
   const availableStaff = useMemo(() => {
-    if (actionScope.data?.staff && actionScope.data.staff.length > 0) {
+    if (actionScope.branchId && actionScope.data?.staff) {
       return actionScope.data.staff;
     }
-    return staffList;
-  }, [actionScope.data?.staff, staffList]);
+    if (actionScope.branchId) {
+      return staffList.filter((s) => s.branchId === actionScope.branchId);
+    }
+    return user?.role === 'SUPER_ADMIN' ? [] : staffList;
+  }, [actionScope.branchId, actionScope.data?.staff, staffList, user?.role]);
 
   // Auto-select staff member if only one is available
   useEffect(() => {
-    if (showAddModal && !addForm.staffId && availableStaff.length === 1) {
+    if (showAddModal && actionScope.ready && !addForm.staffId && availableStaff.length === 1) {
       setAddForm((prev) => ({ ...prev, staffId: availableStaff[0].id }));
     }
-  }, [showAddModal, availableStaff, addForm.staffId]);
+  }, [showAddModal, actionScope.ready, availableStaff, addForm.staffId]);
 
   // Add form effective hourly rate & amount preview
   const addFormPreview = useMemo(() => {
@@ -213,7 +216,11 @@ export const ManualOvertimePage: React.FC = () => {
         toast.error('Please select an employee in this branch.');
         return;
       }
-      const bId = actionScope.branchId || selectedStaff.branchId || effectiveBranchId;
+      const bId = actionScope.branchId || selectedStaff.branchId;
+      if (!bId || bId === 'ALL') {
+        toast.error('Please select a specific branch.');
+        return;
+      }
       const notes = addForm.isIntentionalAdditional
         ? `${addForm.notes ? addForm.notes + ' | ' : ''}INTENTIONAL_ADDITIONAL`
         : (addForm.notes || undefined);
@@ -825,21 +832,40 @@ export const ManualOvertimePage: React.FC = () => {
             </div>
 
             <form onSubmit={handleAddSubmit} className="p-5 space-y-4">
-              <BranchActionField value={actionScope.branchId} onChange={(id) => { actionScope.setBranchId(id); setAddForm((prev) => ({ ...prev, staffId: '' })); }} />
+              <BranchActionField
+                value={actionScope.branchId}
+                onChange={(id) => {
+                  actionScope.setBranchId(id);
+                  setAddForm((prev) => ({ ...prev, staffId: '' }));
+                }}
+              />
               {actionScope.error && <p role="alert" className="text-xs text-rose-600">{actionScope.error}</p>}
+              {user?.role === 'SUPER_ADMIN' && !actionScope.branchId && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200/80 rounded-xl p-2.5">
+                  Please select a branch above to view and select employees.
+                </p>
+              )}
               <fieldset disabled={!actionScope.ready} className="space-y-4 disabled:opacity-50">
                 <LuxurySelect
                   label="Select Employee *"
                   value={addForm.staffId}
                   onValueChange={(val) => setAddForm({ ...addForm, staffId: val })}
                   options={[
-                    { value: '', label: '-- Choose Staff Member --' },
+                    {
+                      value: '',
+                      label: !actionScope.ready
+                        ? '-- Select a branch first --'
+                        : availableStaff.length === 0
+                        ? '-- No employees found in this branch --'
+                        : '-- Choose Staff Member --',
+                    },
                     ...availableStaff.map((s) => ({
                       value: s.id,
                       label: `${s.name} (${s.employeeCode}) • Rate: Rs. ${(s.overtimeHourlyRate ?? 0).toLocaleString()}/hr`,
                     })),
                   ]}
                   placeholder="-- Choose Staff Member --"
+                  contentClassName="z-[100]"
                 />
 
               <div className="grid grid-cols-2 gap-3">
