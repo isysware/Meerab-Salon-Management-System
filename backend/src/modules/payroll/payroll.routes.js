@@ -31,7 +31,7 @@ router.post('/preview', validate(z.object({
   compensationType: z.enum(['ALL', 'DAILY_SALARY', 'DAILY_PLUS_COMMISSION', 'MONTHLY_SALARY', 'MONTHLY_PLUS_COMMISSION', 'COMMISSION_ONLY']).optional(),
   includeDaily: z.boolean().optional(),
 })), send((req) => s.generatePreview(req.user, req.body), 201));
-router.post('/runs/:id/finalize', send((req) => s.finalizeRun(req.user, req.params.id)));
+router.post('/runs/:id/finalize', send((req) => s.finalizeRun(req.user, req.params.id, req.body)));
 router.post('/runs/:id/cancel', validate(reason), send((req) => s.cancelRun(req.user, req.params.id, req.body.reason)));
 router.post('/payslips/:id/cancel', validate(reason), send((req) => s.cancelPayslip(req.user, req.params.id, req.body.reason)));
 router.delete('/payslips/:id', send((req) => s.cancelPayslip(req.user, req.params.id, req.query.reason || 'Staff salary cancelled')));

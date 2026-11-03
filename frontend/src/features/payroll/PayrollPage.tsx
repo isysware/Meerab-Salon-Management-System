@@ -547,7 +547,7 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
     const targetPs = ps || run.payslips.find((p) => p.outstandingAmount > 0) || run.payslips[0];
     setPaymentTargetPayslip(targetPs);
     setPaymentForm({
-      amount: targetPs ? targetPs.outstandingAmount : 0,
+      amount: targetPs ? Number(targetPs.outstandingAmount.toFixed(2)) : 0,
       method: 'CASH',
       onlineAccountId: onlineAccounts[0]?.id || '',
       reference: `Salary payment for ${targetPs?.staffName || 'staff'} (${selectedMonth})`,
@@ -560,8 +560,9 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
     e.preventDefault();
     if (!paymentTargetRun || !paymentTargetPayslip) return;
 
-    if (paymentForm.amount <= 0 || paymentForm.amount > paymentTargetPayslip.outstandingAmount) {
-      toast.error(`Payment amount must be between 1 and ${paymentTargetPayslip.outstandingAmount.toLocaleString()}`);
+    const maxAllowed = Number(paymentTargetPayslip.outstandingAmount.toFixed(2));
+    if (paymentForm.amount <= 0 || Number(paymentForm.amount.toFixed(2)) > maxAllowed) {
+      toast.error(`Payment amount must be between 0.01 and Rs. ${formatSalaryNumber(paymentTargetPayslip.outstandingAmount)}`);
       return;
     }
 
@@ -638,6 +639,20 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
       await loadData();
     } catch (err: any) {
       toast.error(err.message || 'Failed to apply deduction.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Finalize a single staff member from a Draft Payroll Run
+  const handleFinalizeDraftPayslip = async (runId: string, staffId: string, payslipId: string, staffName: string) => {
+    try {
+      setActionLoading(true);
+      const finalized = await salonService.finalizePayroll(runId, user, { staffId, payslipId });
+      toast.success(`${staffName}'s salary successfully finalized! Moved to Finalized Salary Register.`);
+      await loadData();
+    } catch (err: any) {
+      toast.error(err.message || `Failed to finalize ${staffName}'s salary.`);
     } finally {
       setActionLoading(false);
     }
@@ -1473,9 +1488,9 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                             <div className="flex items-center justify-center gap-1.5">
                               <button
                                 type="button"
-                                onClick={() => handleFinalizeDraftRun(run.id)}
+                                onClick={() => handleFinalizeDraftPayslip(run.id, p.staffId, p.id, p.staffName)}
                                 disabled={actionLoading || p.canFinalize === false}
-                                title={p.canFinalize === false ? (p.blockReason || 'Cannot finalize payroll run') : 'Finalize payroll run'}
+                                title={p.canFinalize === false ? (p.blockReason || 'Cannot finalize payroll') : `Finalize ${p.staffName}'s salary`}
                                 className={`px-3 py-1 text-white text-xs font-semibold rounded-xl shadow-2xs transition-all whitespace-nowrap flex items-center gap-1 ${
                                   p.canFinalize === false
                                     ? 'bg-slate-300 cursor-not-allowed text-slate-500'
@@ -2274,8 +2289,9 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                 <label className="block text-slate-600 font-medium mb-1">Payment Amount (Rs.)</label>
                 <input
                   type="number"
-                  min="1"
-                  max={paymentTargetPayslip.outstandingAmount}
+                  min="0.01"
+                  step="any"
+                  max={Number(paymentTargetPayslip.outstandingAmount.toFixed(2))}
                   value={paymentForm.amount}
                   onChange={(e) => setPaymentForm({ ...paymentForm, amount: Number(e.target.value) })}
                   className="w-full border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold focus:ring-2 focus:ring-indigo-500"
@@ -2423,8 +2439,9 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                 </div>
                 <input
                   type="number"
-                  min="1"
-                  max={deductionTargetPayslip.outstandingAmount}
+                  min="0.01"
+                  step="any"
+                  max={Number(deductionTargetPayslip.outstandingAmount.toFixed(2))}
                   value={deductionForm.amount || ''}
                   onChange={(e) => setDeductionForm({ ...deductionForm, amount: Number(e.target.value) })}
                   placeholder="e.g. 500"

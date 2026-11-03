@@ -7281,7 +7281,7 @@ class MockSalonService implements SalonServiceContract {
     return draftRun;
   }
 
-  async finalizePayroll(payrollRunId: string, actor?: User): Promise<PayrollRun> {
+  async finalizePayroll(payrollRunId: string, actor?: User, options?: { staffId?: string; payslipId?: string }): Promise<PayrollRun> {
     const authenticatedActor = this.getAuthenticatedActor(actor);
     if (authenticatedActor.role === 'ACCOUNTANT') {
       throw new Error('Access Denied: Accountants are not authorized to finalize payroll.');

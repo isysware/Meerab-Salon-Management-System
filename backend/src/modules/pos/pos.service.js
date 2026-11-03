@@ -19,6 +19,7 @@ import { consumeStock } from '../../lib/stock.js';
 import { normalizePhoneDigits } from '../../lib/phone.js';
 import { formatMinutesToTime, parseTimeToMinutes } from '../../lib/calculations/attendanceCalculations.js';
 import { isCompensationEligibleForCommission } from '../../lib/calculations/commissionCalculations.js';
+import { allocatePaymentToInvoice } from '../../lib/calculations/collectionAllocation.js';
 import { getActiveDrawer, postCashMovement, postAccountMovement } from '../cash/cash.service.js';
 import { loadBooking, reviseBooking, bookingHistory } from '../bookings/bookings.service.js';
 import { netPayments } from '../bookings/bookings.pricing.js';
@@ -341,7 +342,7 @@ export const postInvoice = async (input, actor, idempotencyKey, request) => {
       },
     });
 
-    // ── Lines (+ package allocation, stock & COGS, commission EARN) ──
+    // ── Lines (+ package/multi-staff allocation, stock & COGS) ──
     for (const [i, d] of drafts.entries()) {
       const lineStaffName = d.c.assignedStaff && d.c.assignedStaff.length > 1
         ? d.c.assignedStaff.map((s) => s.staffName || s.name).filter(Boolean).join(', ')
@@ -355,17 +356,6 @@ export const postInvoice = async (input, actor, idempotencyKey, request) => {
           taxTreatment: d.catalogue.taxTreatment, taxRate: d.taxRate, tax: d.tax, total: round2(d.net.plus(d.tax)),
         },
       });
-      const earn = (staff, attributedNet, componentId) => {
-        if (!staff || staff.id === 'house' || staff.id === 'unassigned' || staff.id === 'none') return null;
-        const rate = commissionRate(staff);
-        if (rate.isZero() || attributedNet.lessThanOrEqualTo(0)) return null;
-        return tx.commissionEvent.create({
-          data: {
-            branchId, staffId: staff.id, invoiceId: invoice.id, invoiceNumber, lineId: line.id, componentId: componentId ?? null,
-            type: 'EARN', attributedNet, rate, amount: round2(attributedNet.times(rate).dividedBy(100)), eventDate: dateOnly(today),
-          },
-        });
-      };
 
       if (d.c.type === 'SERVICE' || d.c.type === 'CUSTOM_SERVICE') {
         const rawAssigned = d.c.assignedStaff && d.c.assignedStaff.length > 0
@@ -391,20 +381,35 @@ export const postInvoice = async (input, actor, idempotencyKey, request) => {
             ? d.net.dividedBy(d.unitPrice.times(d.c.quantity))
             : toDec(1);
 
+          let shares;
           if (hasCustomAllocation) {
-            for (const st of assignedStaffList) {
+            shares = assignedStaffList.map((st) => {
               const customAmount = typeof st.allocatedAmount === 'number' && st.allocatedAmount > 0 ? toDec(st.allocatedAmount) : toDec(0);
-              const staffNet = round2(customAmount.times(discountRatio));
-              await earn(st.staff, staffNet);
-            }
+              return round2(customAmount.times(discountRatio));
+            });
           } else {
-            const shares = splitWithRemainder(d.net, assignedStaffList.map(() => toDec(1)));
-            for (const [si, st] of assignedStaffList.entries()) {
-              await earn(st.staff, shares[si]);
-            }
+            shares = splitWithRemainder(d.net, assignedStaffList.map(() => toDec(1)));
           }
-        } else {
-          await earn(d.staff, d.net);
+
+          for (const [si, st] of assignedStaffList.entries()) {
+            const staffNet = shares[si];
+            const allocPct = d.net.greaterThan(0) ? round2(staffNet.times(100).dividedBy(d.net)) : toDec(0);
+            await tx.invoiceLineComponent.create({
+              data: {
+                lineId: line.id,
+                sortOrder: si,
+                serviceId: d.catalogue.id,
+                serviceCode: d.c.type === 'PRODUCT' ? (d.catalogue.sku || '') : (d.catalogue.code || ''),
+                serviceName: d.catalogue.name,
+                quantity: d.c.quantity,
+                staffId: st.id,
+                staffName: st.name,
+                allocationPercentage: allocPct,
+                allocatedAmount: staffNet,
+                staffCommissionRate: commissionRate(st.staff),
+              },
+            });
+          }
         }
       }
 
@@ -415,84 +420,85 @@ export const postInvoice = async (input, actor, idempotencyKey, request) => {
           for (const [ci, k] of comps.entries()) {
             const assigned = d.c.packageComponents.find(pc => pc.serviceId === k.serviceId);
             const st = requireStaff(assigned?.staffId, k.service.name);
-            const comp = await tx.invoiceLineComponent.create({ data: { lineId: line.id, sortOrder: ci, serviceId: k.serviceId, serviceCode: k.service.code, serviceName: k.service.name,
+            await tx.invoiceLineComponent.create({ data: { lineId: line.id, sortOrder: ci, serviceId: k.serviceId, serviceCode: k.service.code, serviceName: k.service.name,
               quantity: d.c.quantity, staffId: st.id, staffName: st.name, allocationPercentage: k.allocationPercentage, allocatedAmount: shares[ci], staffCommissionRate: commissionRate(st) } });
-            await earn(st, shares[ci], comp.id);
           }
         } else {
-        const rawAssigned = d.c.assignedStaff && d.c.assignedStaff.length > 0
-          ? d.c.assignedStaff.filter((s) => s.staffId && s.staffId !== 'house' && s.staffId !== 'unassigned')
-          : null;
-        const assignedStaffList = rawAssigned && rawAssigned.length > 0
-          ? rawAssigned.map((s) => {
-              const staff = requireStaff(s.staffId, d.catalogue.name);
-              return {
-                ...s,
-                id: staff.id,
-                name: staff.name,
-                commissionRate: staff.commissionRate,
-                staff,
-              };
-            })
-          : (d.c.packageComponents?.length && d.c.packageComponents.some((pc) => pc.staffId && pc.staffId !== d.staff.id)
-              ? null
-              : (d.staff && d.staff.id !== 'house' && d.staff.id !== 'unassigned'
-                  ? [{ staffId: d.staff.id, id: d.staff.id, name: d.staff.name, commissionRate: d.staff.commissionRate, staff: d.staff, allocatedAmount: d.net.toNumber() }]
-                  : []));
+          const rawAssigned = d.c.assignedStaff && d.c.assignedStaff.length > 0
+            ? d.c.assignedStaff.filter((s) => s.staffId && s.staffId !== 'house' && s.staffId !== 'unassigned')
+            : null;
+          const assignedStaffList = rawAssigned && rawAssigned.length > 0
+            ? rawAssigned.map((s) => {
+                const staff = requireStaff(s.staffId, d.catalogue.name);
+                return {
+                  ...s,
+                  id: staff.id,
+                  name: staff.name,
+                  commissionRate: staff.commissionRate,
+                  staff,
+                };
+              })
+            : (d.c.packageComponents?.length && d.c.packageComponents.some((pc) => pc.staffId && pc.staffId !== d.staff.id)
+                ? null
+                : (d.staff && d.staff.id !== 'house' && d.staff.id !== 'unassigned'
+                    ? [{ staffId: d.staff.id, id: d.staff.id, name: d.staff.name, commissionRate: d.staff.commissionRate, staff: d.staff, allocatedAmount: d.net.toNumber() }]
+                    : []));
 
-        if (assignedStaffList && assignedStaffList.length > 0) {
-          // Check if custom allocated amounts/shares are specified (e.g. 1000, 500)
-          const hasCustomAllocation = assignedStaffList.some(
-            (s) => typeof s.allocatedAmount === 'number' && s.allocatedAmount > 0
-          );
-          const discountRatio = (d.discount && d.discount.greaterThan(0) && d.unitPrice && d.unitPrice.greaterThan(0))
-            ? d.net.dividedBy(d.unitPrice.times(d.c.quantity))
-            : toDec(1);
+          if (assignedStaffList && assignedStaffList.length > 0) {
+            const hasCustomAllocation = assignedStaffList.some(
+              (s) => typeof s.allocatedAmount === 'number' && s.allocatedAmount > 0
+            );
+            const discountRatio = (d.discount && d.discount.greaterThan(0) && d.unitPrice && d.unitPrice.greaterThan(0))
+              ? d.net.dividedBy(d.unitPrice.times(d.c.quantity))
+              : toDec(1);
 
-          if (hasCustomAllocation) {
-            for (const st of assignedStaffList) {
-              const customAmount = typeof st.allocatedAmount === 'number' && st.allocatedAmount > 0 ? toDec(st.allocatedAmount) : toDec(0);
-              const staffNet = round2(customAmount.times(discountRatio));
-              await earn(st.staff, staffNet);
+            let shares;
+            if (hasCustomAllocation) {
+              shares = assignedStaffList.map((st) => {
+                const customAmount = typeof st.allocatedAmount === 'number' && st.allocatedAmount > 0 ? toDec(st.allocatedAmount) : toDec(0);
+                return round2(customAmount.times(discountRatio));
+              });
+            } else {
+              shares = splitWithRemainder(d.net, assignedStaffList.map(() => toDec(1)));
             }
-          } else {
-            const shares = splitWithRemainder(d.net, assignedStaffList.map(() => toDec(1)));
+
             for (const [si, st] of assignedStaffList.entries()) {
-              await earn(st.staff, shares[si]);
+              const staffNet = shares[si];
+              const allocPct = d.net.greaterThan(0) ? round2(staffNet.times(100).dividedBy(d.net)) : toDec(0);
+              await tx.invoiceLineComponent.create({
+                data: {
+                  lineId: line.id,
+                  sortOrder: si,
+                  serviceId: d.catalogue.id,
+                  serviceCode: d.catalogue.code || '',
+                  serviceName: d.catalogue.name,
+                  quantity: d.c.quantity,
+                  staffId: st.id,
+                  staffName: st.name,
+                  allocationPercentage: allocPct,
+                  allocatedAmount: staffNet,
+                  staffCommissionRate: commissionRate(st.staff),
+                },
+              });
             }
-          }
-
-          const comps = [...d.catalogue.components].sort((a, b) => a.sortOrder - b.sortOrder);
-          for (const [ci, k] of comps.entries()) {
-            await tx.invoiceLineComponent.create({
-              data: {
-                lineId: line.id, sortOrder: ci, serviceId: k.serviceId, serviceCode: k.service.code, serviceName: k.service.name,
-                quantity: k.quantity, staffId: assignedStaffList[0].id, staffName: assignedStaffList.map((s) => s.name).join(', '),
-                allocationPercentage: k.allocationPercentage,
-                allocatedAmount: toDec(0), staffCommissionRate: commissionRate(assignedStaffList[0].staff),
-              },
-            });
-          }
-        } else if (d.c.packageComponents?.length && d.c.packageComponents.some((pc) => pc.staffId && pc.staffId !== d.staff.id)) {
-          // Fallback legacy per-component split
-          const comps = [...d.catalogue.components].sort((a, b) => a.sortOrder - b.sortOrder);
-          const shares = splitWithRemainder(d.net, comps.map((k) => toDec(k.allocationPercentage)));
-          for (const [ci, k] of comps.entries()) {
-            const assigned = d.c.packageComponents?.find((pc) => pc.serviceId === k.serviceId);
-            const staff = assigned ? requireStaff(assigned.staffId, k.service.name) : d.staff;
-            const comp = await tx.invoiceLineComponent.create({
-              data: {
-                lineId: line.id, sortOrder: ci, serviceId: k.serviceId, serviceCode: k.service.code, serviceName: k.service.name,
-                quantity: k.quantity, staffId: staff.id, staffName: staff.name, allocationPercentage: k.allocationPercentage,
-                allocatedAmount: shares[ci], staffCommissionRate: commissionRate(staff),
-              },
-            });
-            await earn(staff, shares[ci], comp.id);
+          } else if (d.c.packageComponents?.length && d.c.packageComponents.some((pc) => pc.staffId && pc.staffId !== d.staff.id)) {
+            // Fallback legacy per-component split
+            const comps = [...d.catalogue.components].sort((a, b) => a.sortOrder - b.sortOrder);
+            const shares = splitWithRemainder(d.net, comps.map((k) => toDec(k.allocationPercentage)));
+            for (const [ci, k] of comps.entries()) {
+              const assigned = d.c.packageComponents?.find((pc) => pc.serviceId === k.serviceId);
+              const staff = assigned ? requireStaff(assigned.staffId, k.service.name) : d.staff;
+              await tx.invoiceLineComponent.create({
+                data: {
+                  lineId: line.id, sortOrder: ci, serviceId: k.serviceId, serviceCode: k.service.code, serviceName: k.service.name,
+                  quantity: k.quantity, staffId: staff.id, staffName: staff.name, allocationPercentage: k.allocationPercentage,
+                  allocatedAmount: shares[ci], staffCommissionRate: commissionRate(staff),
+                },
+              });
+            }
           }
         }
       }
-
-        }
       if (d.c.type === 'PRODUCT') {
         const movements = await consumeStock(tx, {
           itemId: d.catalogue.id, branchId, branchCode: branch.code, quantity: d.c.quantity, businessDate: today,
@@ -530,6 +536,37 @@ export const postInvoice = async (input, actor, idempotencyKey, request) => {
             unallocatedAmount: amounts.tip,
           },
         });
+      }
+    }
+
+    // ── Collection-based Commission EARN ──
+    const initialCollection = round2(billPaid.plus(advanceAdjusted));
+    if (initialCollection.greaterThan(0)) {
+      const freshInvoice = await loadInvoice(tx, invoice.id);
+      const { commissionsToRecord } = allocatePaymentToInvoice({
+        invoice: freshInvoice,
+        paymentAmount: initialCollection,
+        previousBillPaid: 0,
+      });
+
+      for (const comm of commissionsToRecord) {
+        if (comm.staffId && comm.staffId !== 'house' && comm.staffId !== 'unassigned' && toDec(comm.amount).greaterThan(0)) {
+          await tx.commissionEvent.create({
+            data: {
+              branchId,
+              staffId: comm.staffId,
+              invoiceId: invoice.id,
+              invoiceNumber,
+              lineId: comm.lineId,
+              componentId: comm.componentId ?? null,
+              type: 'EARN',
+              attributedNet: comm.attributedNet,
+              rate: comm.rate,
+              amount: comm.amount,
+              eventDate: dateOnly(today),
+            },
+          });
+        }
       }
     }
 
@@ -584,6 +621,9 @@ export const collectPayment = async (input, actor, request) => {
     const today = input.paymentDate || await getBusinessDate(tx);
     const time = clockTime();
     const previousBalance = toDec(invoice.amountDue);
+    const previousBillPaid = invoice.payments
+      .filter((p) => !p.reversedAt)
+      .reduce((s, p) => s.plus(p.billAmountAllocated), toDec(invoice.advanceAdjusted));
     const remaining = round2(previousBalance.minus(collected));
     for (const { p, amounts } of payments) {
       if (amounts.amount.isZero()) continue;
@@ -592,6 +632,32 @@ export const collectPayment = async (input, actor, request) => {
         notes: input.notes || `Outstanding collection received by ${actor.name}`,
       });
       await tx.invoicePayment.update({ where: { id: pay.id }, data: { remainingBalance: remaining } });
+    }
+
+    // ── Incremental Commission Earned on Dues Collection ──
+    const { commissionsToRecord } = allocatePaymentToInvoice({
+      invoice,
+      paymentAmount: collected,
+      previousBillPaid,
+    });
+    for (const comm of commissionsToRecord) {
+      if (comm.staffId && comm.staffId !== 'house' && comm.staffId !== 'unassigned' && toDec(comm.amount).greaterThan(0)) {
+        await tx.commissionEvent.create({
+          data: {
+            branchId: invoice.branchId,
+            staffId: comm.staffId,
+            invoiceId: invoice.id,
+            invoiceNumber: invoice.invoiceNumber,
+            lineId: comm.lineId,
+            componentId: comm.componentId ?? null,
+            type: 'EARN',
+            attributedNet: comm.attributedNet,
+            rate: comm.rate,
+            amount: comm.amount,
+            eventDate: dateOnly(today),
+          },
+        });
+      }
     }
 
     await tx.invoice.update({
@@ -619,6 +685,37 @@ export const reverseCollection = (input, actor, request) => paymentPosting(actor
   const common = { type: 'REVERSAL', direction: 'OUT', amount: payment.amount, sourceModule: 'POS', sourceId: payment.id, reference: invoice.invoiceNumber, description: input.reason, actor, transactionDate: date };
   if (payment.method === 'CASH') await postCashMovement(tx, { ...common, holderId: payment.drawerId });
   else await postAccountMovement(tx, { ...common, accountId: payment.paymentAccountId, branchId: invoice.branchId });
+  const currentBillPaid = invoice.payments
+    .filter((p) => !p.reversedAt)
+    .reduce((s, p) => s.plus(p.billAmountAllocated), toDec(invoice.advanceAdjusted));
+  const billPaidAfterReversal = Decimal.max(0, currentBillPaid.minus(payment.billAmountAllocated));
+
+  // ── Reverse incremental commission earned on this payment ──
+  const { commissionsToRecord } = allocatePaymentToInvoice({
+    invoice,
+    paymentAmount: payment.billAmountAllocated,
+    previousBillPaid: billPaidAfterReversal,
+  });
+  for (const comm of commissionsToRecord) {
+    if (comm.staffId && comm.staffId !== 'house' && comm.staffId !== 'unassigned' && toDec(comm.amount).greaterThan(0)) {
+      await tx.commissionEvent.create({
+        data: {
+          branchId: invoice.branchId,
+          staffId: comm.staffId,
+          invoiceId: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          lineId: comm.lineId,
+          componentId: comm.componentId ?? null,
+          type: 'REVERSAL',
+          attributedNet: comm.attributedNet,
+          rate: comm.rate,
+          amount: comm.amount,
+          eventDate: date,
+        },
+      });
+    }
+  }
+
   await tx.invoicePayment.update({ where: { id: payment.id }, data: { reversedAt: new Date(), reversedById: actor.id, reversedByName: actor.name, reversalReason: input.reason, reversalDate: date } });
   const paid = round2(toDec(invoice.amountPaid).minus(payment.billAmountAllocated));
   const due = round2(toDec(invoice.amountDue).plus(payment.billAmountAllocated));

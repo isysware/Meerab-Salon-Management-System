@@ -45,6 +45,11 @@ function evaluateStaffCommission(staff, startDate, endDate, invoices, consumedLi
     const isDuesOnly = (inv.lineItems || []).length === 0;
     if (isDuesOnly) continue;
     const isVoided = !!(inv.notes && inv.notes.toLowerCase().includes("void"));
+    const collectionRatio = (inv.status === 'UNPAID' || (inv.amountPaid !== undefined && Number(inv.amountPaid || 0) <= 0 && inv.status !== 'PAID'))
+      ? 0
+      : (inv.status === 'PAID' || inv.amountPaid === undefined || !inv.total || Number(inv.total) <= 0)
+      ? 1
+      : Math.min(1, Math.max(0, Number(inv.amountPaid || 0) / Number(inv.total)));
     (inv.lineItems || []).forEach((item, itemIdx) => {
       if (item.type === "SERVICE" && item.staffId === staff.id) {
         const lineKey = item.id || item.lineInstanceId || `idx-${itemIdx}-${item.itemId || "svc"}`;
@@ -57,10 +62,11 @@ function evaluateStaffCommission(staff, startDate, endDate, invoices, consumedLi
         if (!discountAllocation && inv.discount && inv.subtotal > 0) {
           discountAllocation = roundCurrency(lineGross / inv.subtotal * inv.discount);
         }
-        const netServiceSales = typeof item.netSales === "number" ? item.netSales : roundCurrency(lineGross - discountAllocation);
+        const netServiceSalesFull = typeof item.netSales === "number" ? item.netSales : roundCurrency(lineGross - discountAllocation);
+        const netServiceSales = roundCurrency(netServiceSalesFull * collectionRatio);
         const rawRate = typeof item.staffCommissionRate === "number" ? item.staffCommissionRate : typeof item.commissionRate === "number" ? item.commissionRate : staff.commissionRate || 0;
         const effectiveRatePercent = rawRate > 0 && rawRate <= 1 ? roundCurrency(rawRate * 100) : rawRate;
-        const earned = roundCurrency(netServiceSales * (effectiveRatePercent / 100));
+        const earned = roundCurrency((netServiceSalesFull * (effectiveRatePercent / 100)) * collectionRatio);
         if (isVoided) {
           refundAdjustments -= earned;
         } else {
@@ -106,14 +112,15 @@ function evaluateStaffCommission(staff, startDate, endDate, invoices, consumedLi
           const hasCustom = typeof staffEntry?.allocatedAmount === 'number' && staffEntry.allocatedAmount > 0;
           const discountRatio = lineGross > 0 ? netSales / lineGross : 1;
           const staffShareGross = hasCustom ? staffEntry.allocatedAmount : roundCurrency(lineGross / numStaff);
-          const staffShareNet = hasCustom ? roundCurrency(staffEntry.allocatedAmount * discountRatio) : roundCurrency(netSales / numStaff);
-          const staffShareDiscount = roundCurrency(Math.max(0, staffShareGross - staffShareNet));
+          const staffShareNetFull = hasCustom ? roundCurrency(staffEntry.allocatedAmount * discountRatio) : roundCurrency(netSales / numStaff);
+          const staffShareNet = roundCurrency(staffShareNetFull * collectionRatio);
+          const staffShareDiscount = roundCurrency(Math.max(0, staffShareGross - staffShareNetFull));
 
           const rawRate = typeof staffEntry?.staffCommissionRate === 'number'
             ? staffEntry.staffCommissionRate
             : (staff.commissionRate || 0);
           const effectiveRatePercent = rawRate > 0 && rawRate <= 1 ? roundCurrency(rawRate * 100) : rawRate;
-          const earned = roundCurrency(staffShareNet * (effectiveRatePercent / 100));
+          const earned = roundCurrency((staffShareNetFull * (effectiveRatePercent / 100)) * collectionRatio);
 
           const lineKey = item.id || item.lineInstanceId || `idx-${itemIdx}-${item.itemId || 'pkg'}`;
           const attributionId = `${inv.id}-pkg-${lineKey}-${staff.id}`;
@@ -177,7 +184,9 @@ function evaluateStaffCommission(staff, startDate, endDate, invoices, consumedLi
             }
             const rawCompRate = typeof comp.staffCommissionRate === "number" ? comp.staffCommissionRate : typeof comp.commissionRate === "number" ? comp.commissionRate : staff.commissionRate || 0;
             const compRatePercent = rawCompRate > 0 && rawCompRate <= 1 ? roundCurrency(rawCompRate * 100) : rawCompRate;
-            const earned = roundCurrency(allocatedAmount * (compRatePercent / 100));
+            const allocatedAmountFull = allocatedAmount;
+            const earned = roundCurrency((allocatedAmountFull * (compRatePercent / 100)) * collectionRatio);
+            allocatedAmount = roundCurrency(allocatedAmountFull * collectionRatio);
             if (isVoided) {
               refundAdjustments -= earned;
             } else {

@@ -308,19 +308,184 @@ export const generatePreview = async (actor, { branchId: requested, month: reqMo
   });
 };
 
-export const finalizeRun = async (actor, runId) => {
+export const finalizeRun = async (actor, runId, options = {}) => {
   noAccountant(actor);
   return prisma.$transaction(async (tx) => {
     const header = await tx.payrollRun.findUnique({ where: { id: runId } });
     if (!header) throw notFound('PAYROLL_NOT_FOUND', 'Payroll run not found.');
     await lockCommissionBranch(tx, header.branchId);
     await tx.$executeRaw`SELECT 1 FROM "PayrollRun" WHERE id = ${runId} FOR UPDATE`;
-    const draft = await tx.payrollRun.findUnique({ where: { id: runId } });
+    const draft = await tx.payrollRun.findUnique({ where: { id: runId }, include: { payslips: true } });
     if (!draft) throw notFound('PAYROLL_NOT_FOUND', `Payroll run '${runId}' not found. Please generate a preview first.`);
     assertBranchAccess(actor, draft.branchId, 'Access Denied: Cannot finalize payroll for another branch.');
     if (draft.status !== 'DRAFT') throw conflict('NOT_DRAFT', `Payroll run is already in status '${draft.status}' and cannot be finalized.`);
 
-    // Re-evaluate at finalization so the frozen snapshot reflects the latest approved data and period options.
+    const draftPayslips = draft.payslips || [];
+    const targetStaffId = options?.staffId || (options?.payslipId ? draftPayslips.find((p) => p.id === options.payslipId)?.staffId : undefined);
+
+    // ── CASE A: Finalize ONLY a single staff member from the draft ──
+    if (targetStaffId) {
+      const hasStaff = draftPayslips.some((p) => p.staffId === targetStaffId);
+      if (!hasStaff) throw badRequest('STAFF_NOT_IN_DRAFT', 'Selected employee is not part of this draft payroll.');
+
+      const otherStaffPayslips = draftPayslips.filter((p) => p.staffId !== targetStaffId);
+
+      const { policy, results, alreadyFinalizedByStaff, startDate: actualStart, endDate: actualEnd } = await evaluateBranchMonth(
+        tx,
+        actor,
+        draft.branchId,
+        draft.month,
+        targetStaffId,
+        {
+          startDate: draft.policySnapshot?.startDate,
+          endDate: draft.policySnapshot?.endDate,
+          runType: draft.policySnapshot?.runType,
+          compensationType: draft.policySnapshot?.compensationTypeFilter,
+          staffIds: [targetStaffId],
+          includeDaily: draft.policySnapshot?.includeDaily ?? true,
+          excludeRunId: runId,
+        }
+      );
+
+      if (!results.length) throw conflict('NO_ELIGIBLE_STAFF', 'Selected employee is not eligible in this payroll period.');
+      const r = results[0];
+      if (!r.canFinalize) throw conflict('PAYROLL_BLOCKED', `Cannot finalize payroll for ${r.staff.name}: ${r.blockReason}`);
+
+      const alreadyDates = alreadyFinalizedByStaff?.get(r.staff.id);
+      if (alreadyDates) {
+        for (const d of r.payslip.consumedAttendanceDates || []) {
+          if (alreadyDates.has(d)) {
+            throw conflict('DUPLICATE_PAYROLL', `Staff member ${r.staff.name} already has finalized payroll covering date ${d}.`);
+          }
+        }
+      }
+
+      const branch = await tx.branch.findUnique({ where: { id: draft.branchId } });
+
+      if (otherStaffPayslips.length > 0) {
+        // Remove only this staff member from the current draft run
+        await tx.payslip.deleteMany({ where: { runId, staffId: targetStaffId } });
+
+        // Create a new independent FINALIZED run for this staff member
+        const finalizedRunNumber = await nextPeriodSequence(tx, branch.code, 'PAY', draft.month);
+        const newFinalizedRun = await tx.payrollRun.create({
+          data: {
+            branchId: draft.branchId,
+            month: draft.month,
+            status: 'FINALIZED',
+            payrollNumber: finalizedRunNumber,
+            policySnapshot: {
+              ...policy,
+              startDate: actualStart,
+              endDate: actualEnd,
+              runType: draft.policySnapshot?.runType,
+              compensationTypeFilter: draft.policySnapshot?.compensationTypeFilter,
+              staffIdFilter: targetStaffId,
+              staffIdsFilter: [targetStaffId],
+              includeDaily: draft.policySnapshot?.includeDaily,
+            },
+            generatedByUserId: draft.generatedByUserId,
+            generatedByName: draft.generatedByName,
+            finalizedAt: new Date(),
+            finalizedByUserId: actor.id,
+            finalizedByName: actor.name,
+          },
+        });
+
+        await tx.payslip.create({
+          data: {
+            runId: newFinalizedRun.id,
+            staffId: r.staff.id,
+            payslipNumber: await nextPeriodSequence(tx, branch.code, 'PS', draft.month),
+            snapshot: { ...r.payslip, commissionPayable: 0, commissionLinks: [], canFinalize: true, blockReason: undefined },
+            netPayable: toDec(r.payslip.netPayable),
+            grossPayable: toDec(r.payslip.grossPayable),
+          },
+        });
+
+        if (r.payslip.consumedOvertimeIds?.length) {
+          const claimed = await tx.overtimeRecord.updateMany({
+            where: { id: { in: r.payslip.consumedOvertimeIds }, status: 'APPROVED', payrollRunId: null },
+            data: { payrollRunId: newFinalizedRun.id },
+          });
+          if (claimed.count !== r.payslip.consumedOvertimeIds.length) {
+            throw conflict('OVERTIME_ALREADY_CONSUMED', 'Approved overtime changed or was reserved by another payroll. Regenerate payroll.');
+          }
+        }
+
+        await lockPayrollExtras(tx, newFinalizedRun.id, draft.month, r.payslip);
+        await auditLog(tx, {
+          userId: actor.id,
+          userName: actor.name,
+          action: 'PAYROLL_FINALIZED',
+          entity: 'PayrollRun',
+          entityId: newFinalizedRun.id,
+          branchId: draft.branchId,
+          after: { month: draft.month, staffId: targetStaffId, staffName: r.staff.name },
+        });
+
+        return runDTO(tx, newFinalizedRun.id);
+      } else {
+        // This staff is the only one in the draft, finalize this run directly
+        await tx.payslip.deleteMany({ where: { runId } });
+        await tx.payslip.create({
+          data: {
+            runId,
+            staffId: r.staff.id,
+            payslipNumber: await nextPeriodSequence(tx, branch.code, 'PS', draft.month),
+            snapshot: { ...r.payslip, commissionPayable: 0, commissionLinks: [], canFinalize: true, blockReason: undefined },
+            netPayable: toDec(r.payslip.netPayable),
+            grossPayable: toDec(r.payslip.grossPayable),
+          },
+        });
+
+        if (r.payslip.consumedOvertimeIds?.length) {
+          const claimed = await tx.overtimeRecord.updateMany({
+            where: { id: { in: r.payslip.consumedOvertimeIds }, status: 'APPROVED', payrollRunId: null },
+            data: { payrollRunId: runId },
+          });
+          if (claimed.count !== r.payslip.consumedOvertimeIds.length) {
+            throw conflict('OVERTIME_ALREADY_CONSUMED', 'Approved overtime changed or was reserved by another payroll. Regenerate payroll.');
+          }
+        }
+
+        await lockPayrollExtras(tx, runId, draft.month, r.payslip);
+        await tx.payrollRun.update({
+          where: { id: runId },
+          data: {
+            status: 'FINALIZED',
+            payrollNumber: await nextPeriodSequence(tx, branch.code, 'PAY', draft.month),
+            policySnapshot: {
+              ...policy,
+              startDate: actualStart,
+              endDate: actualEnd,
+              runType: draft.policySnapshot?.runType,
+              compensationTypeFilter: draft.policySnapshot?.compensationTypeFilter,
+              staffIdFilter: targetStaffId,
+              staffIdsFilter: [targetStaffId],
+              includeDaily: draft.policySnapshot?.includeDaily,
+            },
+            finalizedAt: new Date(),
+            finalizedByUserId: actor.id,
+            finalizedByName: actor.name,
+          },
+        });
+
+        await auditLog(tx, {
+          userId: actor.id,
+          userName: actor.name,
+          action: 'PAYROLL_FINALIZED',
+          entity: 'PayrollRun',
+          entityId: runId,
+          branchId: draft.branchId,
+          after: { month: draft.month, staffId: targetStaffId, staffName: r.staff.name },
+        });
+
+        return runDTO(tx, runId);
+      }
+    }
+
+    // ── CASE B: Bulk Finalize ALL staff in this draft run ──
     const { policy, results, alreadyFinalizedByStaff, startDate: actualStart, endDate: actualEnd } = await evaluateBranchMonth(
       tx,
       actor,
@@ -342,7 +507,6 @@ export const finalizeRun = async (actor, runId) => {
     const blocked = results.find((r) => !r.canFinalize);
     if (blocked) throw conflict('PAYROLL_BLOCKED', `Cannot finalize payroll: ${blocked.blockReason}`);
 
-    // Verify duplicate attendance prevention across finalized runs
     for (const r of results) {
       const alreadyDates = alreadyFinalizedByStaff?.get(r.staff.id);
       if (alreadyDates) {
@@ -354,23 +518,19 @@ export const finalizeRun = async (actor, runId) => {
       }
     }
 
-    // Salary does not include commission; commission is managed separately via Commission page.
-
     const branch = await tx.branch.findUnique({ where: { id: draft.branchId } });
     await tx.payslip.deleteMany({ where: { runId } });
     for (const r of results) {
-      const payslip = await tx.payslip.create({
+      await tx.payslip.create({
         data: {
           runId, staffId: r.staff.id, payslipNumber: await nextPeriodSequence(tx, branch.code, 'PS', draft.month),
           snapshot: { ...r.payslip, commissionPayable: 0, commissionLinks: [], canFinalize: true, blockReason: undefined }, netPayable: toDec(r.payslip.netPayable), grossPayable: toDec(r.payslip.grossPayable),
         },
       });
-      // Lock the overtime consumed by this payslip so it can never be paid twice.
       if (r.payslip.consumedOvertimeIds?.length) {
         const claimed = await tx.overtimeRecord.updateMany({ where: { id: { in: r.payslip.consumedOvertimeIds }, status: 'APPROVED', payrollRunId: null }, data: { payrollRunId: runId } });
         if (claimed.count !== r.payslip.consumedOvertimeIds.length) throw conflict('OVERTIME_ALREADY_CONSUMED', 'Approved overtime changed or was reserved by another payroll. Regenerate payroll.');
       }
-      // Freeze one-off adjustments and book advance recoveries against this run.
       await lockPayrollExtras(tx, runId, draft.month, r.payslip);
     }
     await tx.payrollRun.update({

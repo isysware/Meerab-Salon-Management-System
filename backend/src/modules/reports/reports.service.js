@@ -12,6 +12,7 @@ import { max0, round2, toDec } from '../../lib/money.js';
 import { listAppointments } from '../appointments/appointments.service.js';
 import { inventorySummary } from '../inventory/inventory.service.js';
 import { resolveReportContext, formatReportResponse } from '../../lib/reportRange.js';
+import { allocatePaymentToInvoice } from '../../lib/calculations/collectionAllocation.js';
 
 const n = (d) => round2(d ?? 0).toNumber();
 const range = (startDate, endDate) => ({ gte: dateOnly(startDate), lte: dateOnly(endDate) });
@@ -612,7 +613,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   const utcRange = { gte: ctx.fromDate, lte: ctx.toDate };
   const branchFilter = ctx.branchId ? { branchId: ctx.branchId } : {};
 
-  const [branches, staffMembers, users, invoices, refunds, expenses, payrollRuns, commissionEvents, inventoryLosses, retailCogsAgg, consumableUsageAgg, returnedCogsAgg] = await Promise.all([
+  const [branches, staffMembers, users, invoices, duesPayments, refunds, expenses, payrollRuns, commissionEvents, inventoryLosses, retailCogsAgg, consumableUsageAgg, returnedCogsAgg] = await Promise.all([
     prisma.branch.findMany({ select: { id: true, name: true, city: true } }),
     prisma.staff.findMany({ select: { id: true, name: true, employeeCode: true, branchId: true } }),
     prisma.user.findMany({ select: { id: true, name: true, role: true, branchId: true } }),
@@ -634,15 +635,64 @@ export const incomeExpenseReport = async (actor, query = {}) => {
         subtotal: true,
         discount: true,
         netSales: true,
+        tax: true,
         total: true,
         amountPaid: true,
         amountDue: true,
+        advanceAdjusted: true,
         paymentMethod: true,
         status: true,
         lifecycle: true,
         processedByName: true,
         notes: true,
+        lines: {
+          select: {
+            id: true,
+            type: true,
+            netSales: true,
+            tax: true,
+            staffId: true,
+            staffName: true,
+            staffCommissionRate: true,
+            components: true,
+          },
+        },
         payments: { where: { reversedAt: null }, select: { kind: true, billAmountAllocated: true } },
+      },
+    }),
+    // Dues collections received during this reporting period
+    prisma.invoicePayment.findMany({
+      where: {
+        kind: 'DUES_COLLECTION',
+        reversedAt: null,
+        date: dateRange,
+        invoice: {
+          ...(ctx.branchId ? { branchId: ctx.branchId } : {}),
+          ...(actor.role === 'ACCOUNTANT' ? { processedByUserId: actor.id } : {}),
+        },
+      },
+      include: {
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            date: true,
+            branchId: true,
+            clientName: true,
+            subtotal: true,
+            discount: true,
+            netSales: true,
+            tax: true,
+            total: true,
+            advanceAdjusted: true,
+            lines: { select: { id: true, type: true, netSales: true, tax: true, staffId: true, staffName: true, staffCommissionRate: true, components: true } },
+            payments: {
+              where: { reversedAt: null },
+              orderBy: { createdAt: 'asc' },
+              select: { id: true, billAmountAllocated: true, createdAt: true },
+            },
+          },
+        },
       },
     }),
     // 2. Sales Refunds (Dated Reversal Events reducing recognized income)
@@ -801,11 +851,16 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   // Build unified item rows
   const rawRows = [];
 
-  // Invoices -> Recognized Income
+  // Invoices -> Collection-Based Operational Income (Excl. Tax) & Accrual Recognized Sales
   for (const inv of invoices) {
     const net = toDec(inv.netSales);
     const due = toDec(inv.amountDue || 0);
-    const paidAmt = round2(inv.payments.reduce((sum, p) => sum.plus(p.billAmountAllocated), toDec(0)));
+    const posPayments = (inv.payments || []).filter((p) => p.kind === 'POS');
+    const posBillCollected = round2(posPayments.reduce((sum, p) => sum.plus(toDec(p.billAmountAllocated)), toDec(inv.advanceAdjusted || 0)));
+    const allocation = allocatePaymentToInvoice({ invoice: inv, paymentAmount: posBillCollected, previousBillPaid: 0 });
+    const collectedNet = allocation.totalCollectedNet;
+    const collectedTax = allocation.totalCollectedTax;
+
     rawRows.push({
       id: `inv-${inv.id}`,
       date: ymd(inv.date),
@@ -817,15 +872,50 @@ export const incomeExpenseReport = async (actor, query = {}) => {
       branchName: branchMap.get(inv.branchId) || 'Branch',
       userOrPayee: inv.processedByName || 'Staff',
       description: `Invoice ${inv.invoiceNumber} - ${inv.clientName || 'Walk-in'} (Gross: ${n(toDec(inv.subtotal))}, Disc: ${n(toDec(inv.discount))})`,
-      income: n(net),
+      income: n(collectedNet),
+      recognizedIncome: n(net),
       expense: 0,
-      paid: n(paidAmt),
-      // Invoice paid is cumulative; collection events contribute separately to cash flow.
-      collectionAmount: n(inv.payments.filter((p) => p.kind === 'POS').reduce((sum, p) => sum.plus(p.billAmountAllocated), toDec(0))),
+      paid: n(posBillCollected),
+      collectionAmount: n(posBillCollected),
+      collectedTax: n(collectedTax),
       discount: n(toDec(inv.discount || 0)),
       remaining: n(due),
       paymentMethod: inv.paymentMethod || 'CASH',
       status: inv.status,
+    });
+  }
+
+  // Dues Collections -> Incremental Collection-Based Income (Excl. Tax)
+  for (const dp of (duesPayments || [])) {
+    if (!dp.invoice) continue;
+    const earlierPayments = (dp.invoice.payments || []).filter((p) => p.createdAt < dp.createdAt && p.id !== dp.id);
+    const prevPaid = earlierPayments.reduce((s, p) => s.plus(toDec(p.billAmountAllocated)), toDec(dp.invoice.advanceAdjusted || 0));
+    const allocation = allocatePaymentToInvoice({ invoice: dp.invoice, paymentAmount: toDec(dp.billAmountAllocated), previousBillPaid: prevPaid });
+    const collectedNet = allocation.totalCollectedNet;
+    const collectedTax = allocation.totalCollectedTax;
+    const billAmt = toDec(dp.billAmountAllocated);
+
+    rawRows.push({
+      id: `due-${dp.id}`,
+      date: ymd(dp.date),
+      type: 'INCOME',
+      category: 'Sales & Services',
+      source: 'POS Dues Collection',
+      reference: dp.invoice.invoiceNumber,
+      branchId: dp.branchId,
+      branchName: branchMap.get(dp.branchId) || 'Branch',
+      userOrPayee: dp.processedByName || 'Staff',
+      description: `Dues Collection for Invoice ${dp.invoice.invoiceNumber} - ${dp.invoice.clientName || 'Customer'} (Net: ${n(collectedNet)}, Tax: ${n(collectedTax)})`,
+      income: n(collectedNet),
+      recognizedIncome: 0,
+      expense: 0,
+      paid: n(billAmt),
+      collectionAmount: n(billAmt),
+      collectedTax: n(collectedTax),
+      discount: 0,
+      remaining: n(toDec(dp.remainingBalance || 0)),
+      paymentMethod: dp.method || 'CASH',
+      status: toDec(dp.remainingBalance || 0).isZero() ? 'PAID' : 'PARTIAL',
     });
   }
 
@@ -1056,7 +1146,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
 
   // Apply filters
   // Settlement events affect custody and liabilities, never recognized income or expense.
-  const movementWhere = { ...branchFilter, createdAt: utcRange, sourceModule: { in: ['POS', 'INVENTORY', 'BOOKING'] }, type: { in: ['DUES_COLLECTION', 'SUPPLIER_PAYMENT', 'REVERSAL', 'BOOKING_ADVANCE', 'BOOKING_REFUND'] }, ...(actor.role === 'ACCOUNTANT' ? { userId: actor.id } : {}) };
+  const movementWhere = { ...branchFilter, createdAt: utcRange, sourceModule: { in: ['POS', 'INVENTORY', 'BOOKING'] }, type: { in: ['SUPPLIER_PAYMENT', 'REVERSAL', 'BOOKING_ADVANCE', 'BOOKING_REFUND'] }, ...(actor.role === 'ACCOUNTANT' ? { userId: actor.id } : {}) };
   const [cashSettlements, onlineSettlements] = await Promise.all([
     prisma.drawerMovement.findMany({ where: movementWhere }),
     prisma.accountMovement.findMany({ where: movementWhere }),
@@ -1132,6 +1222,8 @@ export const incomeExpenseReport = async (actor, query = {}) => {
 
   // Calculate KPIs and Totals across filtered rows
   let totalIncome = toDec(0);
+  let totalRecognizedIncome = toDec(0);
+  let totalCollectedTax = toDec(0);
   let totalDirectExpenses = toDec(0);
   let totalSalaryExpenses = toDec(0);
   let totalCommissionExpenses = toDec(0);
@@ -1147,6 +1239,14 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     const isIncome = r.type === 'INCOME' || (r.income > 0);
     if (r.income) {
       totalIncome = totalIncome.plus(r.income);
+    }
+    if (r.recognizedIncome !== undefined) {
+      totalRecognizedIncome = totalRecognizedIncome.plus(r.recognizedIncome);
+    } else if (r.income && isIncome) {
+      totalRecognizedIncome = totalRecognizedIncome.plus(r.income);
+    }
+    if (r.collectedTax) {
+      totalCollectedTax = totalCollectedTax.plus(r.collectedTax);
     }
     if (r.discount) {
       totalDiscount = totalDiscount.plus(r.discount);
@@ -1201,7 +1301,9 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   const totalRefundsPaid = refunds.reduce((s, r) => s.plus(toDec(r.cashOut || 0)), toDec(0));
 
   const kpis = {
-    totalRecognizedIncome: n(totalIncome),
+    totalCollectedIncome: n(totalIncome),
+    totalRecognizedIncome: n(totalRecognizedIncome),
+    totalCollectedTax: n(totalCollectedTax),
     totalCollections: n(totalCollections),
     cogs: n(totalCogs),
     retailCogs: n(retailCogs),
@@ -1222,6 +1324,9 @@ export const incomeExpenseReport = async (actor, query = {}) => {
 
   const totals = {
     income: n(totalIncome),
+    collectedIncome: n(totalIncome),
+    recognizedIncome: n(totalRecognizedIncome),
+    collectedTax: n(totalCollectedTax),
     cogs: n(totalCogs),
     grossContribution: n(grossContribution),
     expense: n(totalOperatingExpenses),

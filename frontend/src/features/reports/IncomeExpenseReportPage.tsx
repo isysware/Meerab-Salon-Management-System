@@ -570,7 +570,12 @@ export const IncomeExpenseReportPage: React.FC = () => {
                 PKR {formatPKR(totals.income)}
               </span>
               <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Accrual recognized sales
+                Collected revenue (excl. tax)
+                {reportData?.totals?.recognizedIncome && reportData.totals.recognizedIncome !== totals.income ? (
+                  <span className="block text-[10px] text-slate-400 mt-0.5">
+                    Accrual sales: PKR {formatPKR(reportData.totals.recognizedIncome)}
+                  </span>
+                ) : null}
               </span>
             </div>
           </div>
@@ -631,6 +636,11 @@ export const IncomeExpenseReportPage: React.FC = () => {
               </span>
               <span className="text-xs text-[#78616C] font-medium mt-1 block">
                 Net cash & bank payments
+                {reportData?.totals?.collectedTax && reportData.totals.collectedTax > 0 ? (
+                  <span className="block text-[10px] text-blue-500 mt-0.5">
+                    Tax portion: PKR {formatPKR(reportData.totals.collectedTax)}
+                  </span>
+                ) : null}
               </span>
             </div>
           </div>

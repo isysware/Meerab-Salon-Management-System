@@ -12,6 +12,8 @@ export default defineConfig(() => {
       },
     },
     server: {
+      port: 3002,
+      host: '0.0.0.0',
       // Same-origin API in development: /api/* is forwarded to the Express backend, so the
       // httpOnly refresh cookie works without any CORS/cookie configuration.
       proxy: {

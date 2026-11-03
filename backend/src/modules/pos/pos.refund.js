@@ -108,16 +108,53 @@ export const refundInvoice = async (input, actor) => {
       const restock = line.type === 'PRODUCT' ? (r.restock || 'RESALABLE') : 'NONE';
       await tx.refundLine.create({ data: { refundId: refund.id, lineId: line.id, quantity: r.quantity, net, tax, restock } });
 
-      // Commission reversal on the refund date, at the original rate snapshot (spec §4.3).
-      const reverse = (staffId, attributedNet, rate, componentId) =>
-        toDec(rate).isZero() ? null : tx.commissionEvent.create({
-          data: {
-            branchId: invoice.branchId, staffId, invoiceId: invoice.id, invoiceNumber: invoice.invoiceNumber, lineId: line.id,
-            componentId: componentId ?? null, type: 'REVERSAL', attributedNet, rate, eventDate: dateOnly(today),
-            amount: round2(attributedNet.times(rate).dividedBy(100)),
+      // Commission reversal on the refund date, proportioned to actual collection earnings
+      const reverse = async (staffId, attributedNet, rate, componentId) => {
+        if (!staffId || staffId === 'house' || staffId === 'unassigned' || toDec(rate).isZero()) return;
+        const lineEvents = await tx.commissionEvent.findMany({
+          where: {
+            invoiceId: invoice.id,
+            lineId: line.id,
+            staffId,
+            ...(componentId ? { componentId } : {}),
           },
         });
-      if (line.type === 'SERVICE' || line.type === 'CUSTOM_SERVICE') await reverse(line.staffId, net, line.staffCommissionRate);
+        const netEarnedAmount = lineEvents.reduce((s, e) => s.plus(e.type === 'EARN' ? e.amount : -e.amount), toDec(0));
+        const netEarnedAttributed = lineEvents.reduce((s, e) => s.plus(e.type === 'EARN' ? e.attributedNet : -e.attributedNet), toDec(0));
+        if (netEarnedAmount.lessThanOrEqualTo(0)) return;
+
+        const refundRatio = r.quantity.dividedBy(remaining);
+        const amountToReverse = lastUnits ? netEarnedAmount : round2(netEarnedAmount.times(refundRatio));
+        const attributedToReverse = lastUnits ? netEarnedAttributed : round2(netEarnedAttributed.times(refundRatio));
+
+        if (amountToReverse.greaterThan(0)) {
+          await tx.commissionEvent.create({
+            data: {
+              branchId: invoice.branchId,
+              staffId,
+              invoiceId: invoice.id,
+              invoiceNumber: invoice.invoiceNumber,
+              lineId: line.id,
+              componentId: componentId ?? null,
+              type: 'REVERSAL',
+              attributedNet: attributedToReverse,
+              rate,
+              eventDate: dateOnly(today),
+              amount: amountToReverse,
+            },
+          });
+        }
+      };
+
+      if (line.type === 'SERVICE' || line.type === 'CUSTOM_SERVICE') {
+        if (line.components && line.components.length > 0) {
+          for (const c of line.components) {
+            await reverse(c.staffId, c.allocatedAmount, c.staffCommissionRate, c.id);
+          }
+        } else {
+          await reverse(line.staffId, net, line.staffCommissionRate);
+        }
+      }
       if (line.type === 'PACKAGE') {
         const comps = [...line.components].sort((a, b) => a.sortOrder - b.sortOrder);
         const shares = splitWithRemainder(net, comps.map((c) => toDec(c.allocatedAmount)));

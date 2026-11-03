@@ -103,7 +103,7 @@ export const searchClients = async (actor, { branchId, q }) => {
   assertNotStaff(actor);
   const b = resolveReadBranch(actor, branchId);
   if (!b) throw badRequest('BRANCH_REQUIRED', 'Please select a specific branch to search customers.');
-  const query = q.trim();
+  const query = (q || '').trim();
   const digits = query.replace(/\D/g, '');
   const where = {
     branchId: b,

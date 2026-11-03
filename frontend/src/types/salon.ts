@@ -2264,6 +2264,8 @@ export interface IncomeExpenseReportRow {
   userOrPayee: string;
   description: string;
   income: number;
+  recognizedIncome?: number;
+  collectedTax?: number;
   expense: number;
   paid?: number;
   discount?: number;
@@ -2274,7 +2276,9 @@ export interface IncomeExpenseReportRow {
 
 export interface IncomeExpenseReportKPIs {
   totalCollections?: number;
+  totalCollectedIncome?: number;
   totalRecognizedIncome: number;
+  totalCollectedTax?: number;
   cogs?: number;
   grossContribution?: number;
   directExpenses: number;
@@ -2321,6 +2325,9 @@ export interface IncomeExpenseReport {
   totals: {
     collections?: number;
     income: number;
+    collectedIncome?: number;
+    recognizedIncome?: number;
+    collectedTax?: number;
     expense: number;
     paid?: number;
     discount?: number;

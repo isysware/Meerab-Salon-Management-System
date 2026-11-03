@@ -548,7 +548,7 @@ export interface SalonServiceContract {
   getAttendancePolicy(branchId: string): Promise<AttendancePolicyConfig>;
   updateAttendancePolicy(branchId: string, policy: Partial<AttendancePolicyConfig>, actor?: User): Promise<AttendancePolicyConfig>;
   generatePayrollPreview(branchId: string, month: string, staffId?: string, actor?: User, options?: PayrollPreviewOptions): Promise<PayrollRun>;
-  finalizePayroll(payrollRunId: string, actor?: User): Promise<PayrollRun>;
+  finalizePayroll(payrollRunId: string, actor?: User, options?: { staffId?: string; payslipId?: string }): Promise<PayrollRun>;
   recordPayrollPayment(input: RecordPayrollPaymentInput, actor?: User): Promise<{ payrollRun: PayrollRun; payment: PayrollPayment }>;
   cancelPayrollRun(payrollRunId: string, reason: string, actor?: User): Promise<PayrollRun>;
   cancelPayslip(payslipId: string, reason: string, actor?: User): Promise<{ deletedPayslipId: string; runCancelled: boolean; run?: PayrollRun }>;
