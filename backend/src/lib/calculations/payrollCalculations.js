@@ -205,9 +205,10 @@ function evaluateEmployeePayroll(staff, month, policy, attendanceRecords, overti
             if (check.reason?.startsWith('Holiday')) paidHolidayDays++;
             else paidWeeklyOffDays++;
           } else {
-            // Unrecorded period: tracked as absent/unrecorded without salary deduction
+            // Unrecorded period: tracked as absent/unrecorded with deduction
             absentDays++;
             unrecordedDays++;
+            totalAbsenceDeductions = totalAbsenceDeductions.plus(dateRate);
           }
         }
       }
@@ -434,6 +435,9 @@ function evaluateEmployeePayroll(staff, month, policy, attendanceRecords, overti
     canFinalize = false;
     blockReason = `Salary days have already been paid or reserved in an earlier finalized payroll run: ${overlapDates.join(', ')}.`;
   }
+  if (unrecordedDays > 0) {
+    exceptionDetails.push(`${unrecordedDays} unrecorded attendance day(s) in period (${effectiveStartDate} to ${effectiveEndDate}). Missing attendance must be explicitly classified before finalization.`);
+  }
   const hasExceptions = exceptionDetails.length > 0;
   if (hasExceptions) {
     canFinalize = false;
@@ -530,9 +534,13 @@ function evaluateEmployeePayroll(staff, month, policy, attendanceRecords, overti
         monthlyCalculationVersion: 3,
         divisorRule: isMonthly ? `Actual Calendar Days (${totalCalendarDays})` : 'Strict Worked Days',
         divisorUsed: isMonthly ? totalCalendarDays : undefined,
-        payableDays: isMonthly ? payableDays : workedDayEquivalents.toNumber(),
+        payableDays: isMonthly
+          ? Decimal.max(0, d(totalCalendarDays).minus(absentDays + unpaidLeaveDays + halfDayUnpaidDays)).toNumber()
+          : workedDayEquivalents.toNumber(),
         prorationDivisor: isMonthly ? totalCalendarDays : undefined,
-        prorationDays: isMonthly ? payableDays : undefined,
+        prorationDays: isMonthly
+          ? Decimal.max(0, d(totalCalendarDays).minus(absentDays + unpaidLeaveDays + halfDayUnpaidDays)).toNumber()
+          : undefined,
         prorationApplied: isProrated,
         prorationFormula: isMonthly ? prorationFormula : void 0,
         dailyRateUsed: currentDailyRate.toNumber(),

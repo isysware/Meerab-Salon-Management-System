@@ -51,7 +51,17 @@ import { toast } from '../../context/ToastContext';
 // Payslip parts added with allowances/adjustments/advances (absent on older payslips → 0).
 const plusExtras = (p: PayslipRecord) => (p.allowancesTotal ?? 0) + (p.holidayEarnings ?? 0);
 const minusExtras = (p: PayslipRecord) => (p.otherDeductions ?? 0) + (p.advanceRecoveryAmount ?? 0);
-const money = (n: number, sign: '+' | '-') => (n > 0 ? `${sign}Rs. ${n.toLocaleString()}` : '0');
+const money = (n: number, sign: '+' | '-') => (n > 0 ? `${sign}Rs. ${formatSalaryNumber(n)}` : '0');
+const formatSalaryNumber = (num: number | string | undefined | null): string => {
+  if (num === undefined || num === null || num === '') return '0.00';
+  const val = typeof num === 'string' ? parseFloat(num) : num;
+  if (isNaN(val)) return '0.00';
+  const hasSubCents = Math.abs(val * 100 - Math.round(val * 100)) > 0.0001;
+  return val.toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: hasSubCents ? 4 : 2,
+  });
+};
 const BaseExplanation = ({ payslip: p }: { payslip: PayslipRecord }) => (
   <div className="text-[11px] text-slate-500 mt-1 font-normal whitespace-normal min-w-44">
     {p.startDate && <div>Eligible period: {p.startDate}{p.endDate && p.endDate !== p.startDate ? ` to ${p.endDate}` : ''}</div>}
@@ -1417,28 +1427,42 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                             {(p.approvedOvertimeHours ?? (p.approvedOvertimeMinutes ? p.approvedOvertimeMinutes / 60 : 0)).toFixed(1)}h
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums text-slate-700">
-                            {((p.effectiveBaseSalary ?? p.baseEarnings) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatSalaryNumber((p.effectiveBaseSalary ?? p.baseEarnings) || 0)}
                           </td>
                           <td className="py-3.5 px-3 text-right font-mono tabular-nums text-rose-600 font-medium">
                             {(p.lateEarlyDeductions || p.attendancePenaltyDeductions || 0) > 0
-                              ? `-${(p.lateEarlyDeductions || p.attendancePenaltyDeductions || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                              ? `-${formatSalaryNumber(p.lateEarlyDeductions || p.attendancePenaltyDeductions || 0)}`
                               : '0.00'}
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums text-amber-800 font-bold">
-                            {(p.netPayable || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatSalaryNumber(p.netPayable || 0)}
                           </td>
                           <td className="py-3.5 px-3 text-center whitespace-nowrap">
-                            <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-                              DRAFT
-                            </span>
+                            {p.canFinalize === false || p.hasExceptions ? (
+                              <span
+                                className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-rose-50 text-rose-700 border border-rose-200"
+                                title={p.blockReason || (p.exceptionDetails ? p.exceptionDetails.join(' ') : 'Unresolved attendance')}
+                              >
+                                UNRESOLVED
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                                DRAFT
+                              </span>
+                            )}
                           </td>
                           <td className="py-3.5 px-4 text-center whitespace-nowrap">
                             <div className="flex items-center justify-center gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => handleFinalizeDraftRun(run.id)}
-                                disabled={actionLoading}
-                                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl shadow-2xs transition-all whitespace-nowrap cursor-pointer flex items-center gap-1"
+                                disabled={actionLoading || p.canFinalize === false || p.hasExceptions}
+                                title={p.canFinalize === false ? (p.blockReason || 'Cannot finalize: attendance is unresolved') : 'Finalize payroll run'}
+                                className={`px-3 py-1 text-white text-xs font-semibold rounded-xl shadow-2xs transition-all whitespace-nowrap flex items-center gap-1 ${
+                                  p.canFinalize === false || p.hasExceptions
+                                    ? 'bg-slate-300 cursor-not-allowed text-slate-500'
+                                    : 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer'
+                                }`}
                               >
                                 <Lock className="w-3 h-3" />
                                 <span>Finalize</span>
@@ -1574,21 +1598,21 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                             {(p.approvedOvertimeHours ?? (p.approvedOvertimeMinutes ? p.approvedOvertimeMinutes / 60 : 0)).toFixed(1)}h
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums text-slate-700">
-                            {((p.effectiveBaseSalary ?? p.baseEarnings) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatSalaryNumber((p.effectiveBaseSalary ?? p.baseEarnings) || 0)}
                           </td>
                           <td className="py-3.5 px-3 text-right font-mono tabular-nums text-rose-600 font-medium">
                             {(p.lateEarlyDeductions || p.attendancePenaltyDeductions || 0) > 0
-                              ? `-${(p.lateEarlyDeductions || p.attendancePenaltyDeductions || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                              ? `-${formatSalaryNumber(p.lateEarlyDeductions || p.attendancePenaltyDeductions || 0)}`
                               : '0.00'}
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums text-[#B82E69] font-bold">
-                            {(p.netPayable || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatSalaryNumber(p.netPayable || 0)}
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums text-emerald-700 font-medium">
-                            {(p.paidAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatSalaryNumber(p.paidAmount || 0)}
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums text-slate-600">
-                            {(p.advanceRecoveryAmount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {formatSalaryNumber(p.advanceRecoveryAmount || 0)}
                           </td>
                           <td className="py-3.5 px-3 text-center whitespace-nowrap">
                             <span
@@ -1806,23 +1830,23 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                         <td className="py-2.5 px-2 text-center font-mono text-indigo-700">
                           {(p.approvedOvertimeHours ?? (p.approvedOvertimeMinutes ? p.approvedOvertimeMinutes / 60 : 0)).toFixed(1)}h
                         </td>
-                        <td className="py-2.5 px-3 text-right font-medium">Rs. {p.baseEarnings.toLocaleString()}<BaseExplanation payslip={p} /></td>
+                        <td className="py-2.5 px-3 text-right font-medium">Rs. {formatSalaryNumber(p.baseEarnings)}<BaseExplanation payslip={p} /></td>
                         <td className="py-2.5 px-3 text-right text-emerald-600">{money(p.leaveEarnings, '+')}</td>
                         <td className="py-2.5 px-3 text-right text-rose-600">
-                          {p.absenceDeductions > 0 ? `-Rs. ${p.absenceDeductions.toLocaleString()}` : '0'}
+                          {p.absenceDeductions > 0 ? `-Rs. ${formatSalaryNumber(p.absenceDeductions)}` : '0'}
                         </td>
                         <td className="py-2.5 px-3 text-right text-rose-600">
                           {money((p as any).lateEarlyDeductions || p.attendancePenaltyDeductions, '-')}
                         </td>
                         <td className="py-2.5 px-3 text-right text-indigo-600">
-                          {p.approvedOvertimeAmount > 0 ? `+Rs. ${p.approvedOvertimeAmount.toLocaleString()}` : '0'}
+                          {p.approvedOvertimeAmount > 0 ? `+Rs. ${formatSalaryNumber(p.approvedOvertimeAmount)}` : '0'}
                         </td>
                         <td className="py-2.5 px-3 text-right text-emerald-600">{money(plusExtras(p), '+')}</td>
                         
                         <td className="py-2.5 px-3 text-right text-rose-600">{money(p.otherDeductions ?? 0, '-')}</td>
                         <td className="py-2.5 px-3 text-right text-rose-600">{money(p.advanceRecoveryAmount ?? 0, '-')}</td>
                         <td className="py-2.5 px-3 text-right font-bold text-slate-900">
-                          Rs. {p.netPayable.toLocaleString()}
+                          Rs. {formatSalaryNumber(p.netPayable)}
                         </td>
                         <td className="py-2.5 px-3 text-center">
                           {p.canFinalize ? (
@@ -2084,15 +2108,15 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
               <div className="bg-slate-50 p-4 rounded-xl space-y-2">
                 <div className="flex justify-between text-slate-700">
                   <span>Gross Earnings (Base + Leave + Overtime + Allowances):</span>
-                  <span className="font-semibold">Rs. {selectedPayslip.grossPayable.toLocaleString()}</span>
+                  <span className="font-semibold">Rs. {formatSalaryNumber(selectedPayslip.grossPayable)}</span>
                 </div>
                 <div className="flex justify-between text-rose-600">
                   <span>Total Deductions (Absence + Late/Early + Other + Loans):</span>
-                  <span className="font-semibold">-Rs. {selectedPayslip.totalDeductions.toLocaleString()}</span>
+                  <span className="font-semibold">-Rs. {formatSalaryNumber(selectedPayslip.totalDeductions)}</span>
                 </div>
                 <div className="border-t border-slate-200 pt-2 flex justify-between text-sm font-bold text-slate-900">
                   <span>Net Salary Payable:</span>
-                  <span className="text-indigo-600">Rs. {selectedPayslip.netPayable.toLocaleString()}</span>
+                  <span className="text-indigo-600">Rs. {formatSalaryNumber(selectedPayslip.netPayable)}</span>
                 </div>
               </div>
             </div>
@@ -2863,26 +2887,26 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                 {/* Gross Earnings Subtotal */}
                 <div className="flex justify-between py-1.5 border-b-2 border-slate-200 bg-slate-100/70 px-2 rounded font-semibold text-slate-900">
                   <span>Gross Earnings</span>
-                  <span>Rs. {selectedPayslip.grossPayable.toLocaleString()}</span>
+                  <span>Rs. {formatSalaryNumber(selectedPayslip.grossPayable)}</span>
                 </div>
 
                 {/* 3. Itemized Deductions */}
                 {selectedPayslip.absenceDeductions > 0 && (
                   <div className="flex justify-between py-1 border-b border-slate-100 text-rose-600">
                     <span>Absence Deductions ({selectedPayslip.absentDays + (selectedPayslip.unpaidLeaveDays || 0)} days)</span>
-                    <span className="font-semibold">-Rs. {selectedPayslip.absenceDeductions.toLocaleString()}</span>
+                    <span className="font-semibold">-Rs. {formatSalaryNumber(selectedPayslip.absenceDeductions)}</span>
                   </div>
                 )}
                 {((selectedPayslip.lateEarlyDeductions || selectedPayslip.attendancePenaltyDeductions || 0) > 0) && (
                   <div className="flex justify-between py-1 border-b border-slate-100 text-rose-600">
                     <span>Late & Early Attendance Penalties</span>
-                    <span className="font-semibold">-Rs. {(selectedPayslip.lateEarlyDeductions || selectedPayslip.attendancePenaltyDeductions || 0).toLocaleString()}</span>
+                    <span className="font-semibold">-Rs. {formatSalaryNumber(selectedPayslip.lateEarlyDeductions || selectedPayslip.attendancePenaltyDeductions || 0)}</span>
                   </div>
                 )}
                 {(selectedPayslip.adjustments ?? []).filter((a) => a.type === 'DEDUCTION').map((a) => (
                   <div key={a.id} className="flex justify-between py-1 border-b border-slate-100 text-rose-600">
                     <span>{a.title} (deduction)</span>
-                    <span className="font-semibold">-Rs. {a.amount.toLocaleString()}</span>
+                    <span className="font-semibold">-Rs. {formatSalaryNumber(a.amount)}</span>
                   </div>
                 ))}
 
@@ -2892,23 +2916,23 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                     <span>
                       Loan Recovery ({r.advanceNumber}){' '}
                       <span className="text-[10px] text-slate-500 font-normal">
-                        ({selectedPayslip.status === 'DRAFT' ? 'Projected balance' : 'Remaining balance'}: Rs. {r.balanceAfter.toLocaleString()})
+                        ({selectedPayslip.status === 'DRAFT' ? 'Projected balance' : 'Remaining balance'}: Rs. {formatSalaryNumber(r.balanceAfter)})
                       </span>
                     </span>
-                    <span className="font-semibold">-Rs. {r.amount.toLocaleString()}</span>
+                    <span className="font-semibold">-Rs. {formatSalaryNumber(r.amount)}</span>
                   </div>
                 ))}
 
                 {/* Total Deductions Subtotal */}
                 <div className="flex justify-between py-1.5 border-b border-slate-200 text-rose-600 font-semibold px-2">
                   <span>Total Deductions</span>
-                  <span>-Rs. {selectedPayslip.totalDeductions.toLocaleString()}</span>
+                  <span>-Rs. {formatSalaryNumber(selectedPayslip.totalDeductions)}</span>
                 </div>
 
                 {/* 4. Net Salary Payable */}
                 <div className="pt-2 flex justify-between font-bold text-sm text-slate-900 border-t-2 border-slate-900">
                   <span>Net Salary Payable</span>
-                  <span className="text-indigo-600">Rs. {selectedPayslip.netPayable.toLocaleString()}</span>
+                  <span className="text-indigo-600">Rs. {formatSalaryNumber(selectedPayslip.netPayable)}</span>
                 </div>
 
                 <div className="flex justify-between text-slate-500 pt-1">
