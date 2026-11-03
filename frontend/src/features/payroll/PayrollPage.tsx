@@ -2589,13 +2589,13 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
               </div>
             </div>
 
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 space-y-1">
-              <p className="font-semibold text-amber-900">
-                Sirf is employee ({payslipToDelete.payslip.staffName}) ki salary delete hogi:
+            <div className="bg-amber-50/80 border border-amber-200/80 rounded-2xl p-3 text-xs text-amber-900 space-y-1 shadow-[inset_0_1px_1px_rgba(255,255,255,0.9)]">
+              <p className="font-semibold text-amber-950">
+                Only this employee ({payslipToDelete.payslip.staffName})'s salary record will be removed:
               </p>
-              <p>• Baki tamam employees ki salaries register mein mehfooz rahengi.</p>
-              <p>• Is employee ke locked attendance days, overtime hours aur loan recovery release ho jayengi.</p>
-              <p>• Agar is payslip ki payment ho chuki hai, toh pehle payment reverse karni hogi.</p>
+              <p>• All other employees' salary records remain preserved in the register.</p>
+              <p>• Locked attendance dates, approved overtime, and advance recoveries will be released.</p>
+              <p>• If payment has already been disbursed for this payslip, reverse payment first.</p>
             </div>
 
             <div>

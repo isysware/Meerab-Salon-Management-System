@@ -211,11 +211,11 @@ export const AttendanceSettingsPage: React.FC = () => {
             Auto-Mark Absent Rule (By-Default Absent on Lateness)
           </h3>
           <p className="text-[#78616C] leading-relaxed">
-            Agar koi staff member apni shift start time ke baad tay shuda threshold (e.g. 1 ghante) tak check-in na kare,
-            toh system by-default uski attendance <strong className="text-[#18191B]">'ABSENT'</strong> mark kar dega.
+            If a staff member does not check in within the configured threshold after shift start,
+            the system automatically designates their attendance as <strong className="text-[#18191B]">'ABSENT'</strong>.
           </p>
           <p className="text-[#A38D98] italic">
-            * Note: Admin baad mein attendance sheet par kisi bhi waqt manual check-in time ya status tabdeel kar sakta hai.
+            * Note: Administrators can manually adjust check-in times and statuses anytime on the attendance sheet.
           </p>
         </div>
       </div>

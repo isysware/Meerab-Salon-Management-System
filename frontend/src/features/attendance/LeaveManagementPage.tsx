@@ -586,13 +586,13 @@ const LeaveManagementContent: React.FC = () => {
                       </div>
                     </div>
                     {leaveForm.type === 'PAID' && leaveStaffPreview.remainingDays <= 0 && (
-                      <div className="mt-2.5 p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs space-y-1 text-amber-900">
+                      <div className="mt-2.5 p-3 bg-gradient-to-r from-amber-50/90 to-amber-50/60 border border-amber-200/80 rounded-2xl text-xs space-y-1.5 text-amber-900 shadow-[inset_0_1px_1px_rgba(255,255,255,0.9)]">
                         <div className="font-semibold text-amber-950 flex items-center gap-1.5">
                           <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span>Leave Quota Exhausted</span>
+                          <span>Leave Quota Reached</span>
                         </div>
-                        <p className="text-[11px] text-amber-800">
-                          Is employee ki {leaveStaffPreview.allowedDays} {leaveStaffPreview.period.toLowerCase()} paid leaves limit khatam ho chuki hai. Super Admin / Admin hone ke nate aap Override ke sath mark kar sakte hain.
+                        <p className="text-[11px] text-amber-800 leading-snug">
+                          This employee has exhausted their {leaveStaffPreview.allowedDays} {leaveStaffPreview.period.toLowerCase()} paid leave quota. Authorized administrators may mark with override.
                         </p>
                         <label className="flex items-center gap-2 font-semibold text-xs text-amber-950 pt-1 cursor-pointer">
                           <input
@@ -601,7 +601,7 @@ const LeaveManagementContent: React.FC = () => {
                             onChange={(e) => setAllowOverride(e.target.checked)}
                             className="rounded text-[#B82E69] focus:ring-[#B82E69]"
                           />
-                          <span>Approve with Admin Override (Allow exceeding quota)</span>
+                          <span>Authorize with Admin Override</span>
                         </label>
                       </div>
                     )}

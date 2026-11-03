@@ -1047,61 +1047,63 @@ export const StaffAttendancePage: React.FC = () => {
 
       {/* ── MODAL: FINALIZE DAY (EOD) ───────────────────────────────────────── */}
       {/* ========================================================================= */}
-      {/* ── PREMIUM MODAL: LEAVE QUOTA EXHAUSTED (VALIDATION & OVERRIDE) ────────── */}
+      {/* ── PREMIUM GLOSSY MODAL: LEAVE QUOTA EXHAUSTED (VALIDATION & OVERRIDE) ── */}
       {/* ========================================================================= */}
       {quotaAlertModal && quotaAlertModal.isOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col p-6 space-y-4 text-xs border border-white/80">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200/60 flex items-center justify-center text-amber-600 shrink-0 shadow-2xs">
-                <AlertTriangle className="w-6 h-6 stroke-[2.2]" />
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-md overflow-hidden rounded-[28px] border border-white/90 bg-white/85 backdrop-blur-2xl p-6 shadow-[0_24px_70px_rgba(35,21,29,0.15),inset_0_1.5px_2px_rgba(255,255,255,1)] flex flex-col space-y-4 text-xs animate-in zoom-in-95 duration-150">
+            {/* Top Gloss Reflection */}
+            <div className="pointer-events-none absolute -top-24 -left-20 w-64 h-64 rounded-full bg-gradient-to-br from-white/80 via-rose-100/30 to-transparent blur-2xl" />
+
+            {/* Header */}
+            <div className="flex items-center gap-3 relative z-10">
+              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-amber-50 to-amber-100/80 border border-amber-200/70 flex items-center justify-center text-amber-600 shrink-0 shadow-[0_4px_12px_rgba(245,158,11,0.12),inset_0_1px_1px_rgba(255,255,255,0.9)]">
+                <AlertTriangle className="w-5 h-5 stroke-[2.2]" />
               </div>
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200/50">
-                  Quota Validation Warning
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50/90 px-2.5 py-0.5 rounded-full border border-amber-200/60 shadow-2xs">
+                  Quota Exceeded
                 </span>
-                <h3 className="text-base font-bold text-slate-900 mt-1">Paid Leave Quota Exhausted</h3>
-                <p className="text-slate-500 font-medium">
-                  {quotaAlertModal.staffName} ({quotaAlertModal.employeeCode})
+                <h3 className="text-base font-extrabold text-[#18191B] tracking-tight mt-1">Paid Leave Limit Reached</h3>
+                <p className="text-slate-500 font-medium text-[11px]">
+                  {quotaAlertModal.staffName} • <span className="font-mono text-slate-600">{quotaAlertModal.employeeCode}</span>
                 </p>
               </div>
             </div>
 
-            {/* Leave Quota Metrics Badge */}
-            <div className="grid grid-cols-3 gap-2 bg-slate-50/80 p-3 rounded-2xl border border-slate-200/80 text-center">
-              <div>
-                <span className="text-slate-400 text-[10px] block font-medium">Allowed Quota</span>
-                <span className="font-bold text-slate-800 text-sm">{quotaAlertModal.allowedDays} Days</span>
-                <span className="text-[9px] text-slate-400 block font-medium uppercase">{quotaAlertModal.period}</span>
+            {/* Leave Quota Metrics Badge - Glossy style */}
+            <div className="grid grid-cols-3 gap-2 bg-gradient-to-b from-white/90 to-slate-50/70 p-3 rounded-2xl border border-rose-100/70 shadow-[inset_0_1px_2px_rgba(255,255,255,1),0_2px_8px_rgba(0,0,0,0.02)] text-center relative z-10">
+              <div className="p-1">
+                <span className="text-slate-400 text-[10px] block font-semibold uppercase tracking-wider">Allowed</span>
+                <span className="font-extrabold text-slate-800 text-sm font-mono block mt-0.5">{quotaAlertModal.allowedDays} Days</span>
+                <span className="text-[9px] text-slate-400 font-semibold uppercase">{quotaAlertModal.period}</span>
               </div>
-              <div>
-                <span className="text-slate-400 text-[10px] block font-medium">Already Taken</span>
-                <span className="font-bold text-rose-600 text-sm">{quotaAlertModal.usedDays} Days</span>
-                <span className="text-[9px] text-rose-400 block font-medium">Utilized</span>
+              <div className="p-1 border-x border-slate-200/60">
+                <span className="text-slate-400 text-[10px] block font-semibold uppercase tracking-wider">Used</span>
+                <span className="font-extrabold text-[#B82E69] text-sm font-mono block mt-0.5">{quotaAlertModal.usedDays} Days</span>
+                <span className="text-[9px] text-[#B82E69]/70 font-semibold uppercase">Utilized</span>
               </div>
-              <div>
-                <span className="text-slate-400 text-[10px] block font-medium">Remaining</span>
-                <span className="font-bold text-rose-700 text-sm">0 Days</span>
-                <span className="text-[9px] text-rose-500 font-bold block uppercase">EXHAUSTED</span>
+              <div className="p-1">
+                <span className="text-slate-400 text-[10px] block font-semibold uppercase tracking-wider">Available</span>
+                <span className="font-extrabold text-rose-600 text-sm font-mono block mt-0.5">0 Days</span>
+                <span className="text-[9px] text-rose-500 font-bold uppercase">Exhausted</span>
               </div>
             </div>
 
-            <div className="p-3 bg-amber-50/80 border border-amber-200/80 rounded-2xl text-amber-900 space-y-1.5 leading-relaxed">
-              <p className="font-semibold text-xs text-amber-950 flex items-center gap-1.5">
-                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                Is staff member ki paid leaves limit khatam ho chuki hai.
-              </p>
-              <p className="text-[11px] text-amber-800">
-                Chunkay aap Super Admin / Admin hain, aap chahein toh isay <strong>Paid Leave (Override)</strong> ke tor par tasdeeq kar sakte hain, ya phir <strong>Unpaid Leave</strong> mein tabdeel kar sakte hain.
+            {/* Professional Short Notice - Glossy */}
+            <div className="p-3 bg-gradient-to-r from-amber-50/90 via-amber-50/70 to-rose-50/40 border border-amber-200/70 rounded-2xl text-amber-950 flex items-center gap-2.5 relative z-10 shadow-[inset_0_1px_1px_rgba(255,255,255,0.9)]">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <p className="text-[11px] text-amber-900 leading-snug font-medium">
+                Paid leave balance is exhausted. You can convert to unpaid leave or grant an authorized admin override.
               </p>
             </div>
 
             {/* Modal Actions */}
-            <div className="flex flex-col sm:flex-row items-center justify-end gap-2.5 pt-2">
+            <div className="flex flex-col sm:flex-row items-center justify-end gap-2 pt-2 relative z-10">
               <button
                 type="button"
                 onClick={() => setQuotaAlertModal(null)}
-                className="w-full sm:w-auto px-4 py-2 border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl font-medium cursor-pointer"
+                className="w-full sm:w-auto px-4 py-2 text-xs border border-slate-200/80 bg-white/80 hover:bg-white text-slate-700 rounded-xl font-semibold shadow-2xs cursor-pointer transition-all active:scale-[0.98]"
               >
                 Cancel
               </button>
@@ -1112,9 +1114,9 @@ export const StaffAttendancePage: React.FC = () => {
                   toast.info(`Switched to Unpaid Leave for ${quotaAlertModal.staffName}.`);
                   setQuotaAlertModal(null);
                 }}
-                className="w-full sm:w-auto px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded-xl font-semibold cursor-pointer transition-all"
+                className="w-full sm:w-auto px-4 py-2 text-xs bg-amber-100/80 hover:bg-amber-100 text-amber-900 border border-amber-300/80 rounded-xl font-semibold shadow-2xs cursor-pointer transition-all active:scale-[0.98]"
               >
-                Switch to Unpaid Leave
+                Switch to Unpaid
               </button>
               <button
                 type="button"
@@ -1123,9 +1125,9 @@ export const StaffAttendancePage: React.FC = () => {
                   toast.success(`Admin Override: Paid Leave approved for ${quotaAlertModal.staffName}.`);
                   setQuotaAlertModal(null);
                 }}
-                className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-[#B82E69] to-[#A02358] hover:from-[#A02358] hover:to-[#8E1F4D] text-white rounded-xl font-semibold shadow-xs cursor-pointer transition-all"
+                className="w-full sm:w-auto px-4 py-2 text-xs bg-gradient-to-r from-[#B82E69] to-[#9D2558] hover:from-[#A02358] hover:to-[#851C47] text-white rounded-xl font-semibold shadow-[0_4px_14px_rgba(184,46,105,0.25),inset_0_1px_1px_rgba(255,255,255,0.3)] cursor-pointer transition-all active:scale-[0.98]"
               >
-                Proceed with Paid Leave (Override)
+                Authorize Override
               </button>
             </div>
           </div>
