@@ -720,6 +720,32 @@ export const POSBillingPage: React.FC = () => {
         (ci) => ci.type === 'PRODUCT' && ci.item.id === product.id
       );
       if (existingIndex >= 0) {
+        return prev.map((ci, idx) =>
+          idx === existingIndex ? { ...ci, quantity: ci.quantity + 1 } : ci
+        );
+      }
+
+      const cartInstanceId = `ci-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      const newItem: POSCartItem = {
+        cartInstanceId,
+        type: 'PRODUCT',
+        item: product,
+        quantity: 1,
+        staffId: '',
+        staffName: '',
+        staffCommissionRate: 0,
+      };
+      return [...prev, newItem];
+    });
+  };
+
+  // Add Service to Cart
+  const handleAddServiceToCart = (service: ServiceItem) => {
+    setCart((prev) => {
+      const existingIndex = prev.findIndex(
+        (ci) => ci.type === 'SERVICE' && ci.item.id === service.id
+      );
+      if (existingIndex >= 0) {
         const target = prev[existingIndex];
         const newQty = target.quantity + 1;
         let updatedStaff = target.assignedStaff;
@@ -746,32 +772,6 @@ export const POSBillingPage: React.FC = () => {
         }
         return prev.map((ci, idx) =>
           idx === existingIndex ? { ...ci, quantity: newQty, assignedStaff: updatedStaff } : ci
-        );
-      }
-
-      const cartInstanceId = `ci-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-      const newItem: POSCartItem = {
-        cartInstanceId,
-        type: 'PRODUCT',
-        item: product,
-        quantity: 1,
-        staffId: '',
-        staffName: '',
-        staffCommissionRate: 0,
-      };
-      return [...prev, newItem];
-    });
-  };
-
-  // Add Service to Cart
-  const handleAddServiceToCart = (service: ServiceItem) => {
-    setCart((prev) => {
-      const existingIndex = prev.findIndex(
-        (ci) => ci.type === 'SERVICE' && ci.item.id === service.id
-      );
-      if (existingIndex >= 0) {
-        return prev.map((ci, idx) =>
-          idx === existingIndex ? { ...ci, quantity: ci.quantity + 1 } : ci
         );
       }
 
