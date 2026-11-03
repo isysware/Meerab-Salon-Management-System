@@ -343,7 +343,7 @@ export const postInvoice = async (input, actor, idempotencyKey, request) => {
 
     // ── Lines (+ package allocation, stock & COGS, commission EARN) ──
     for (const [i, d] of drafts.entries()) {
-      const lineStaffName = d.c.type === 'PACKAGE' && d.c.assignedStaff && d.c.assignedStaff.length > 1
+      const lineStaffName = d.c.assignedStaff && d.c.assignedStaff.length > 1
         ? d.c.assignedStaff.map((s) => s.staffName || s.name).filter(Boolean).join(', ')
         : d.staff.name;
 

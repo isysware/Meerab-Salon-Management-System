@@ -720,8 +720,32 @@ export const POSBillingPage: React.FC = () => {
         (ci) => ci.type === 'PRODUCT' && ci.item.id === product.id
       );
       if (existingIndex >= 0) {
+        const target = prev[existingIndex];
+        const newQty = target.quantity + 1;
+        let updatedStaff = target.assignedStaff;
+        if (target.assignedStaff && target.assignedStaff.length > 0) {
+          const totalLine = getCatalogueSellingPrice(target.item) * newQty;
+          const count = target.assignedStaff.length;
+          const isInteger = Number.isInteger(totalLine);
+          if (isInteger) {
+            const equalShare = Math.floor(totalLine / count);
+            const rem = totalLine - equalShare * count;
+            updatedStaff = target.assignedStaff.map((s, idx) => ({
+              ...s,
+              allocatedAmount: equalShare + (idx < rem ? 1 : 0),
+            }));
+          } else {
+            const totalCents = Math.round(totalLine * 100);
+            const equalCents = Math.floor(totalCents / count);
+            const remCents = totalCents - equalCents * count;
+            updatedStaff = target.assignedStaff.map((s, idx) => ({
+              ...s,
+              allocatedAmount: (equalCents + (idx < remCents ? 1 : 0)) / 100,
+            }));
+          }
+        }
         return prev.map((ci, idx) =>
-          idx === existingIndex ? { ...ci, quantity: ci.quantity + 1 } : ci
+          idx === existingIndex ? { ...ci, quantity: newQty, assignedStaff: updatedStaff } : ci
         );
       }
 
@@ -841,7 +865,7 @@ export const POSBillingPage: React.FC = () => {
             }
             if (newQty <= 0) return null;
 
-            if (ci.type === 'PACKAGE' && ci.assignedStaff && ci.assignedStaff.length > 0) {
+            if ((ci.type === 'PACKAGE' || ci.type === 'SERVICE') && ci.assignedStaff && ci.assignedStaff.length > 0) {
               const newTotal = getCatalogueSellingPrice(ci.item) * newQty;
               const count = ci.assignedStaff.length;
               const oldTotal = getCatalogueSellingPrice(ci.item) * ci.quantity;
@@ -893,6 +917,7 @@ export const POSBillingPage: React.FC = () => {
               staffId: '',
               staffName: '',
               staffCommissionRate: 0,
+              assignedStaff: [],
             };
           }
           return ci;
@@ -905,11 +930,20 @@ export const POSBillingPage: React.FC = () => {
       setCart((prev) =>
         prev.map((ci) => {
           if (ci.cartInstanceId === cartInstanceId) {
+            const totalLine = getCatalogueSellingPrice(ci.item) * ci.quantity;
             return {
               ...ci,
               staffId: 'house',
               staffName: 'House / Salon',
               staffCommissionRate: 0,
+              assignedStaff: [
+                {
+                  staffId: 'house',
+                  staffName: 'House / Salon',
+                  staffCommissionRate: 0,
+                  allocatedAmount: totalLine,
+                },
+              ],
             };
           }
           return ci;
@@ -924,11 +958,20 @@ export const POSBillingPage: React.FC = () => {
     setCart((prev) =>
       prev.map((ci) => {
         if (ci.cartInstanceId === cartInstanceId) {
+          const totalLine = getCatalogueSellingPrice(ci.item) * ci.quantity;
           return {
             ...ci,
             staffId: staff.id,
             staffName: staff.name,
             staffCommissionRate: staff.commissionRate,
+            assignedStaff: [
+              {
+                staffId: staff.id,
+                staffName: staff.name,
+                staffCommissionRate: staff.commissionRate,
+                allocatedAmount: totalLine,
+              },
+            ],
           };
         }
         return ci;
@@ -950,7 +993,24 @@ export const POSBillingPage: React.FC = () => {
           ? Math.round(staff.commissionRate * 100)
           : (staff.commissionRate || 0);
 
-        if (ci.type === 'SERVICE' || ci.type === 'PRODUCT') {
+        if (ci.type === 'SERVICE') {
+          const totalLine = getCatalogueSellingPrice(ci.item) * ci.quantity;
+          return {
+            ...ci,
+            staffId: staff.id,
+            staffName: staff.name,
+            staffCommissionRate: rate,
+            assignedStaff: [
+              {
+                staffId: staff.id,
+                staffName: staff.name,
+                staffCommissionRate: rate,
+                allocatedAmount: totalLine,
+              },
+            ],
+          };
+        }
+        if (ci.type === 'PRODUCT') {
           return {
             ...ci,
             staffId: staff.id,
@@ -982,7 +1042,7 @@ export const POSBillingPage: React.FC = () => {
     toast.success(`Assigned all items to ${staff.name}`);
   };
 
-  // Add staff member to a package line item
+  // Add staff member to a cart line item (equal split across all assigned staff)
   const handleAddStaffToPackage = (cartInstanceId: string, staffId: string) => {
     const staff = staffId === 'house'
       ? { id: 'house', name: 'House / Salon', commissionRate: 0 }
@@ -997,28 +1057,34 @@ export const POSBillingPage: React.FC = () => {
 
         const totalLineAmount = getCatalogueSellingPrice(ci.item) * ci.quantity;
 
+        const newStaffMember = {
+          staffId: staff.id,
+          staffName: staff.name,
+          staffCommissionRate: staff.commissionRate,
+        };
+
+        const combinedStaff = [...currentStaff, newStaffMember];
+        const count = combinedStaff.length;
+
+        // Equal split among all assigned staff
+        const isInteger = Number.isInteger(totalLineAmount);
         let updatedStaff;
-        if (currentStaff.length === 0) {
-          updatedStaff = [
-            {
-              staffId: staff.id,
-              staffName: staff.name,
-              staffCommissionRate: staff.commissionRate,
-              allocatedAmount: totalLineAmount,
-            },
-          ];
+
+        if (isInteger) {
+          const equalShare = Math.floor(totalLineAmount / count);
+          const remainder = totalLineAmount - equalShare * count;
+          updatedStaff = combinedStaff.map((s, idx) => ({
+            ...s,
+            allocatedAmount: equalShare + (idx < remainder ? 1 : 0),
+          }));
         } else {
-          const currentAllocated = currentStaff.reduce((sum, s) => sum + (s.allocatedAmount ?? 0), 0);
-          const remainder = Math.max(0, totalLineAmount - currentAllocated);
-          updatedStaff = [
-            ...currentStaff,
-            {
-              staffId: staff.id,
-              staffName: staff.name,
-              staffCommissionRate: staff.commissionRate,
-              allocatedAmount: remainder > 0 ? remainder : Math.floor(totalLineAmount / (currentStaff.length + 1)),
-            },
-          ];
+          const totalCents = Math.round(totalLineAmount * 100);
+          const equalCents = Math.floor(totalCents / count);
+          const remainderCents = totalCents - equalCents * count;
+          updatedStaff = combinedStaff.map((s, idx) => ({
+            ...s,
+            allocatedAmount: (equalCents + (idx < remainderCents ? 1 : 0)) / 100,
+          }));
         }
 
         return {
@@ -1032,7 +1098,7 @@ export const POSBillingPage: React.FC = () => {
     );
   };
 
-  // Update custom sales allocation amount for a staff member on a package
+  // Update custom sales allocation amount with automatic auto-balancing (clamped strictly to line total)
   const handleUpdateStaffPackageAmount = (
     cartInstanceId: string,
     staffId: string,
@@ -1048,15 +1114,108 @@ export const POSBillingPage: React.FC = () => {
         const targetStaff = currentStaff.find((s) => s.staffId === staffId);
         if (!targetStaff) return ci;
 
-        // Strictly clamp amount between 0 and totalLineAmount
-        const clampedAmount = Math.max(0, Math.min(Math.round(amount), totalLineAmount));
+        // Single staff assigned: strictly clamped to totalLineAmount
+        if (currentStaff.length === 1) {
+          return {
+            ...ci,
+            assignedStaff: currentStaff.map((s) => ({ ...s, allocatedAmount: totalLineAmount })),
+          };
+        }
 
-        const updatedStaff = currentStaff.map((s) => {
-          if (s.staffId === staffId) {
-            return { ...s, allocatedAmount: clampedAmount };
+        const isInteger = Number.isInteger(totalLineAmount);
+
+        // Clamp edited amount between 0 and totalLineAmount ("1000 sa uper nhi jae ga")
+        const clampedAmount = Math.max(
+          0,
+          Math.min(
+            isInteger ? Math.round(amount) : Math.round(amount * 100) / 100,
+            totalLineAmount
+          )
+        );
+
+        // Remaining amount for other staff
+        const remainder = Math.max(
+          0,
+          isInteger
+            ? Math.round(totalLineAmount - clampedAmount)
+            : Math.round((totalLineAmount - clampedAmount) * 100) / 100
+        );
+
+        const otherStaff = currentStaff.filter((s) => s.staffId !== staffId);
+
+        let updatedStaff: typeof currentStaff;
+
+        // Exactly 2 staff total: the other staff member automatically gets the exact remaining amount
+        if (otherStaff.length === 1) {
+          updatedStaff = currentStaff.map((s) => {
+            if (s.staffId === staffId) {
+              return { ...s, allocatedAmount: clampedAmount };
+            }
+            return { ...s, allocatedAmount: remainder };
+          });
+        } else {
+          // 3 or more staff total: distribute remainder proportionally based on existing allocations
+          const otherPreviousTotal = otherStaff.reduce(
+            (sum, s) => sum + (typeof s.allocatedAmount === 'number' ? Math.max(0, s.allocatedAmount) : 0),
+            0
+          );
+
+          let updatedOtherStaff: typeof otherStaff;
+
+          if (otherPreviousTotal > 0) {
+            if (isInteger) {
+              let allocatedSoFar = 0;
+              updatedOtherStaff = otherStaff.map((s, idx) => {
+                if (idx === otherStaff.length - 1) {
+                  return { ...s, allocatedAmount: Math.max(0, remainder - allocatedSoFar) };
+                }
+                const ratio = Math.max(0, s.allocatedAmount || 0) / otherPreviousTotal;
+                const share = Math.round(remainder * ratio);
+                allocatedSoFar += share;
+                return { ...s, allocatedAmount: share };
+              });
+            } else {
+              const remainderCents = Math.round(remainder * 100);
+              let allocatedCentsSoFar = 0;
+              updatedOtherStaff = otherStaff.map((s, idx) => {
+                if (idx === otherStaff.length - 1) {
+                  return { ...s, allocatedAmount: Math.max(0, remainderCents - allocatedCentsSoFar) / 100 };
+                }
+                const ratio = Math.max(0, s.allocatedAmount || 0) / otherPreviousTotal;
+                const shareCents = Math.round(remainderCents * ratio);
+                allocatedCentsSoFar += shareCents;
+                return { ...s, allocatedAmount: shareCents / 100 };
+              });
+            }
+          } else {
+            // If other staff had 0, distribute remainder equally among them
+            const otherCount = otherStaff.length;
+            if (isInteger) {
+              const equalShare = Math.floor(remainder / otherCount);
+              const rem = remainder - equalShare * otherCount;
+              updatedOtherStaff = otherStaff.map((s, idx) => ({
+                ...s,
+                allocatedAmount: equalShare + (idx < rem ? 1 : 0),
+              }));
+            } else {
+              const remainderCents = Math.round(remainder * 100);
+              const equalCents = Math.floor(remainderCents / otherCount);
+              const remCents = remainderCents - equalCents * otherCount;
+              updatedOtherStaff = otherStaff.map((s, idx) => ({
+                ...s,
+                allocatedAmount: (equalCents + (idx < remCents ? 1 : 0)) / 100,
+              }));
+            }
           }
-          return s;
-        });
+
+          const otherMap = new Map(updatedOtherStaff.map((s) => [s.staffId, s]));
+          updatedStaff = currentStaff.map((s) => {
+            if (s.staffId === staffId) {
+              return { ...s, allocatedAmount: clampedAmount };
+            }
+            return otherMap.get(s.staffId) || s;
+          });
+        }
 
         return {
           ...ci,
@@ -1066,7 +1225,7 @@ export const POSBillingPage: React.FC = () => {
     );
   };
 
-  // Split package total evenly across all assigned staff
+  // Split cart item total evenly across all assigned staff
   const handleEqualizeStaffPackageAmounts = (cartInstanceId: string) => {
     setCart((prev) =>
       prev.map((ci) => {
@@ -1075,13 +1234,26 @@ export const POSBillingPage: React.FC = () => {
         if (currentStaff.length === 0) return ci;
         const totalLineAmount = getCatalogueSellingPrice(ci.item) * ci.quantity;
         const count = currentStaff.length;
-        const equalShare = Math.floor(totalLineAmount / count);
-        const remainder = totalLineAmount - equalShare * count;
 
-        const updatedStaff = currentStaff.map((s, idx) => ({
-          ...s,
-          allocatedAmount: equalShare + (idx === 0 ? remainder : 0),
-        }));
+        const isInteger = Number.isInteger(totalLineAmount);
+        let updatedStaff;
+
+        if (isInteger) {
+          const equalShare = Math.floor(totalLineAmount / count);
+          const remainder = totalLineAmount - equalShare * count;
+          updatedStaff = currentStaff.map((s, idx) => ({
+            ...s,
+            allocatedAmount: equalShare + (idx < remainder ? 1 : 0),
+          }));
+        } else {
+          const totalCents = Math.round(totalLineAmount * 100);
+          const equalCents = Math.floor(totalCents / count);
+          const remainderCents = totalCents - equalCents * count;
+          updatedStaff = currentStaff.map((s, idx) => ({
+            ...s,
+            allocatedAmount: (equalCents + (idx < remainderCents ? 1 : 0)) / 100,
+          }));
+        }
 
         return {
           ...ci,
@@ -1091,7 +1263,7 @@ export const POSBillingPage: React.FC = () => {
     );
   };
 
-  // Remove staff member from a package line item
+  // Remove staff member from a line item and equally split remainder
   const handleRemoveStaffFromPackage = (cartInstanceId: string, staffId: string) => {
     setCart((prev) =>
       prev.map((ci) => {
@@ -1111,13 +1283,25 @@ export const POSBillingPage: React.FC = () => {
 
         const totalLineAmount = getCatalogueSellingPrice(ci.item) * ci.quantity;
         const count = updatedStaffRaw.length;
-        const equalShare = Math.floor(totalLineAmount / count);
-        const remainder = totalLineAmount - equalShare * count;
+        const isInteger = Number.isInteger(totalLineAmount);
+        let updatedStaff;
 
-        const updatedStaff = updatedStaffRaw.map((s, idx) => ({
-          ...s,
-          allocatedAmount: equalShare + (idx === 0 ? remainder : 0),
-        }));
+        if (isInteger) {
+          const equalShare = Math.floor(totalLineAmount / count);
+          const remainder = totalLineAmount - equalShare * count;
+          updatedStaff = updatedStaffRaw.map((s, idx) => ({
+            ...s,
+            allocatedAmount: equalShare + (idx < remainder ? 1 : 0),
+          }));
+        } else {
+          const totalCents = Math.round(totalLineAmount * 100);
+          const equalCents = Math.floor(totalCents / count);
+          const remainderCents = totalCents - equalCents * count;
+          updatedStaff = updatedStaffRaw.map((s, idx) => ({
+            ...s,
+            allocatedAmount: (equalCents + (idx < remainderCents ? 1 : 0)) / 100,
+          }));
+        }
 
         return {
           ...ci,
@@ -1292,6 +1476,28 @@ export const POSBillingPage: React.FC = () => {
           const staffId = itm.staffId || '';
           const staffMember = staffId ? staffList.find((s) => s.id === staffId) : undefined;
           const staffName = itm.staffName || staffMember?.name || '';
+          const lineTotal = (itm.unitPrice || 0) * (itm.quantity || 1);
+
+          const serviceAssignedStaff = itm.assignedStaff && itm.assignedStaff.length > 0
+            ? itm.assignedStaff.map((as) => {
+                const member = staffList.find((s) => s.id === as.staffId);
+                return {
+                  staffId: as.staffId,
+                  staffName: as.staffName || member?.name || 'Stylist',
+                  staffCommissionRate: as.staffCommissionRate ?? member?.commissionRate ?? 0,
+                  allocatedAmount: typeof as.allocatedAmount === 'number' ? as.allocatedAmount : undefined,
+                };
+              })
+            : (staffId && staffId !== 'unassigned' && staffId !== 'house'
+                ? [
+                    {
+                      staffId,
+                      staffName,
+                      staffCommissionRate: staffMember?.commissionRate ?? 0,
+                      allocatedAmount: lineTotal,
+                    },
+                  ]
+                : []);
 
           newCartItems.push({
             cartInstanceId: itm.lineInstanceId || `ci-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
@@ -1301,6 +1507,7 @@ export const POSBillingPage: React.FC = () => {
             staffId,
             staffName,
             staffCommissionRate: staffMember?.commissionRate ?? 0,
+            assignedStaff: serviceAssignedStaff,
           });
         }
       }
@@ -2116,27 +2323,31 @@ export const POSBillingPage: React.FC = () => {
                               className="flex items-center justify-between gap-1 text-[11px] py-0.2"
                             >
                               <span className="font-semibold text-slate-800 truncate text-[11px]">{st.staffName}</span>
-                              <div className="flex items-center gap-1">
+                              <div className="flex items-center gap-1 shrink-0">
+                                <span className="text-[10px] text-slate-400 font-medium">Rs.</span>
                                 <input
                                   type="number"
                                   min="0"
                                   max={lineTotalAmount}
+                                  step="any"
                                   value={st.allocatedAmount ?? currentAmount}
+                                  onFocus={(e) => e.target.select()}
                                   onChange={(e) =>
                                     handleUpdateStaffPackageAmount(
                                       ci.cartInstanceId,
                                       st.staffId,
-                                      Number(e.target.value) || 0
+                                      e.target.value === '' ? 0 : Number(e.target.value)
                                     )
                                   }
-                                  className="w-14 h-5 px-1 text-right font-mono font-bold text-[11px] bg-slate-50 border border-slate-200 rounded"
+                                  className="w-16 h-5.5 px-1.5 text-right font-mono font-bold text-[11px] bg-white border border-slate-200 rounded focus:border-[#9D2558] focus:ring-1 focus:ring-[#9D2558] outline-none transition-all [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                 />
                                 <button
                                   type="button"
+                                  title="Remove Stylist"
                                   onClick={() => handleRemoveStaffFromPackage(ci.cartInstanceId, st.staffId)}
-                                  className="p-0.5 text-slate-400 hover:text-rose-600 rounded"
+                                  className="p-0.5 text-slate-400 hover:text-rose-600 rounded transition-colors"
                                 >
-                                  <X className="w-3 h-3" />
+                                  <X className="w-3.5 h-3.5" />
                                 </button>
                               </div>
                             </div>
