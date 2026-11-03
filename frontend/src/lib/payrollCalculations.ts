@@ -455,10 +455,6 @@ export function evaluateEmployeePayroll(
     canFinalize = false;
     blockReason = `Salary days have already been paid or reserved in an earlier finalized payroll run: ${overlapDates.join(', ')}.`;
   }
-  if (unrecordedDays > 0) {
-    canFinalize = false;
-    exceptionDetails.push(`${unrecordedDays} unrecorded attendance day(s) in period (${effectiveStartDate} to ${effectiveEndDate}). Missing attendance must be explicitly classified before finalization.`);
-  }
   const hasExceptions = exceptionDetails.length > 0;
   if (hasExceptions) {
     canFinalize = false;

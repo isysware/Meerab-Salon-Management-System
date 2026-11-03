@@ -219,13 +219,8 @@ function isWorkingDay(dateStr, staff, branchHolidays = []) {
   if (holiday) {
     return { isWorking: false, reason: `Holiday: ${holiday.title}` };
   }
-  const dateObj = new Date(dateStr + "T12:00:00Z");
-  const dayOfWeek = dateObj.getUTCDay();
   if (staff.joiningDate && staff.joiningDate > dateStr) {
     return { isWorking: false, reason: "Prior to employment start date" };
-  }
-  if (dayOfWeek === 0) {
-    return { isWorking: false, reason: "Weekly off (Sunday)" };
   }
   return { isWorking: true };
 }

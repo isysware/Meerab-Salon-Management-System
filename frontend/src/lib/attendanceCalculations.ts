@@ -325,18 +325,9 @@ export function isWorkingDay(
     return { isWorking: false, reason: `Holiday: ${holiday.title}` };
   }
 
-  // Check day of week
-  const dateObj = new Date(dateStr + 'T12:00:00Z');
-  const dayOfWeek = dateObj.getUTCDay(); // 0 is Sunday, 1 is Monday ... 6 is Saturday
-
   // If staff has joined after dateStr, not working
   if (staff.joiningDate && staff.joiningDate > dateStr) {
     return { isWorking: false, reason: 'Prior to employment start date' };
-  }
-
-  // Default: Sunday is weekly off (day 0)
-  if (dayOfWeek === 0) {
-    return { isWorking: false, reason: 'Weekly off (Sunday)' };
   }
 
   return { isWorking: true };

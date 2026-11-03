@@ -1438,12 +1438,12 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                             {formatSalaryNumber(p.netPayable || 0)}
                           </td>
                           <td className="py-3.5 px-3 text-center whitespace-nowrap">
-                            {p.canFinalize === false || p.hasExceptions ? (
+                            {p.canFinalize === false ? (
                               <span
                                 className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-rose-50 text-rose-700 border border-rose-200"
-                                title={p.blockReason || (p.exceptionDetails ? p.exceptionDetails.join(' ') : 'Unresolved attendance')}
+                                title={p.blockReason}
                               >
-                                UNRESOLVED
+                                BLOCKED
                               </span>
                             ) : (
                               <span className="px-2.5 py-0.5 text-[10px] font-bold rounded-full bg-amber-50 text-amber-800 border border-amber-200">
@@ -1456,10 +1456,10 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                               <button
                                 type="button"
                                 onClick={() => handleFinalizeDraftRun(run.id)}
-                                disabled={actionLoading || p.canFinalize === false || p.hasExceptions}
-                                title={p.canFinalize === false ? (p.blockReason || 'Cannot finalize: attendance is unresolved') : 'Finalize payroll run'}
+                                disabled={actionLoading || p.canFinalize === false}
+                                title={p.canFinalize === false ? (p.blockReason || 'Cannot finalize payroll run') : 'Finalize payroll run'}
                                 className={`px-3 py-1 text-white text-xs font-semibold rounded-xl shadow-2xs transition-all whitespace-nowrap flex items-center gap-1 ${
-                                  p.canFinalize === false || p.hasExceptions
+                                  p.canFinalize === false
                                     ? 'bg-slate-300 cursor-not-allowed text-slate-500'
                                     : 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer'
                                 }`}
@@ -1744,14 +1744,14 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
               {/* Blocking issues banner */}
-              {activeDraft.payslips.some((p) => !p.canFinalize) && (
+              {activeDraft.payslips.some((p) => p.canFinalize === false) && (
                 <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-3">
                   <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
                   <div className="space-y-1">
-                    <h4 className="font-bold text-rose-900">Finalization Blocked by Actionable Exceptions</h4>
+                    <h4 className="font-bold text-rose-900">Finalization Blocked</h4>
                     <p className="text-rose-700">
-                      One or more employees have unresolved missing punches, overlapping salary days, or negative net
-                      salary entitlement. Resolve attendance records or adjust policies before finalizing.
+                      One or more employees have overlapping salary days or negative net
+                      salary entitlement. Review adjustments before finalizing.
                     </p>
                   </div>
                 </div>
