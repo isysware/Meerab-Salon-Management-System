@@ -1375,6 +1375,7 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                       <th className="py-3.5 px-2 text-center whitespace-nowrap">OT Hours</th>
                       <th className="py-3.5 px-4 text-right whitespace-nowrap">Basic</th>
                       <th className="py-3.5 px-3 text-right whitespace-nowrap">Late/Early Cut</th>
+                      <th className="py-3.5 px-4 text-right whitespace-nowrap">Loan Recovery</th>
                       <th className="py-3.5 px-4 text-right whitespace-nowrap">Salary Generated</th>
                       <th className="py-3.5 px-3 text-center whitespace-nowrap">Status</th>
                       <th className="py-3.5 px-4 text-center whitespace-nowrap">Actions</th>
@@ -1432,6 +1433,23 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                           <td className="py-3.5 px-3 text-right font-mono tabular-nums text-rose-600 font-medium">
                             {(p.lateEarlyDeductions || p.attendancePenaltyDeductions || 0) > 0
                               ? `-${formatSalaryNumber(p.lateEarlyDeductions || p.attendancePenaltyDeductions || 0)}`
+                              : '0.00'}
+                          </td>
+                          <td
+                            className="py-3.5 px-4 text-right font-mono tabular-nums text-rose-600 font-medium"
+                            title={
+                              p.advanceRecoveries && p.advanceRecoveries.length > 0
+                                ? p.advanceRecoveries
+                                    .map(
+                                      (a: any) =>
+                                        `${a.advanceNumber || 'Loan'}: Rs. ${formatSalaryNumber(a.amount)} (Remaining: Rs. ${formatSalaryNumber(a.balanceAfter)})`
+                                    )
+                                    .join('\n')
+                                : undefined
+                            }
+                          >
+                            {(p.advanceRecoveryAmount || 0) > 0
+                              ? `-${formatSalaryNumber(p.advanceRecoveryAmount || 0)}`
                               : '0.00'}
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums text-amber-800 font-bold">
@@ -1532,9 +1550,9 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                       <th className="py-3.5 px-2 text-center whitespace-nowrap">OT Hours</th>
                       <th className="py-3.5 px-4 text-right whitespace-nowrap">Basic</th>
                       <th className="py-3.5 px-3 text-right whitespace-nowrap">Late/Early Cut</th>
+                      <th className="py-3.5 px-4 text-right whitespace-nowrap">Loan Recovery</th>
                       <th className="py-3.5 px-4 text-right whitespace-nowrap">Salary Generated</th>
                       <th className="py-3.5 px-4 text-right whitespace-nowrap">Amount Paid</th>
-                      <th className="py-3.5 px-4 text-right whitespace-nowrap">Loan Repayment</th>
                       <th className="py-3.5 px-3 text-center whitespace-nowrap">Status</th>
                       <th className="py-3.5 px-4 text-center whitespace-nowrap">Actions</th>
                     </tr>
@@ -1605,14 +1623,28 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                               ? `-${formatSalaryNumber(p.lateEarlyDeductions || p.attendancePenaltyDeductions || 0)}`
                               : '0.00'}
                           </td>
+                          <td
+                            className="py-3.5 px-4 text-right font-mono tabular-nums text-rose-600 font-medium"
+                            title={
+                              p.advanceRecoveries && p.advanceRecoveries.length > 0
+                                ? p.advanceRecoveries
+                                    .map(
+                                      (a: any) =>
+                                        `${a.advanceNumber || 'Loan'}: Rs. ${formatSalaryNumber(a.amount)} (Remaining: Rs. ${formatSalaryNumber(a.balanceAfter)})`
+                                    )
+                                    .join('\n')
+                                : undefined
+                            }
+                          >
+                            {(p.advanceRecoveryAmount || 0) > 0
+                              ? `-${formatSalaryNumber(p.advanceRecoveryAmount || 0)}`
+                              : '0.00'}
+                          </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums text-[#B82E69] font-bold">
                             {formatSalaryNumber(p.netPayable || 0)}
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums text-emerald-700 font-medium">
                             {formatSalaryNumber(p.paidAmount || 0)}
-                          </td>
-                          <td className="py-3.5 px-4 text-right font-mono tabular-nums text-slate-600">
-                            {formatSalaryNumber(p.advanceRecoveryAmount || 0)}
                           </td>
                           <td className="py-3.5 px-3 text-center whitespace-nowrap">
                             <span
@@ -1780,7 +1812,7 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                       <th className="py-2.5 px-3 text-right">Allow./Bonus/Holiday</th>
                       
                       <th className="py-2.5 px-3 text-right">Other Ded.</th>
-                      <th className="py-2.5 px-3 text-right">Loan</th>
+                      <th className="py-2.5 px-3 text-right">Loan Recovery</th>
                       <th className="py-2.5 px-3 text-right font-bold">Net Payable</th>
                       <th className="py-2.5 px-3 text-center">Status</th>
                       <th className="py-2.5 px-2 text-center">Action</th>
