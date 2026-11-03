@@ -55,9 +55,11 @@ export const ManualOvertimePage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
+  const effectiveBranchId = user?.role === 'SUPER_ADMIN' ? selectedBranchId : (user?.branchId || activeBranchId);
+
   // Modals
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
-  const actionScope = useBranchAction(showAddModal, loadOvertimeAction);
+  const actionScope = useBranchAction(showAddModal, loadOvertimeAction, effectiveBranchId);
   const [showEditModal, setShowEditModal] = useState<boolean>(false);
   const [showApproveModal, setShowApproveModal] = useState<boolean>(false);
   const [showRejectModal, setShowRejectModal] = useState<boolean>(false);
@@ -87,8 +89,6 @@ export const ManualOvertimePage: React.FC = () => {
   const [reasonForm, setReasonForm] = useState({
     reason: '',
   });
-
-  const effectiveBranchId = user?.role === 'SUPER_ADMIN' ? selectedBranchId : (user?.branchId || activeBranchId);
 
   // Load data
   const loadData = async () => {
@@ -161,10 +161,24 @@ export const ManualOvertimePage: React.FC = () => {
     };
   }, [filteredRecords]);
 
+  const availableStaff = useMemo(() => {
+    if (actionScope.data?.staff && actionScope.data.staff.length > 0) {
+      return actionScope.data.staff;
+    }
+    return staffList;
+  }, [actionScope.data?.staff, staffList]);
+
+  // Auto-select staff member if only one is available
+  useEffect(() => {
+    if (showAddModal && !addForm.staffId && availableStaff.length === 1) {
+      setAddForm((prev) => ({ ...prev, staffId: availableStaff[0].id }));
+    }
+  }, [showAddModal, availableStaff, addForm.staffId]);
+
   // Add form effective hourly rate & amount preview
   const addFormPreview = useMemo(() => {
     if (!addForm.staffId) return null;
-    const staff = actionScope.data?.staff.find((s) => s.id === addForm.staffId);
+    const staff = availableStaff.find((s) => s.id === addForm.staffId);
     if (!staff) return null;
     const rate = Number(staff.overtimeHourlyRate ?? 0);
     const hours = (addForm.minutes || 0) / 60;
@@ -174,7 +188,7 @@ export const ManualOvertimePage: React.FC = () => {
       hours: hours.toFixed(2),
       estimatedAmount,
     };
-  }, [addForm.staffId, addForm.minutes, actionScope.data]);
+  }, [addForm.staffId, addForm.minutes, availableStaff]);
 
   // Handle Add Overtime
   const handleAddSubmit = async (e: React.FormEvent) => {
@@ -188,17 +202,21 @@ export const ManualOvertimePage: React.FC = () => {
       toast.error('Overtime minutes must be a positive whole number.');
       return;
     }
+    if (!addForm.reason || !addForm.reason.trim()) {
+      toast.error('Please enter a reason for the overtime.');
+      return;
+    }
 
     try {
-      const selectedStaff = actionScope.data?.staff.find((s) => s.id === addForm.staffId);
-      if (!selectedStaff || selectedStaff.branchId !== actionScope.branchId) {
+      const selectedStaff = availableStaff.find((s) => s.id === addForm.staffId);
+      if (!selectedStaff) {
         toast.error('Please select an employee in this branch.');
         return;
       }
-      const bId = actionScope.branchId;
+      const bId = actionScope.branchId || selectedStaff.branchId || effectiveBranchId;
       const notes = addForm.isIntentionalAdditional
         ? `${addForm.notes ? addForm.notes + ' | ' : ''}INTENTIONAL_ADDITIONAL`
-        : addForm.notes;
+        : (addForm.notes || undefined);
 
       const res = await salonService.createOvertime(
         {
@@ -206,7 +224,7 @@ export const ManualOvertimePage: React.FC = () => {
           staffId: addForm.staffId,
           date: addForm.date,
           minutes: Number(addForm.minutes),
-          reason: addForm.reason,
+          reason: addForm.reason.trim(),
           notes,
           status: addForm.status,
         },
@@ -227,7 +245,10 @@ export const ManualOvertimePage: React.FC = () => {
       });
       loadData();
     } catch (err: any) {
-      const errMsg = err.message || 'Failed to create overtime.';
+      let errMsg = err.message || 'Failed to create overtime.';
+      if (err.code === 'OVERTIME_EXISTS' || errMsg.includes('already exists')) {
+        errMsg = `${errMsg} (Tip: Check "Explicit intentional additional overtime" if this is a second entry for the same day)`;
+      }
       toast.error(errMsg);
     }
   };
@@ -813,7 +834,7 @@ export const ManualOvertimePage: React.FC = () => {
                   onValueChange={(val) => setAddForm({ ...addForm, staffId: val })}
                   options={[
                     { value: '', label: '-- Choose Staff Member --' },
-                    ...(actionScope.data?.staff || []).map((s) => ({
+                    ...availableStaff.map((s) => ({
                       value: s.id,
                       label: `${s.name} (${s.employeeCode}) • Rate: Rs. ${(s.overtimeHourlyRate ?? 0).toLocaleString()}/hr`,
                     })),
