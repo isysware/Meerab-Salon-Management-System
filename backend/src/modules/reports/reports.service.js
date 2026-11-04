@@ -5,6 +5,7 @@
 // Voided invoices never count as performance. Tips are reported separately from sales.
 
 import { accruedCommissionForPeriod } from './fullCommissionAccrual.js';
+import { loadStaffLoanMovements, STAFF_LOAN_CATEGORY } from './staffLoanMovements.js';
 import prisma from '../../config/prisma.js';
 import { forbidden, notFound } from '../../lib/AppError.js';
 import { resolveReadBranch } from '../../lib/scope.js';
@@ -187,6 +188,7 @@ const computePerformance = async (staffList, startDate, endDate, filters = {}) =
           date: event.date, time: event.record.time || '', clientName: event.invoice.clientName,
           itemId: share.serviceId || line.itemId, serviceName: share.serviceName ? share.serviceName + ' (' + line.name + ')' : line.name,
           itemType: line.type === 'PACKAGE' ? 'PACKAGE_COMPONENT' : 'SERVICE',
+          quantity: Number(line.quantity || 1),
           cataloguePrice: n(share.net.plus(collectedDiscount)), discountAllocated: n(collectedDiscount), netSales: n(share.net),
           commissionRatePercent: n(share.staffCommissionRate), commissionEarned: n(earned), eventType: event.kind });
       }
@@ -317,7 +319,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
             components: true,
           },
         },
-        payments: { where: { reversedAt: null }, select: { kind: true, billAmountAllocated: true } },
+        payments: { where: { reversedAt: null }, select: { id: true, kind: true, billAmountAllocated: true } },
       },
     }),
     // Dues collections received during this reporting period
@@ -510,6 +512,17 @@ export const incomeExpenseReport = async (actor, query = {}) => {
 
   // Build unified item rows
   const rawRows = [];
+  // Tip Management receipts are the source of collected tips, not invoice targets or staff allocations.
+  // Key by payment so a tip on the original sale never repeats on later dues collection.
+  const tipPaymentIds = [...new Set([
+    ...invoices.flatMap(inv => (inv.payments || []).filter(p => p.kind === 'POS').map(p => p.id)),
+    ...duesPayments.map(p => p.id),
+  ].filter(Boolean))];
+  const tipReceipts = tipPaymentIds.length ? await prisma.tipReceipt.findMany({
+    where: { ...branchFilter, paymentId: { in: tipPaymentIds }, collectionDate: dateRange },
+    select: { paymentId: true, collectedAmount: true },
+  }) : [];
+  const tipsByPayment = new Map(tipReceipts.map(r => [r.paymentId, toDec(r.collectedAmount)]));
 
   // Invoices -> Collection-Based Operational Income (Excl. Tax) & Accrual Recognized Sales
   for (const inv of invoices) {
@@ -520,6 +533,8 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     const allocation = allocatePaymentToInvoice({ invoice: inv, paymentAmount: posBillCollected, previousBillPaid: 0 });
     const collectedNet = allocation.totalCollectedNet;
     const collectedTax = allocation.totalCollectedTax;
+    const tipAmount = posPayments.reduce((sum, p) => sum.plus(tipsByPayment.get(p.id) || 0), toDec(0));
+    const grossReceipt = posBillCollected.plus(tipAmount);
 
     rawRows.push({
       id: `inv-${inv.id}`,
@@ -536,16 +551,17 @@ export const incomeExpenseReport = async (actor, query = {}) => {
       description: `Invoice ${inv.invoiceNumber} - ${inv.clientName || 'Walk-in'} (Gross: ${n(toDec(inv.subtotal))}, Disc: ${n(toDec(inv.discount))})`,
       serviceAmount: n(net),
       tax: n(toDec(inv.tax || 0)),
-      totalBill: n(toDec(inv.total)),
+      totalBill: n(net.plus(inv.tax || 0)),
+      tipAmount: n(tipAmount),
       collectedService: n(collectedNet),
       collectedTax: n(collectedTax),
-      totalReceived: n(posBillCollected),
+      totalReceived: n(grossReceipt),
       remainingDues: n(due),
       income: n(collectedNet),
       recognizedIncome: n(net),
       expense: 0,
-      paid: n(posBillCollected),
-      collectionAmount: n(posBillCollected),
+      paid: n(grossReceipt),
+      collectionAmount: n(grossReceipt),
       discount: n(toDec(inv.discount || 0)),
       remaining: n(due),
       paymentMethod: inv.paymentMethod || 'CASH',
@@ -562,6 +578,8 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     const collectedNet = allocation.totalCollectedNet;
     const collectedTax = allocation.totalCollectedTax;
     const billAmt = toDec(dp.billAmountAllocated);
+    const tipAmount = tipsByPayment.get(dp.id) || toDec(0);
+    const grossReceipt = billAmt.plus(tipAmount);
 
     rawRows.push({
       id: `due-${dp.id}`,
@@ -579,15 +597,16 @@ export const incomeExpenseReport = async (actor, query = {}) => {
       serviceAmount: n(collectedNet),
       tax: n(collectedTax),
       totalBill: n(billAmt),
+      tipAmount: n(tipAmount),
       collectedService: n(collectedNet),
       collectedTax: n(collectedTax),
-      totalReceived: n(billAmt),
+      totalReceived: n(grossReceipt),
       remainingDues: n(toDec(dp.remainingBalance || 0)),
       income: n(collectedNet),
       recognizedIncome: 0,
       expense: 0,
-      paid: n(billAmt),
-      collectionAmount: n(billAmt),
+      paid: n(grossReceipt),
+      collectionAmount: n(grossReceipt),
       discount: 0,
       remaining: n(toDec(dp.remainingBalance || 0)),
       paymentMethod: dp.method || 'CASH',
@@ -617,6 +636,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
       serviceAmount: -n(reversedNet),
       tax: -n(reversedTax),
       totalBill: -n(reversedNet.plus(reversedTax)),
+      tipAmount: -n(toDec(ref.tipReversed || 0)),
       collectedService: -n(reversedNet),
       collectedTax: -n(reversedTax),
       totalReceived: -n(actualCashOut),
@@ -896,6 +916,15 @@ export const incomeExpenseReport = async (actor, query = {}) => {
       cashFlow: n(toDec(movement.amount).times(movement.direction === 'IN' ? 1 : -1)), paymentMethod: method, paymentEventType: movement.type, status: 'POSTED',
     });
   }
+  const loanMovements = ['ADMIN', 'SUPER_ADMIN'].includes(actor.role)
+    ? await loadStaffLoanMovements(branchFilter, ctx.fromDate, ctx.toDate) : [];
+  for (const m of loanMovements) rawRows.push({
+    id: m.id, date: m.date, type: 'SETTLEMENT', category: STAFF_LOAN_CATEGORY,
+    source: 'Staff Loan', reference: m.reference, branchId: m.branchId, branchName: branchMap.get(m.branchId),
+    userOrPayee: m.userName, description: m.description, income: 0, expense: 0, paid: 0, discount: 0, remaining: 0,
+    cashFlow: -m.signedOutflow, paymentMethod: m.paymentSource === 'CASH_DRAWER' ? 'CASH' : 'ONLINE_ACCOUNT',
+    paymentEventType: m.type, status: m.direction === 'IN' ? 'REVERSED' : 'POSTED',
+  });
   const cancellationEvents = await prisma.bookingHistory.findMany({ where: { type: 'BOOKING_CANCELLED',
     booking: branchFilter, ...(actor.role === 'ACCOUNTANT' ? { userId: actor.id } : {}) }, include: { booking: true } });
   for (const event of cancellationEvents) {
@@ -1024,6 +1053,8 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   const netOperatingPosition = round2(grossContribution.minus(totalOperatingExpenses));
 
   const settlementCashFlow = filteredRows.reduce((sum, row) => sum.plus(row.cashFlow || 0), toDec(0));
+  const staffLoanCashOutflow = filteredRows.filter(r => r.source === 'Staff Loan')
+    .reduce((sum, row) => sum.minus(row.cashFlow || 0), toDec(0));
   const totalCollections = filteredRows.reduce((sum, row) => row.type === 'SETTLEMENT' && ['POS', 'BOOKING'].includes(row.source)
     ? sum.plus(row.cashFlow || 0) : sum, totalPaidIncome);
   const totalPaid = totalPaidIncome.minus(totalPaidExpense).plus(settlementCashFlow);
@@ -1038,6 +1069,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   const totalRefundsPaid = refunds.reduce((s, r) => s.plus(toDec(r.cashOut || 0)), toDec(0));
 
   const kpis = {
+    staffLoanCashOutflow: n(staffLoanCashOutflow),
     totalCollectedIncome: n(totalIncome),
     totalRecognizedIncome: n(totalRecognizedIncome),
     totalCollectedTax: n(totalCollectedTax),
@@ -1061,6 +1093,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   };
 
   const totals = {
+    tipAmount: n(filteredRows.reduce((sum, row) => sum.plus(row.tipAmount || 0), toDec(0))),
     income: n(totalIncome),
     collectedIncome: n(totalIncome),
     recognizedIncome: n(totalRecognizedIncome),
@@ -2632,7 +2665,11 @@ export const inventoryReport = async (actor, query = {}) => {
   const branchFilter = ctx.branchId ? { branchId: ctx.branchId } : {};
 
   if (subType === 'valuation') {
-    const [items, batches] = await Promise.all([
+    const today = await getBusinessDate();
+    const todayStr = ymd(today);
+    const isHistorical = ctx.toStr < todayStr;
+
+    const [items, batches, futureMovements] = await Promise.all([
       prisma.inventoryItem.findMany({
         where: {
           ...(query.itemType && query.itemType !== 'ALL' ? { itemType: query.itemType } : {}),
@@ -2643,17 +2680,38 @@ export const inventoryReport = async (actor, query = {}) => {
       prisma.inventoryBatch.findMany({
         where: {
           ...branchFilter,
-          remainingQuantity: { gt: 0 },
+          receivedDate: isHistorical ? { lte: dateOnly(ctx.toStr) } : undefined,
+          ...(isHistorical ? {} : { remainingQuantity: { gt: 0 } }),
         },
         include: {
           item: true,
         },
         orderBy: [{ receivedDate: 'asc' }, { batchNumber: 'asc' }],
       }),
+      isHistorical
+        ? prisma.stockMovement.findMany({
+            where: {
+              ...branchFilter,
+              createdAt: { gt: ctx.toDate },
+              batchId: { not: null },
+            },
+            select: {
+              batchId: true,
+              direction: true,
+              quantity: true,
+            },
+          })
+        : Promise.resolve([]),
     ]);
 
-    const today = await getBusinessDate();
-    const todayStr = ymd(today);
+    const futureMovementsMap = new Map();
+    if (isHistorical && futureMovements.length > 0) {
+      for (const m of futureMovements) {
+        const cur = futureMovementsMap.get(m.batchId) || toDec(0);
+        const delta = m.direction === 'OUT' ? toDec(m.quantity) : toDec(m.quantity).negated();
+        futureMovementsMap.set(m.batchId, cur.plus(delta));
+      }
+    }
 
     let totalCostVal = toDec(0);
     let totalRetailVal = toDec(0);
@@ -2664,8 +2722,12 @@ export const inventoryReport = async (actor, query = {}) => {
 
     const itemStockMap = new Map();
     for (const b of batches) {
-      const cur = itemStockMap.get(b.itemId) || toDec(0);
-      itemStockMap.set(b.itemId, cur.plus(b.remainingQuantity));
+      const futureAdj = futureMovementsMap.get(b.id) || toDec(0);
+      const rem = isHistorical ? max0(toDec(b.remainingQuantity).plus(futureAdj)) : toDec(b.remainingQuantity);
+      if (rem.gt(0)) {
+        const cur = itemStockMap.get(b.itemId) || toDec(0);
+        itemStockMap.set(b.itemId, cur.plus(rem));
+      }
     }
 
     const rows = [];
@@ -2674,8 +2736,11 @@ export const inventoryReport = async (actor, query = {}) => {
       if (query.itemType && query.itemType !== 'ALL' && item.itemType !== query.itemType) continue;
       if (query.categoryId && query.categoryId !== 'ALL' && item.category !== query.categoryId) continue;
 
+      const futureAdj = futureMovementsMap.get(b.id) || toDec(0);
+      const remQty = isHistorical ? max0(toDec(b.remainingQuantity).plus(futureAdj)) : toDec(b.remainingQuantity);
+      if (remQty.lessThanOrEqualTo(0)) continue;
+
       const isConsumable = item.itemType === 'SALON_CONSUMABLE';
-      const remQty = toDec(b.remainingQuantity);
       const unitCost = toDec(b.unitCost);
       const costVal = remQty.times(unitCost);
       const sellingPrice = isConsumable ? toDec(0) : toDec(item.sellingPrice || 0);
@@ -2773,7 +2838,12 @@ export const inventoryReport = async (actor, query = {}) => {
       potentialProfit: n(filteredRetailValue.minus(filteredCostValue)),
     };
 
-    return formatReportResponse({ ...ctx.meta, basisNote: 'Current live inventory custody and valuation as of today; stock counts reflect active available batches.' }, {
+    return formatReportResponse({
+      ...ctx.meta,
+      basisNote: isHistorical
+        ? `Historical inventory valuation as of ${ctx.toStr} reconstructed from recorded stock movements.`
+        : 'Current live inventory custody and valuation as of today; stock counts reflect active available batches.',
+    }, {
       type: subType,
       kpis,
       rows: filteredRows,

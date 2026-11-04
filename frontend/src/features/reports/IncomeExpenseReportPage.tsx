@@ -194,6 +194,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       ['Actual Paid Operating Expenses', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).paidOperatingExpenses)],
       ['Recognized Revenue (Accrual; Separate Information)', formatPKR(reportData.totals.recognizedIncome ?? 0)],
       ['COGS (Separate Accounting Information)', formatPKR(reportData.kpis.cogs ?? 0)],
+      ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.staffLoanCashOutflow ?? 0)],
       ['Report', 'Income & Expense Reports'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -274,6 +275,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       ['Actual Paid Operating Expenses', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).paidOperatingExpenses)],
       ['Recognized Revenue (Accrual; Separate Information)', formatPKR(reportData.totals.recognizedIncome ?? 0)],
       ['COGS (Separate Accounting Information)', formatPKR(reportData.kpis.cogs ?? 0)],
+      ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.staffLoanCashOutflow ?? 0)],
       ['Report', 'Income & Expense Reports'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -358,6 +360,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       ['Actual Paid Operating Expenses', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).paidOperatingExpenses)],
       ['Recognized Revenue (Accrual; Separate Information)', formatPKR(reportData.totals.recognizedIncome ?? 0)],
       ['COGS (Separate Accounting Information)', formatPKR(reportData.kpis.cogs ?? 0)],
+      ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.staffLoanCashOutflow ?? 0)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
@@ -1149,6 +1152,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
                   </tr>
                 )}
 
+                <tr><td colSpan={4} className="py-3 px-4 text-right">Staff Loan Disbursements - Non-Operating (Net of Reversals)</td><td colSpan={2} className="py-3 px-4 text-right font-mono">{formatPKR(reportData?.kpis.staffLoanCashOutflow ?? 0)}</td><td colSpan={2} /></tr>
                 <tr><td colSpan={4} className="py-3 px-4 text-right">Reported Expense Recognition (Reference Only)</td><td colSpan={2} className="py-3 px-4 text-right font-mono">{formatPKR(totals.expense)}</td><td colSpan={2} /></tr>
               </tfoot>
             </table>

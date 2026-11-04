@@ -141,6 +141,9 @@ export const DetailedExpensesReportPage: React.FC = () => {
       ['Report', 'Detailed Expenses Report'],
       ['Basis', 'Actual paid expenses; unpaid liabilities shown separately'],
       ...(reportData.liabilities ? [['Unpaid Salaries (branch, period end)', formatPKR(reportData.liabilities.unpaidSalaries)], ['Unpaid Commissions (branch, period end)', formatPKR(reportData.liabilities.unpaidCommissions)]] as [string, string][] : []),
+      ['Paid Operating Expenses', formatPKR(reportData.kpis.totalExpenses)],
+      ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.nonOperatingCashOutflow ?? 0)],
+      ['Total Cash Outflow', formatPKR(reportData.kpis.totalCashOutflow ?? reportData.totals.amount)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
@@ -182,6 +185,9 @@ export const DetailedExpensesReportPage: React.FC = () => {
     if (!reportData || !reportData.rows.length) return;
     const meta: [string, string][] = [
       ['Report', 'Detailed Expenses Report'],
+      ['Paid Operating Expenses', formatPKR(reportData.kpis.totalExpenses)],
+      ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.nonOperatingCashOutflow ?? 0)],
+      ['Total Cash Outflow', formatPKR(reportData.kpis.totalCashOutflow ?? reportData.totals.amount)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
@@ -225,10 +231,13 @@ export const DetailedExpensesReportPage: React.FC = () => {
       return;
     }
     const meta: [string, string][] = [
+      ['Paid Operating Expenses', formatPKR(reportData.kpis.totalExpenses)],
+      ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.nonOperatingCashOutflow ?? 0)],
+      ['Total Cash Outflow', formatPKR(reportData.kpis.totalCashOutflow ?? reportData.totals.amount)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
-      ['Total Expenses', formatPKR(reportData.totals.amount)],
+      ['Total Cash Outflow', formatPKR(reportData.totals.amount)],
       ...(reportData.liabilities ? [['Unpaid Salaries (branch, period end)', formatPKR(reportData.liabilities.unpaidSalaries)], ['Unpaid Commissions (branch, period end)', formatPKR(reportData.liabilities.unpaidCommissions)]] as [string, string][] : []),
     ];
     const headers = ['#', 'Voucher #', 'Date', 'Branch', 'Category', 'Title', 'Payee', 'Source', 'Status', 'Amount'];
@@ -401,8 +410,9 @@ export const DetailedExpensesReportPage: React.FC = () => {
                 PKR {formatPKR((kpis as any).totalExpenses ?? (kpis as any).netExpenseAmount ?? reportData?.totals?.amount ?? 0)}
               </span>
               <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Net recognized disbursements
+                Paid operating expenses (excludes staff loans)
               </span>
+              <span className="text-xs text-[#78616C] font-medium mt-1 block">Staff loans — non-operating: PKR {formatPKR(reportData.kpis.nonOperatingCashOutflow ?? 0)}</span>
             </div>
           </div>
 
@@ -674,10 +684,10 @@ export const DetailedExpensesReportPage: React.FC = () => {
                 {/* Row 2: Net Operating Disbursements */}
                 <tr>
                   <td colSpan={9} className="py-3 px-4 text-right font-semibold text-slate-700">
-                    Net Recognized Disbursements
+                    Staff Loan Disbursements - Non-Operating (Net of Reversals)
                   </td>
                   <td className="py-3 px-4 text-right font-mono tabular-nums font-extrabold text-[#B82E69] text-sm">
-                    PKR {formatPKR((kpis as any).totalExpenses ?? (kpis as any).netExpenseAmount ?? reportData?.totals?.amount ?? 0)}
+                    PKR {formatPKR(reportData?.kpis.nonOperatingCashOutflow ?? 0)}
                   </td>
                 </tr>
               </tfoot>

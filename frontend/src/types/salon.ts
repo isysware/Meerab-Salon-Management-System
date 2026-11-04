@@ -1294,6 +1294,8 @@ export type CustodyTransactionType =
   | 'TIP_RECEIVED'
   | 'FLOAT_RECEIVED'
   | 'EXPENSE_PAID'
+  | 'STAFF_LOAN_DISBURSEMENT'
+  | 'STAFF_LOAN_REVERSAL'
   | 'EXPENSE_REVERSAL_REFUND'
   | 'INVOICE_REFUND'
   | 'HANDOVER_SETTLEMENT'
@@ -1328,6 +1330,8 @@ export interface BalanceSheetSummary {
   cashTipsTotal: number;
   floatReceivedTotal: number;
   cashExpensesPaidTotal: number;
+  staffLoanDisbursementsTotal?: number;
+  staffLoanReversalsTotal?: number;
   cashRefundsPaidTotal?: number;
   cashReversalsRefundTotal: number;
   approvedHandoversTotal: number;
@@ -1372,6 +1376,9 @@ export type AttendanceStatus =
   | 'ABSENT'
   | 'PAID_LEAVE'
   | 'UNPAID_LEAVE'
+  | 'HOLIDAY'
+  | 'OFF_DAY'
+  | 'WEEKLY_OFF'
   | 'MISSING_PUNCH'
   | 'NOT_RECORDED'
   | 'ON_TIME'
@@ -1692,6 +1699,9 @@ export interface PayslipCalculationDetails {
   payableDays?: number;
   prorationDivisor?: number;
   dailyRateUsed?: number;
+  periodType?: string;
+  startDate?: string;
+  endDate?: string;
   policyNotes: string;
 }
 
@@ -2266,6 +2276,7 @@ export type IncomeExpenseItemType =
   | 'INVENTORY_WRITEOFF';
 
 export interface IncomeExpenseReportRow {
+  tipAmount?: number;
   collectionAmount?: number;
   paymentEventType?: string;
   cashFlow?: number;
@@ -2299,6 +2310,7 @@ export interface IncomeExpenseReportRow {
 }
 
 export interface IncomeExpenseReportKPIs {
+  staffLoanCashOutflow?: number;
   totalCollections?: number;
   totalCollectedIncome?: number;
   totalRecognizedIncome: number;
@@ -2348,7 +2360,9 @@ export interface IncomeExpenseReport {
   kpis: IncomeExpenseReportKPIs;
   rows: IncomeExpenseReportRow[];
   totals: {
+    tipAmount?: number;
     collections?: number;
+    totalCollections?: number;
     income: number;
     collectedIncome?: number;
     recognizedIncome?: number;
@@ -2466,7 +2480,7 @@ export interface TaxReport {
 export interface OperatingProfitStatementRow {
   id: string;
   name: string;
-  section: 'REVENUE' | 'COGS' | 'GROSS_PROFIT' | 'EXPENSE' | 'NET_PROFIT';
+  section: 'REVENUE' | 'COGS' | 'GROSS_PROFIT' | 'EXPENSE' | 'NET_PROFIT' | 'STATUTORY_TAX' | 'MEMORANDUM';
   isHeader?: boolean;
   isSubItem?: boolean;
   isTotal?: boolean;
@@ -2514,6 +2528,8 @@ export interface OperatingProfitKPIs {
   priorOperatingProfit: number;
   revenueGrowthPercent: number | null;
   profitGrowthPercent: number | null;
+  priorCashSurplus?: number;
+  totalGrossCollections?: number;
   outstandingDues?: number;
 
   // Collection-based specific fields
@@ -2555,6 +2571,7 @@ export interface OperatingProfitReportViewData {
     netProfit: number;
     collectedTax?: number;
     collections?: number;
+    totalCollections?: number;
     cashSurplus?: number;
     outstandingDues?: number;
     earnedCommission?: number;
@@ -2587,6 +2604,7 @@ export interface OperatingProfitReport {
     netProfit: number;
     collectedTax?: number;
     collections?: number;
+    totalCollections?: number;
     cashSurplus?: number;
     outstandingDues?: number;
     earnedCommission?: number;
@@ -2976,6 +2994,7 @@ export interface StaffPerformanceServiceItem {
   itemId: string;
   serviceName: string;
   itemType: 'SERVICE' | 'PACKAGE_COMPONENT';
+  quantity?: number;
   cataloguePrice: number;
   discountAllocated: number;
   netSales: number;
@@ -3156,6 +3175,8 @@ export interface DetailedExpenseCategoryItem {
 }
 
 export interface DetailedExpensesReportKPIs {
+  nonOperatingCashOutflow?: number;
+  totalCashOutflow?: number;
   unpaidSalaries?: number;
   unpaidCommissions?: number;
   paidSalaries?: number;

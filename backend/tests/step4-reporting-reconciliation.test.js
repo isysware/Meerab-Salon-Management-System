@@ -21,6 +21,7 @@ vi.mock('../src/lib/balances.js', async original => ({ ...await original(), acco
 vi.mock('../src/modules/cash/cash.service.js', async original => ({ ...await original(), drawerDTOs: vi.fn(async () => []) }));
 
 import { computePeriodMetrics, inventoryReport, attendanceOvertimeReport } from '../src/modules/reports/reports.service.js';
+import { detailedIncomeReport } from '../src/modules/reports/detailedCollections.report.js';
 import { computeBranchMetrics } from '../src/modules/dashboard/dashboard.service.js';
 import { evaluateEmployeePayroll } from '../src/lib/calculations/payrollCalculations.js';
 import { allocatePaymentToInvoice } from '../src/lib/calculations/collectionAllocation.js';
@@ -211,6 +212,37 @@ describe('Batch 4B: Supplier & Inventory Reporting', () => {
     expect(report.totals.retailValue).toBe(2000);
     expect(report.totals.potentialProfit).toBe(1000);
   });
+
+  it('F17: Reconstructs historical inventory valuation as-of selected past date from stock movements', async () => {
+    db.inventoryItem.findMany.mockResolvedValue([
+      { id: 'i1', name: 'Argan Oil', category: 'Hair', sku: 'AO-1', minStockLevel: 2 },
+    ]);
+    // Current remaining is 5, but on Oct 20 (after selected as-of date Oct 15) 2 units were consumed OUT
+    db.inventoryBatch.findMany.mockResolvedValue([
+      {
+        id: 'b-hist', itemId: 'i1', branchId: 'b1', batchNumber: 'BAT-HIST',
+        receivedDate: day('2026-10-01'), remainingQuantity: D(5), unitCost: D(500),
+        item: { id: 'i1', name: 'Argan Oil', sku: 'AO-1', category: 'Hair', sellingPrice: D(800) },
+      },
+    ]);
+    // Movement after Oct 15
+    db.stockMovement.findMany.mockResolvedValue([
+      {
+        batchId: 'b-hist',
+        direction: 'OUT',
+        quantity: D(2),
+      },
+    ]);
+
+    const report = await inventoryReport(actor, { type: 'valuation', startDate: '2026-10-15', endDate: '2026-10-15' });
+
+    expect(report.rows.length).toBe(1);
+    // Historical reconstructed quantity as of Oct 15: 5 (current) + 2 (future OUT) = 7
+    expect(report.rows[0].remainingQuantity).toBe(7);
+    expect(report.rows[0].costValue).toBe(3500); // 7 * 500 = 3500
+    expect(report.rows[0].retailValue).toBe(5600); // 7 * 800 = 5600
+    expect(report.totals.costValue).toBe(3500);
+  });
 });
 
 describe('Batch 4D: Staff Performance, Overtime & Commission History', () => {
@@ -345,5 +377,233 @@ describe('Step 4 Cross-Report Reconciliation: Salary & Commission Invariants', (
     // Reconcile duplicate check
     const duplicateCommissionExpense = commissionEarned > 50 ? commissionEarned - 50 : 0;
     expect(duplicateCommissionExpense).toBe(0);
+  });
+
+  it('Dual-View P&L verification: Accounting P&L recognizes full Rs. 100 commission, Collection-based recognizes Rs. 50 payable', async () => {
+    // Single service invoice of 1,000 net, 100 tax = 1,100 total
+    const inv = {
+      id: 'inv-dual-1',
+      invoiceNumber: 'INV-DUAL-1',
+      date: day('2026-10-01'),
+      branchId: 'b1',
+      subtotal: D(1000),
+      discount: D(0),
+      netSales: D(1000),
+      tax: D(100),
+      total: D(1100),
+      amountPaid: D(550),
+      amountDue: D(550),
+      lines: [{
+        id: 'l1',
+        type: 'SERVICE',
+        name: 'Keratin',
+        netSales: D(1000),
+        tax: D(100),
+        staffId: 'st-1',
+        staffName: 'Zahra',
+        staffCommissionRate: D(10), // 10%
+      }],
+      payments: [{
+        id: 'pay-1',
+        kind: 'POS',
+        billAmountAllocated: D(550),
+        createdAt: day('2026-10-01'),
+      }],
+    };
+
+    db.invoice.findMany.mockResolvedValue([inv]);
+
+    const metrics = await computePeriodMetrics(
+      'b1',
+      '2026-10-01',
+      '2026-10-31',
+      new Date('2026-09-30T19:00:00Z'),
+      new Date('2026-10-31T18:59:59.999Z')
+    );
+
+    // 1. Accounting P&L (Accrual basis):
+    // Full recognized service revenue = 1,000
+    expect(metrics.serviceSales).toBe(1000);
+    expect(metrics.totalNetSales).toBe(1000);
+    // Full accrued commission expense = 100 (10% of 1,000)
+    expect(metrics.commissionExpenses).toBe(100);
+    // Net Operating Profit = 1,000 - 100 = 900
+    expect(metrics.netOperatingProfit).toBe(900);
+
+    // 2. Collection-Based Performance:
+    // Collected Service Revenue = 500
+    expect(metrics.collectedServiceSales).toBe(500);
+    expect(metrics.totalCollectedRevenue).toBe(500);
+    // Tax Collected = 50
+    expect(metrics.totalCollectedTax).toBe(50);
+    // Commission Payable (Earned on collection) = 50
+    expect(metrics.collectionEarnedCommission).toBe(50);
+    expect(metrics.unpaidCommissionLiability).toBe(50);
+    // Commission Paid = 0
+    expect(metrics.paidCommissionExpenses).toBe(0);
+    // Cash Operating Surplus = 500 (collected revenue - 0 cash outflow)
+    expect(metrics.collectionCashSurplus).toBe(500);
+  });
+
+  it('preserves whole service quantity (1, not 0.5) in Detailed Income Report on partial payment', async () => {
+    db.systemSetting.findUnique.mockResolvedValue({ key: 'businessDate', value: '2026-11-04' });
+    db.branch.findMany.mockResolvedValue([{ id: 'b1', name: 'Main Branch' }]);
+
+    const inv = {
+      id: 'inv-partial-qty',
+      invoiceNumber: 'INV-PQ-001',
+      date: day('2026-11-04'),
+      time: '12:00:00',
+      branchId: 'b1',
+      clientName: 'Walk-in Customer',
+      clientPhone: '03001234567',
+      subtotal: D(1000),
+      discount: D(0),
+      netSales: D(1000),
+      tax: D(100),
+      tip: D(0),
+      total: D(1100),
+      amountPaid: D(550),
+      amountDue: D(550),
+      advanceAdjusted: D(0),
+      status: 'PARTIAL',
+      lifecycle: 'ACTIVE',
+      processedByName: 'Cashier',
+      lines: [
+        {
+          id: 'line-1',
+          type: 'SERVICE',
+          name: 'Haircut',
+          code: 'HC-01',
+          quantity: 1,
+          unitPrice: D(1000),
+          netSales: D(1000),
+          tax: D(100),
+          taxRate: D(0.1),
+          discountAllocated: D(0),
+          staffId: 's1',
+          staffName: 'Ali Stylist',
+          staffCommissionRate: D(10),
+          components: [],
+        },
+      ],
+      payments: [
+        {
+          id: 'pay-1',
+          date: day('2026-11-04'),
+          createdAt: new Date('2026-11-04T12:00:00Z'),
+          method: 'CASH',
+          amount: D(550),
+          billAmountAllocated: D(550),
+          tipAmountAllocated: D(0),
+          reversedAt: null,
+        },
+      ],
+      refunds: [],
+      booking: null,
+    };
+
+    db.invoice.findMany.mockResolvedValue([inv]);
+
+    const report = await detailedIncomeReport(actor, {
+      branchId: 'b1',
+      startDate: '2026-11-01',
+      endDate: '2026-11-30',
+    });
+
+    expect(report.rows).toHaveLength(1);
+    const row = report.rows[0];
+    // Quantity MUST remain 1, NEVER fractional 0.5
+    expect(row.quantity).toBe(1);
+    expect(row.netSales).toBe(500);
+    expect(row.tax).toBe(50);
+    expect(row.total).toBe(550);
+    expect(row.outstanding).toBe(550);
+    // KPI serviceCount must also be 1, never 0.5
+    expect(report.kpis.serviceCount).toBe(1);
+  });
+
+  it('correctly handles Partial Payment with Tip: 500 service + 50 tax + 100 tip = 650 total, 550 dues', async () => {
+    db.systemSetting.findUnique.mockResolvedValue({ key: 'businessDate', value: '2026-11-04' });
+    db.branch.findMany.mockResolvedValue([{ id: 'b1', name: 'Main Branch' }]);
+
+    const inv = {
+      id: 'inv-partial-tip',
+      invoiceNumber: 'INV-PT-001',
+      date: day('2026-11-04'),
+      time: '14:00:00',
+      branchId: 'b1',
+      clientName: 'Nadia Butt',
+      clientPhone: '03001234567',
+      subtotal: D(1000),
+      discount: D(0),
+      netSales: D(1000),
+      tax: D(100),
+      tip: D(100),
+      total: D(1200),
+      amountPaid: D(650),
+      amountDue: D(550),
+      advanceAdjusted: D(0),
+      status: 'PARTIAL',
+      lifecycle: 'ACTIVE',
+      processedByName: 'Cashier',
+      lines: [
+        {
+          id: 'line-tip-1',
+          type: 'SERVICE',
+          name: 'Balayage Color',
+          code: 'BC-01',
+          quantity: 1,
+          unitPrice: D(1000),
+          netSales: D(1000),
+          tax: D(100),
+          taxRate: D(0.1),
+          discountAllocated: D(0),
+          staffId: 's1',
+          staffName: 'Ali Stylist',
+          staffCommissionRate: D(10),
+          components: [],
+        },
+      ],
+      payments: [
+        {
+          id: 'pay-tip-1',
+          date: day('2026-11-04'),
+          createdAt: new Date('2026-11-04T14:00:00Z'),
+          method: 'CASH',
+          amount: D(650),
+          billAmountAllocated: D(550),
+          tipAmountAllocated: D(100),
+          reversedAt: null,
+        },
+      ],
+      refunds: [],
+      booking: null,
+    };
+
+    db.invoice.findMany.mockResolvedValue([inv]);
+
+    const report = await detailedIncomeReport(actor, {
+      branchId: 'b1',
+      startDate: '2026-11-01',
+      endDate: '2026-11-30',
+    });
+
+    expect(report.rows).toHaveLength(1);
+    const row = report.rows[0];
+    expect(row.quantity).toBe(1);
+    expect(row.netSales).toBe(500);
+    expect(row.tax).toBe(50);
+    expect(row.tip).toBe(100);
+    expect(row.total).toBe(550);
+    expect(row.outstanding).toBe(550);
+    expect(row.payments[0].amount).toBe(650);
+
+    // Report KPIs
+    expect(report.kpis.recognizedNetRevenue).toBe(500);
+    expect(report.kpis.netTaxLiability).toBe(50);
+    expect(report.kpis.tipsCollected).toBe(100);
+    expect(report.kpis.totalPaid).toBe(650);
+    expect(report.kpis.serviceCount).toBe(1);
   });
 });

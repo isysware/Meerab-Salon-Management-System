@@ -91,7 +91,7 @@ export function evaluateEmployeePayroll(
 
   // Dates for working days in month (used for reference)
   const allMonthDates = Array.from({ length: totalCalendarDays }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`);
-  const fullMonthStaff = { ...staff, joiningDate: undefined };
+  const fullMonthStaff = { ...staff, joiningDate: '1970-01-01' };
   const workingDaysInMonth = allMonthDates.filter((dateStr) => isWorkingDay(dateStr, fullMonthStaff, branchHolidays).isWorking).length;
 
   // Actual dates evaluated:

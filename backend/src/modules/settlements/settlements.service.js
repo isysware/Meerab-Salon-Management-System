@@ -6,6 +6,7 @@
 // Settlements move custody only — never income or expense. Nobody may approve their own settlement.
 
 import prisma from '../../config/prisma.js';
+import { isStaffLoanMovement } from '../reports/staffLoanMovements.js';
 import { auditLog } from '../../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../../lib/AppError.js';
 import { assertBranchAccess, resolveReadBranch, resolveWriteBranch } from '../../lib/scope.js';
@@ -86,7 +87,8 @@ export const custodyStatement = async (actor, { userId, branchId, drawerId, star
     if (!transactions.length) running = opening;
     running = running.plus(signed);
     transactions.push({
-      id: m.id, date: toDateString(m.createdAt), time: clockTime(m.createdAt), type: CUSTODY_TYPE[m.type] ?? 'VARIANCE_ADJUSTMENT',
+      id: m.id, date: toDateString(m.createdAt), time: clockTime(m.createdAt),
+      type: isStaffLoanMovement(m) ? (m.direction === 'OUT' ? 'STAFF_LOAN_DISBURSEMENT' : 'STAFF_LOAN_REVERSAL') : CUSTODY_TYPE[m.type] ?? 'VARIANCE_ADJUSTMENT',
       referenceNumber: m.reference ?? m.type, description: m.description ?? m.type,
       debit: m.direction === 'IN' ? num(m.amount) : 0, credit: m.direction === 'OUT' ? num(m.amount) : 0,
       cashIn: m.direction === 'IN' ? num(m.amount) : 0, cashOut: m.direction === 'OUT' ? num(m.amount) : 0,
@@ -125,6 +127,8 @@ export const custodyStatement = async (actor, { userId, branchId, drawerId, star
       bookingAdvancesTotal: total(['BOOKING_ADVANCE'], 'IN'), bookingRefundsTotal: total(['BOOKING_REFUND'], 'OUT'),
       cashTipsTotal: total(['TIP_RECEIVED'], 'IN'), floatReceivedTotal: total(['FLOAT_RECEIVED'], 'IN'),
       cashExpensesPaidTotal: total(['EXPENSE_PAID'], 'OUT'),
+      staffLoanDisbursementsTotal: total(['STAFF_LOAN_DISBURSEMENT'], 'OUT'),
+      staffLoanReversalsTotal: total(['STAFF_LOAN_REVERSAL'], 'IN'),
       cashRefundsPaidTotal: total(['INVOICE_REFUND'], 'OUT'),
       cashReversalsRefundTotal: total(['EXPENSE_REVERSAL_REFUND'], 'IN'),
       approvedHandoversTotal: total(['HANDOVER_SETTLEMENT'], 'OUT'), expectedCashInCustody: running.toNumber(),

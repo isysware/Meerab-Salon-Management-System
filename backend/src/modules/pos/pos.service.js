@@ -97,10 +97,23 @@ export const clientOutstanding = async (actor, { branchId, clientIdOrPhone }) =>
 
 // ═══ SHARED PAYMENT HANDLING ══════════════════════════════════════════════════
 
-const validatePaymentShape = (p, { allowTip }) => {
+const validatePaymentShape = (p, { allowTip, expectedTip } = {}) => {
   const amount = round2(p.amount);
-  const bill = round2(p.billAllocation);
-  const tip = round2(p.tipAllocation);
+  let bill = p.billAllocation !== undefined ? round2(p.billAllocation) : null;
+  let tip = p.tipAllocation !== undefined ? round2(p.tipAllocation) : null;
+  if (bill === null && tip === null) {
+    if (allowTip && expectedTip && expectedTip.gt(0)) {
+      tip = round2(Decimal.min(amount, expectedTip));
+      bill = round2(amount.minus(tip));
+    } else {
+      bill = amount;
+      tip = toDec(0);
+    }
+  } else if (bill === null) {
+    bill = round2(amount.minus(tip || 0));
+  } else if (tip === null) {
+    tip = round2(amount.minus(bill || 0));
+  }
   if ([amount, bill, tip].some((v) => v.lessThan(0))) throw badRequest('INVALID_PAYMENT', 'All payment amounts must be finite, non-negative numbers.');
   if (!bill.plus(tip).equals(amount)) {
     throw badRequest('PAYMENT_ALLOCATION_MISMATCH', `Payment receipt error: bill allocation (${bill}) + tip allocation (${tip}) must equal payment amount (${amount}).`);
@@ -296,7 +309,12 @@ export const postInvoice = async (input, actor, idempotencyKey, request) => {
     const total = round2(billTotal.plus(tip));
 
     // ── Payments ──
-    const payments = (input.payments || []).map((p) => ({ p, amounts: validatePaymentShape(p, { allowTip: true }) }));
+    let remainingTipTarget = tip;
+    const payments = (input.payments || []).map((p) => {
+      const amounts = validatePaymentShape(p, { allowTip: true, expectedTip: remainingTipTarget });
+      remainingTipTarget = round2(Decimal.max(0, remainingTipTarget.minus(amounts.tip)));
+      return { p, amounts };
+    });
     const sum = (f) => round2(payments.reduce((s, x) => s.plus(x.amounts[f]), toDec(0)));
     const received = sum('amount');
     const billPaid = sum('bill');
@@ -313,12 +331,12 @@ export const postInvoice = async (input, actor, idempotencyKey, request) => {
     // ── Customer: dues need a named, reachable customer ──
     let clientName = input.clientName?.trim();
     let clientPhone = input.clientPhone?.trim();
+    const phoneDigits = normalizePhoneDigits(clientPhone);
     if (amountDue.greaterThan(0)) {
       if (isWalkIn(clientName)) throw badRequest('CUSTOMER_REQUIRED', 'A specific customer name is required for unpaid or partial balance invoices so outstanding amounts can be followed up.');
-      if (!clientPhone) throw badRequest('PHONE_REQUIRED', 'A contact phone number is required for unpaid or partial balance invoices.');
+      if (!clientPhone || phoneDigits.length < 10) throw badRequest('PHONE_REQUIRED', 'A contact phone number (at least 10 digits) is required for unpaid or partial balance invoices.');
     }
     let client = null;
-    const phoneDigits = normalizePhoneDigits(clientPhone);
     if (input.clientId || (!isWalkIn(clientName) && phoneDigits.length >= 10)) {
       client = await findOrCreateClient(tx, {
         branchId, clientId: input.clientId, name: clientName, phone: clientPhone,
@@ -341,7 +359,7 @@ export const postInvoice = async (input, actor, idempotencyKey, request) => {
         staffId: drafts[0].staff.id === 'house' ? null : drafts[0].staff.id,
         staffName: drafts[0].staff.id === 'house' ? 'House / Salon' : drafts[0].staff.name,
         subtotal, discount: totalDiscount, discountType: input.discountType || 'FIXED', discountValue: round2(discountValue),
-        netSales, tax, tip, total, status, amountPaid: received.plus(advanceAdjusted), amountDue,
+        netSales, tax, tip: tipPaid, total: round2(billTotal.plus(tipPaid)), status, amountPaid: received.plus(advanceAdjusted), amountDue,
         bookingId: booking?.id || null, advanceAdjusted,
         paymentMethod: payments.filter((x) => x.amounts.amount.greaterThan(0)).length > 1 ? 'SPLIT' : payments.find((x) => x.amounts.amount.greaterThan(0))?.p.method ?? 'CASH',
         processedByUserId: actor.id, processedByName: actor.name, idempotencyKey: idempotencyKey ?? input.idempotencyKey ?? null,

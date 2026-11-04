@@ -45,7 +45,7 @@ export async function detailedIncomeReport(actor, query = {}) {
       itemCode: line.code || '', itemName: line.name, staffId: query.staffId !== 'ALL' && query.staffId ? query.staffId : line.staffId,
       staffName: (line.components || []).filter(c => !query.staffId || query.staffId === 'ALL' || c.staffId === query.staffId)
         .map(c => c.staffName).filter(Boolean).join(', ') || line.staffName || 'House / Salon',
-      quantity: toDec(line.quantity).times(fraction).toNumber(), unitPrice: n(line.unitPrice),
+      quantity: Number(line.quantity || 1), unitPrice: n(line.unitPrice),
       gross: n(net.plus(discount)), discount: n(discount), netSales: n(net), refundedNet: net.lt(0) ? n(net.negated()) : 0,
       recognizedNet: n(net), collectedNet: n(net), taxRate: n(toDec(line.taxRate).times(100)),
       tax: n(tax), netTax: n(tax), total: n(net.plus(tax)), tip: n(tip), outstanding: n(e.outstanding),
@@ -72,7 +72,16 @@ export async function detailedIncomeReport(actor, query = {}) {
   for (const type of ['SERVICE', 'PRODUCT', 'PACKAGE']) {
     const selected = rows.filter(r => r.incomeSource === type);
     kpis[`${type.toLowerCase()}Revenue`] = sum('recognizedNet', selected);
-    kpis[`${type.toLowerCase()}Count`] = sum('quantity', selected);
+    const countedLines = new Set();
+    let unitCount = 0;
+    for (const r of selected) {
+      const lineKey = `${r.invoiceId}:${r.itemCode || r.itemName}`;
+      if (!countedLines.has(lineKey)) {
+        countedLines.add(lineKey);
+        unitCount += Number(r.quantity || 1);
+      }
+    }
+    kpis[`${type.toLowerCase()}Count`] = unitCount;
   }
   return formatReportResponse(ctx.meta, { kpis, rows, totals });
 }

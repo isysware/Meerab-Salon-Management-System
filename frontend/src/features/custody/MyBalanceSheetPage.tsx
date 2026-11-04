@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from '@/context/RouterContext';
@@ -179,6 +180,7 @@ export const MyBalanceSheetPage: React.FC = () => {
     return transactions.filter(
       (t) =>
         t.cashIn > 0 ||
+        t.type === 'STAFF_LOAN_REVERSAL' ||
         t.type === 'POS_SALE' ||
         t.type === 'DUES_COLLECTION' ||
         t.type === 'TIP_RECEIVED' ||
@@ -190,6 +192,7 @@ export const MyBalanceSheetPage: React.FC = () => {
     return transactions.filter(
       (t) =>
         t.cashOut > 0 ||
+        t.type === 'STAFF_LOAN_DISBURSEMENT' ||
         t.type === 'EXPENSE_PAID' ||
         t.type === 'INVOICE_REFUND' ||
         t.type === 'HANDOVER_SETTLEMENT'
@@ -213,11 +216,13 @@ export const MyBalanceSheetPage: React.FC = () => {
   const bookingAdvances = summary?.bookingAdvancesTotal ?? 0;
   const bookingRefunds = summary?.bookingRefundsTotal ?? 0;
   const totalCashCollections = cashSales + duesCollected + tipsCollected + bookingAdvances || totalCollections;
-  const cashExpenses = summary?.cashExpensesPaidTotal ?? expensesList.filter((t) => t.type !== 'INVOICE_REFUND' && t.type !== 'HANDOVER_SETTLEMENT').reduce((acc, t) => acc + (t.cashOut || 0), 0);
+  const cashExpenses = summary?.cashExpensesPaidTotal ?? expensesList.filter((t) => t.type !== 'INVOICE_REFUND' && t.type !== 'HANDOVER_SETTLEMENT' && t.type !== 'STAFF_LOAN_DISBURSEMENT').reduce((acc, t) => acc + (t.cashOut || 0), 0);
   const cashRefunds = (summary?.cashRefundsPaidTotal ?? expensesList.filter((t) => t.type === 'INVOICE_REFUND').reduce((acc, t) => acc + (t.cashOut || 0), 0)) + bookingRefunds;
   const handovers = summary?.approvedHandoversTotal ?? expensesList.filter((t) => t.type === 'HANDOVER_SETTLEMENT').reduce((acc, t) => acc + (t.cashOut || 0), 0);
   const nonCash = summary?.onlineCollectionsTotal ?? 0;
-  const expectedCash = summary?.expectedCashInCustody ?? Math.max(0, openingCash + totalCashCollections - cashExpenses - cashRefunds - handovers);
+  const loanCash = (type: CustodyTransaction['type'], field: 'cashIn' | 'cashOut') => transactions.filter(t => t.type === type).reduce((sum, t) => sum.plus(t[field] || 0), new Decimal(0));
+  const staffLoanOutflow = new Decimal(summary?.staffLoanDisbursementsTotal ?? loanCash('STAFF_LOAN_DISBURSEMENT', 'cashOut')).minus(summary?.staffLoanReversalsTotal ?? loanCash('STAFF_LOAN_REVERSAL', 'cashIn')).toDecimalPlaces(2).toNumber();
+  const expectedCash = summary?.expectedCashInCustody ?? Math.max(0, openingCash + totalCashCollections - cashExpenses - staffLoanOutflow - cashRefunds - handovers);
   const remainingUnsettled = Math.max(0, expectedCash);
   const isSettled = remainingUnsettled === 0;
 
@@ -234,6 +239,7 @@ export const MyBalanceSheetPage: React.FC = () => {
       ['Branch', summary?.branch?.name || selectedBranchId],
       ['Period', selectedPeriod],
       ['Expected Cash', formatPKR(expectedCash)],
+      ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(staffLoanOutflow)],
       ['Generated At', new Date().toLocaleString()],
     ];
 
@@ -241,7 +247,7 @@ export const MyBalanceSheetPage: React.FC = () => {
     const collRows = collectionsList.map((t, idx) => [
       idx + 1,
       t.referenceNumber || '—',
-      t.type === 'POS_SALE' ? 'Collection' : t.type === 'DUES_COLLECTION' ? 'Dues' : t.type === 'TIP_RECEIVED' ? 'Tip' : 'Collection',
+      t.type === 'STAFF_LOAN_REVERSAL' ? 'Staff Loan Reversal' : t.type === 'POS_SALE' ? 'Collection' : t.type === 'DUES_COLLECTION' ? 'Dues' : t.type === 'TIP_RECEIVED' ? 'Tip' : 'Collection',
       (t as any).paymentMethod || 'CASH',
       `PKR ${(t.cashIn || 0).toLocaleString()}`,
     ]);
@@ -271,6 +277,7 @@ export const MyBalanceSheetPage: React.FC = () => {
       ['User', (summary?.user?.name || user.name)],
       ['Period', selectedPeriod],
       ['Expected Cash', formatPKR(expectedCash)],
+      ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(staffLoanOutflow)],
       ['Generated At', new Date().toLocaleString()],
     ];
 
@@ -288,7 +295,7 @@ export const MyBalanceSheetPage: React.FC = () => {
       ]),
       ...expensesList.map((t, i) => [
         collectionsList.length + i + 1,
-        'Expense',
+        t.type === 'STAFF_LOAN_DISBURSEMENT' ? 'Non-Operating Staff Loan' : 'Expense',
         t.referenceNumber || '—',
         t.description || t.type,
         (t as any).paymentMethod || 'CASH',
@@ -742,6 +749,7 @@ export const MyBalanceSheetPage: React.FC = () => {
             </span>
           </div>
 
+          <div className="flex justify-between items-center py-3 border-b border-slate-100"><span className="text-slate-700 font-medium">Staff Loan Disbursements - Non-Operating (Net of Reversals):</span><span>{formatPKR(staffLoanOutflow)}</span></div>
           {/* Row 3: (-) Cash Expenses (Credit / Out) */}
           <div className="flex items-center justify-between px-6 py-3.5 bg-rose-50/20">
             <span className="text-slate-700 font-medium">(-) Cash Expenses (Credit / Out):</span>

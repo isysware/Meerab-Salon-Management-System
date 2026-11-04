@@ -542,7 +542,7 @@ export const COGSReportPage: React.FC = () => {
                   </div>
                   <div className="mt-3 relative z-10">
                     <span className="text-xl sm:text-2xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
-                      PKR {formatPKR(activeViewData.kpis.totalGrossCollections ?? activeViewData.totals.totalCollections ?? 0)}
+                      PKR {formatPKR(activeViewData.kpis.totalGrossCollections ?? activeViewData.totals.collections ?? 0)}
                     </span>
                     <span className="text-[11px] text-[#78616C] font-medium mt-1 block truncate">
                       Net cash & bank received

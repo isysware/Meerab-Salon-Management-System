@@ -1677,6 +1677,10 @@ export const POSBillingPage: React.FC = () => {
     setSplitCashTendered(billAndTip);
     setSplitOnlinePayments([]);
 
+    // Sync walk-in state with entered client name
+    const hasName = Boolean(clientName && clientName.trim() && clientName.trim().toLowerCase() !== 'walk-in customer' && clientName.trim().toLowerCase() !== 'walk-in');
+    if (hasName) setIsWalkIn(false);
+
     setIsCheckoutOpen(true);
   };
 
@@ -1752,9 +1756,9 @@ export const POSBillingPage: React.FC = () => {
         const retained = Math.min(cashTendered, calculations.fullInvoiceTotal);
         const change = Math.max(0, roundCurrency(cashTendered - retained));
 
-        // Allocate retained to bill first, then tip
-        const billAlloc = Math.min(retained, billTotal);
-        const tipAlloc = Math.min(Math.max(0, roundCurrency(retained - billAlloc)), tipAmount);
+        // When tip is present, allocate tip first as staff liability; remainder pays full/partial bill
+        const tipAlloc = Math.min(retained, tipAmount);
+        const billAlloc = roundCurrency(retained - tipAlloc);
 
         if (retained > 0) {
           payments.push({
@@ -1777,8 +1781,8 @@ export const POSBillingPage: React.FC = () => {
           throw new Error(`Online payment cannot exceed total due (${calculations.fullInvoiceTotal} PKR).`);
         }
 
-        const billAlloc = Math.min(onlineAmount, billTotal);
-        const tipAlloc = Math.min(Math.max(0, roundCurrency(onlineAmount - billAlloc)), tipAmount);
+        const tipAlloc = Math.min(onlineAmount, tipAmount);
+        const billAlloc = roundCurrency(onlineAmount - tipAlloc);
 
         if (onlineAmount > 0 && selectedAcc) {
           payments.push({
@@ -1791,6 +1795,8 @@ export const POSBillingPage: React.FC = () => {
           });
         }
       } else if (checkoutMode === 'SPLIT') {
+        let remainingTipToAllocate = tipAmount;
+
         // Cash component
         const cAmount = roundCurrency(splitCashAmount || 0);
         const cTendered = roundCurrency(splitCashTendered !== undefined && splitCashTendered !== null ? splitCashTendered : cAmount);
@@ -1798,8 +1804,10 @@ export const POSBillingPage: React.FC = () => {
         const cChange = Math.max(0, roundCurrency(cTendered - cAmount));
 
         if (actualCashRetained > 0) {
-          const bAlloc = Math.min(actualCashRetained, billTotal);
-          const tAlloc = Math.min(Math.max(0, roundCurrency(actualCashRetained - bAlloc)), tipAmount);
+          const tAlloc = Math.min(actualCashRetained, remainingTipToAllocate);
+          const bAlloc = roundCurrency(actualCashRetained - tAlloc);
+          remainingTipToAllocate = roundCurrency(remainingTipToAllocate - tAlloc);
+
           payments.push({
             method: 'CASH',
             amount: actualCashRetained,
@@ -1811,20 +1819,13 @@ export const POSBillingPage: React.FC = () => {
         }
 
         // Online components
-        let accumulatedBill = payments.reduce((sum, p) => sum + p.billAllocation, 0);
-        let accumulatedTip = payments.reduce((sum, p) => sum + p.tipAllocation, 0);
-
         for (const op of splitOnlinePayments) {
           const acc = paymentAccounts.find((a) => a.id === op.paymentAccountId);
           const opAmount = roundCurrency(op.amount || 0);
           if (opAmount > 0 && acc) {
-            const remainingBill = Math.max(0, roundCurrency(billTotal - accumulatedBill));
-            const bAlloc = Math.min(opAmount, remainingBill);
-            const remainingTip = Math.max(0, roundCurrency(tipAmount - accumulatedTip));
-            const tAlloc = Math.min(Math.max(0, roundCurrency(opAmount - bAlloc)), remainingTip);
-
-            accumulatedBill += bAlloc;
-            accumulatedTip += tAlloc;
+            const tAlloc = Math.min(opAmount, remainingTipToAllocate);
+            const bAlloc = roundCurrency(opAmount - tAlloc);
+            remainingTipToAllocate = roundCurrency(remainingTipToAllocate - tAlloc);
 
             payments.push({
               method: 'ONLINE_ACCOUNT',
@@ -1845,10 +1846,11 @@ export const POSBillingPage: React.FC = () => {
       if (isDueRemaining) {
         const cleanName = (clientName || '').trim();
         const cleanPhone = (clientPhone || '').replace(/\D/g, '');
-        if (!cleanName || cleanName.toLowerCase() === 'walk-in customer' || cleanName.toLowerCase() === 'walk-in' || isWalkIn) {
+        const isAnonymous = !cleanName || cleanName.toLowerCase() === 'walk-in customer' || cleanName.toLowerCase() === 'walk-in' || cleanName.toLowerCase() === 'n/a';
+        if (isAnonymous) {
           throw new Error('A specific customer name is required for Partial or Unpaid invoices so dues are tracked in their Client Ledger.');
         }
-        if (!cleanPhone || cleanPhone.length < 10) {
+        if (cleanPhone.length < 10) {
           throw new Error('A valid customer contact phone number (at least 10 digits) is required for Partial or Unpaid invoices.');
         }
       }
@@ -2447,6 +2449,7 @@ export const POSBillingPage: React.FC = () => {
                       onChange={(e) => {
                         const val = e.target.value;
                         setClientName(val);
+                        if (val.trim()) setIsWalkIn(false);
                         setCustomerSearchQuery(val);
                         setShowCartClientDropdown(Boolean(val.trim().length >= 2));
                       }}
@@ -2467,6 +2470,7 @@ export const POSBillingPage: React.FC = () => {
                       onChange={(e) => {
                         const val = e.target.value;
                         setClientPhone(val);
+                        if (val.trim()) setIsWalkIn(false);
                         setCustomerSearchQuery(val);
                         setShowCartClientDropdown(Boolean(val.trim().length >= 3));
                       }}
@@ -3381,10 +3385,11 @@ export const POSBillingPage: React.FC = () => {
                 ? 0
                 : Math.max(0, roundCurrency(splitCashGiven - splitCashShare));
 
+              const cleanClientName = (clientName || '').trim();
+              const cleanClientDigits = (clientPhone || '').replace(/\D/g, '');
               const isNamedClientValid =
-                !isWalkIn &&
-                Boolean(clientName && clientName.trim() && clientName.trim().toLowerCase() !== 'walk-in customer' && clientName.trim().toLowerCase() !== 'walk-in') &&
-                Boolean(clientPhone && clientPhone.replace(/\D/g, '').length >= 10);
+                Boolean(cleanClientName && cleanClientName.toLowerCase() !== 'walk-in customer' && cleanClientName.toLowerCase() !== 'walk-in' && cleanClientName.toLowerCase() !== 'n/a') &&
+                cleanClientDigits.length >= 10;
 
               return (
                 <div className="space-y-3">

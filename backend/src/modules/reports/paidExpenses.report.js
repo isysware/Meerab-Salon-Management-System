@@ -4,6 +4,7 @@ import { dateOnly } from '../../lib/dates.js';
 import { round2, toDec } from '../../lib/money.js';
 import { resolveReportContext, formatReportResponse } from '../../lib/reportRange.js';
 import { loadCollectionEvents, payoutEvents } from './collectionEvents.js';
+import { loadStaffLoanMovements, STAFF_LOAN_CATEGORY } from './staffLoanMovements.js';
 
 const n = value => round2(value ?? 0).toNumber();
 const sum = (rows, field) => rows.reduce((total, row) => total.plus(row[field] ?? 0), toDec(0));
@@ -35,6 +36,7 @@ export async function detailedExpensesReport(actor, query = {}) {
     admin ? loadCollectionEvents(scope, null, ctx.toStr) : [],
   ]);
   const names = new Map(branches.map(b => [b.id, b.name]));
+  const loans = admin ? await loadStaffLoanMovements(scope, ctx.fromDate, ctx.toDate) : [];
   const rawRows = expenses.map(e => ({
     ...e, date: e.expenseDate.toISOString().slice(0, 10), branchName: names.get(e.branchId) || 'Branch',
     // Original paid voucher remains positive; its separately dated reversal is negative.
@@ -59,16 +61,29 @@ export async function detailedExpensesReport(actor, query = {}) {
     });
   }
   const search = query.search?.trim().toLowerCase();
+  for (const m of loans) rawRows.push({
+    id: m.id, voucherNumber: m.reference, date: m.date, time: '', branchId: m.branchId,
+    branchName: names.get(m.branchId) || 'Branch', category: STAFF_LOAN_CATEGORY,
+    title: m.direction === 'IN' ? 'Staff Loan Disbursement Reversal' : 'Staff Loan Disbursement',
+    payee: '', description: m.description || '', sourceType: 'STAFF_LOAN',
+    amount: m.signedOutflow, paidAmount: m.signedOutflow, paymentSource: m.paymentSource,
+    paymentAccountId: m.accountId, paymentAccountName: m.account?.name,
+    status: m.direction === 'IN' ? 'REVERSED' : 'POSTED', externalReference: m.reference || '', notes: '',
+    createdByUserId: m.userId, createdByName: m.userName, paidByName: m.userName,
+    isReversalRecord: m.direction === 'IN', reversalReason: '', reversedByName: '',
+  });
   const rows = rawRows.filter(r => (!query.category || query.category === 'ALL' || r.category === query.category)
     && (query.status && query.status !== 'ALL' ? r.status === query.status : r.status !== 'DRAFT' || query.status === 'ALL')
     && (!query.paymentSource || query.paymentSource === 'ALL' || r.paymentSource === query.paymentSource)
     && (!query.paymentAccountId || query.paymentAccountId === 'ALL' || r.paymentAccountId === query.paymentAccountId)
     && (!query.createdByUserId || query.createdByUserId === 'ALL' || r.createdByUserId === query.createdByUserId)
-    && (!search || [r.voucherNumber, r.title, r.payee, r.category, r.branchName, r.createdByName, r.externalReference].some(v => v?.toLowerCase().includes(search))))
+    && (!search || [r.voucherNumber, r.title, r.payee, r.category, r.branchName, r.createdByName, r.externalReference, ...(r.sourceType === 'STAFF_LOAN' ? [r.description] : [])].some(v => v?.toLowerCase().includes(search))))
     .sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
   const cash = sum(rows.filter(r => r.paymentSource === 'CASH_DRAWER'), 'paidAmount');
   const online = sum(rows.filter(r => r.paymentSource !== 'CASH_DRAWER'), 'paidAmount');
   const total = cash.plus(online);
+  const operatingRows = rows.filter(r => r.sourceType !== 'STAFF_LOAN');
+  const nonOperatingCashOutflow = n(sum(rows.filter(r => r.sourceType === 'STAFF_LOAN'), 'paidAmount'));
   const categoryNames = [...new Set(rows.map(r => r.category))];
   const accountIds = [...new Set(rows.filter(r => r.paymentSource === 'ONLINE_ACCOUNT').map(r => r.paymentAccountId || 'online'))];
   const onlineAccounts = accountIds.map(id => {
@@ -80,9 +95,12 @@ export async function detailedExpensesReport(actor, query = {}) {
   const commissionPayable = commissionEarned.minus(sum(payments.commission.filter(p => p.date <= ctx.toStr), 'signedAmount'));
   return formatReportResponse({ ...ctx.meta, liabilityBasis: 'Branch closing liabilities at period end; not reduced by table filters.' }, {
     rows, categories: [...new Set([...categories.map(c => c.name), ...rawRows.map(r => r.category)])].sort(),
-    kpis: { totalExpenses: n(total), cashExpenses: n(cash), onlineExpenses: n(online), totalVouchersCount: rows.length,
-      totalPostedAmount: n(sum(rows.filter(r => r.status === 'POSTED'), 'paidAmount')),
-      totalReversedAmount: n(sum(rows.filter(r => r.status === 'REVERSED'), 'paidAmount').negated()),
+    kpis: { totalExpenses: n(sum(operatingRows, 'paidAmount')),
+      cashExpenses: n(sum(operatingRows.filter(r => r.paymentSource === 'CASH_DRAWER'), 'paidAmount')),
+      onlineExpenses: n(sum(operatingRows.filter(r => r.paymentSource !== 'CASH_DRAWER'), 'paidAmount')),
+      nonOperatingCashOutflow, totalCashOutflow: n(total), totalVouchersCount: rows.length,
+      totalPostedAmount: n(sum(operatingRows.filter(r => r.status === 'POSTED'), 'paidAmount')),
+      totalReversedAmount: n(sum(operatingRows.filter(r => r.status === 'REVERSED'), 'paidAmount').negated()),
       postedCount: rows.filter(r => r.status === 'POSTED').length, reversedCount: rows.filter(r => r.status === 'REVERSED').length,
       draftCount: rows.filter(r => r.status === 'DRAFT').length, categoryCount: categoryNames.length,
       paidSalaries: n(sum(rows.filter(r => r.sourceType === 'SALARY'), 'paidAmount')),
@@ -91,6 +109,6 @@ export async function detailedExpensesReport(actor, query = {}) {
     liabilities: admin ? { unpaidSalaries: n(salaryPayable), unpaidCommissions: n(commissionPayable) } : undefined,
     tenderBreakdown: { totalCash: n(cash), totalOnline: n(online), grandTotal: n(total), onlineAccounts },
     categoryBreakdown: categoryNames.map(categoryName => ({ categoryName, amount: n(sum(rows.filter(r => r.category === categoryName), 'paidAmount')) })),
-    totals: { amount: n(total), cash: n(cash), online: n(online) },
+    totals: { amount: n(total), cash: n(cash), online: n(online), operatingExpenses: n(sum(operatingRows, 'paidAmount')), nonOperatingCashOutflow },
   });
 }
