@@ -5,6 +5,7 @@
 // Voided invoices never count as performance. Tips are reported separately from sales.
 
 import { accruedCommissionForPeriod } from './fullCommissionAccrual.js';
+import { recognizedSalaryExpense } from './salaryRecognition.js';
 import { loadStaffLoanMovements, currentStaffLoanReceivable, STAFF_LOAN_CATEGORY } from './staffLoanMovements.js';
 import prisma from '../../config/prisma.js';
 import { forbidden, notFound } from '../../lib/AppError.js';
@@ -419,7 +420,8 @@ export const incomeExpenseReport = async (actor, query = {}) => {
             ...branchFilter,
             OR: [
               { finalizedAt: utcRange },
-              { generatedAt: utcRange },
+              { finalizedAt: null, generatedAt: utcRange },
+              { payslips: { some: { payments: { some: { OR: [{ paidAt: utcRange }, { reversedAt: utcRange }] } } } } },
             ],
           },
           include: {
@@ -538,6 +540,8 @@ export const incomeExpenseReport = async (actor, query = {}) => {
 
     rawRows.push({
       id: `inv-${inv.id}`,
+      invoiceId: inv.id,
+      invoiceBillTotal: n(net.plus(inv.tax || 0)),
       date: ymd(inv.date),
       type: 'INCOME',
       category: 'Sales & Services',
@@ -583,6 +587,8 @@ export const incomeExpenseReport = async (actor, query = {}) => {
 
     rawRows.push({
       id: `due-${dp.id}`,
+      invoiceId: dp.invoice.id,
+      invoiceBillTotal: n(toDec(dp.invoice.netSales).plus(dp.invoice.tax || 0)),
       date: ymd(dp.date),
       type: 'INCOME',
       category: 'Sales & Services',
@@ -689,59 +695,39 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     });
   }
 
-  // Finalized / Paid Payroll -> Salary Expense (Included ONLY when salary has actually been paid/disbursed)
+  // Salary cash rows are actual dated payment events; accrual is recognized once per finalized slip.
+  let accruedSalaryExpenses = toDec(0);
+  const inRecognitionPeriod = date => date && date >= ctx.fromDate && date <= ctx.toDate;
   for (const run of payrollRuns) {
-    if (run.status === 'CANCELLED') continue;
+    if (run.status === 'CANCELLED' || run.status === 'DRAFT') continue;
     for (const p of run.payslips) {
       const snap = typeof p.snapshot === 'string' ? JSON.parse(p.snapshot) : p.snapshot || {};
       const staffLabel = snap.staffName || staffMap.get(p.staffId) || 'Staff';
-      const salAmt = round2(toDec(p.netPayable ?? p.grossPayable ?? 0));
-      const amountVal = n(salAmt);
-
-      const activePayments = (p.payments || []).filter((pay) => pay.status !== 'REVERSED');
-      const paidDec = activePayments.reduce((acc, pay) => acc.plus(toDec(pay.amount)), toDec(0));
-      const hasMockPaid = p.paidAmount !== undefined ? toDec(p.paidAmount).gt(0) : false;
-      const isFullyPaid = run.status === 'PAID' || (activePayments.length > 0 && paidDec.gte(salAmt));
-      const paidVal = isFullyPaid ? amountVal : (activePayments.length > 0 ? n(round2(paidDec)) : (hasMockPaid ? n(toDec(p.paidAmount)) : 0));
-      const remainingVal = Math.max(0, round2(toDec(amountVal).minus(paidVal)).toNumber());
-      const statusLabel = isFullyPaid ? 'PAID' : (paidVal > 0 ? 'PARTIALLY_PAID' : 'FINALIZED');
-
-      // Unpaid salary should NOT appear in Income & Expense unless explicitly requested via query
-      if (paidVal <= 0 && query.includeUnpaid !== 'true' && query.includeCommission !== 'true') {
-        continue;
+      const salaryNet = round2(toDec(p.netPayable ?? p.grossPayable ?? 0));
+      if (inRecognitionPeriod(run.finalizedAt || run.generatedAt)) {
+        accruedSalaryExpenses = accruedSalaryExpenses.plus(recognizedSalaryExpense(p));
       }
-
-      const effectiveExpense = paidVal > 0 ? paidVal : amountVal;
-      const effectivePaid = paidVal > 0 ? paidVal : 0;
-
-      rawRows.push({
-        id: `psl-${p.id}`,
-        date: ymd(activePayments[0]?.paidAt || run.finalizedAt || run.generatedAt),
-        type: 'SALARY_EXPENSE',
-        category: 'Payroll & Salaries',
-        source: 'Expense - Staff Salary',
-        reference: p.payslipNumber !== 'DRAFT' ? p.payslipNumber : run.payrollNumber,
-        invoiceNumber: p.payslipNumber !== 'DRAFT' ? p.payslipNumber : run.payrollNumber,
-        customerName: staffLabel,
-        branchId: run.branchId,
-        branchName: branchMap.get(run.branchId) || 'Branch',
-        userOrPayee: staffLabel,
-        description: `Staff Salary for ${staffLabel} (${run.month})`,
-        serviceAmount: effectiveExpense,
-        tax: 0,
-        totalBill: effectiveExpense,
-        collectedService: 0,
-        collectedTax: 0,
-        totalReceived: effectivePaid > 0 ? -effectivePaid : 0,
-        remainingDues: paidVal > 0 ? 0 : remainingVal,
-        income: 0,
-        expense: effectiveExpense,
-        paid: effectivePaid,
-        discount: 0,
-        remaining: paidVal > 0 ? 0 : remainingVal,
-        paymentMethod: activePayments[0]?.method || 'PAYROLL_TRANSFER',
-        status: statusLabel,
+      const events = payoutEvents((p.payments || []).filter(pay => ['COMPLETED', 'REVERSED'].includes(pay.status)));
+      const paidToDate = events.filter(pay => pay.date <= ctx.toStr).reduce((sum, pay) => sum.plus(pay.signedAmount), toDec(0));
+      const status = paidToDate.gte(salaryNet) && salaryNet.gt(0) ? 'PAID' : paidToDate.gt(0) ? 'PARTIALLY_PAID' : 'FINALIZED';
+      const base = {
+        type: 'SALARY_EXPENSE', category: 'Payroll & Salaries', source: 'Expense - Staff Salary',
+        customerName: staffLabel, branchId: run.branchId, branchName: branchMap.get(run.branchId) || 'Branch',
+        userOrPayee: staffLabel, description: 'Staff Salary for ' + staffLabel + ' (' + run.month + ')',
+        income: 0, collectedService: 0, collectedTax: 0, discount: 0, remaining: 0, status,
+      };
+      const periodPayments = events.filter(pay => pay.date >= ctx.fromStr && pay.date <= ctx.toStr);
+      for (const pay of periodPayments) rawRows.push({
+        ...base, id: 'psl-' + p.id + '-' + pay.eventId, date: pay.date,
+        reference: pay.paymentNumber || (p.payslipNumber !== 'DRAFT' ? p.payslipNumber : run.payrollNumber),
+        expense: n(pay.signedAmount), paid: n(pay.signedAmount), totalReceived: n(pay.signedAmount.negated()),
+        paymentMethod: pay.method, status: pay.reversal ? 'REVERSED' : status,
       });
+      if (!periodPayments.length && paidToDate.lt(salaryNet) && (query.includeUnpaid === 'true' || query.includeCommission === 'true')) {
+        rawRows.push({ ...base, id: 'psl-' + p.id, date: ymd(run.finalizedAt || run.generatedAt),
+          reference: p.payslipNumber !== 'DRAFT' ? p.payslipNumber : run.payrollNumber,
+          expense: n(salaryNet), paid: 0, totalReceived: 0, paymentMethod: 'PAYROLL_TRANSFER' });
+      }
     }
   }
 
@@ -1017,7 +1003,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     if (r.discount) {
       totalDiscount = totalDiscount.plus(r.discount);
     }
-    if (r.remaining) {
+    if (r.remaining && isIncome) {
       totalRemaining = totalRemaining.plus(r.remaining);
     }
     if (r.paid) {
@@ -1071,6 +1057,15 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   const totalRevenueReversals = refunds.reduce((s, r) => s.plus(toDec(r.netReversed)), toDec(0));
   const totalRefundsPaid = refunds.reduce((s, r) => s.plus(toDec(r.cashOut || 0)), toDec(0));
 
+  // Accounting reference is scoped to branch/date, independent of cash table filters.
+  const accruedCommission = actor.role === 'ACCOUNTANT' ? toDec(0) : await accruedCommissionForPeriod(branchFilter, ctx.fromStr, ctx.toStr);
+  const reportedExpenseRecognition = expenses.filter(e => e.status !== 'DRAFT').reduce((sum, e) => sum.plus(toDec(e.amount).times(e.isReversalRecord ? -1 : 1)), toDec(0))
+    .plus(accruedSalaryExpenses).plus(accruedCommission)
+    .plus(inventoryLosses.reduce((sum, m) => sum.plus(m.totalCost || 0), toDec(0)));
+  const uniqueInvoiceBills = new Map(filteredRows.filter(r => ['POS Invoice', 'POS Dues Collection'].includes(r.source))
+    .map(r => [r.invoiceId || r.invoiceNumber || r.reference, toDec(r.invoiceBillTotal ?? r.totalBill ?? 0)]));
+  const customerInvoiceTotal = [...uniqueInvoiceBills.values()].reduce((sum, amount) => sum.plus(amount), toDec(0));
+
   const kpis = {
     ...(['ADMIN', 'SUPER_ADMIN'].includes(actor.role)
       ? { staffLoanReceivable: await currentStaffLoanReceivable(branchFilter) } : {}),
@@ -1098,6 +1093,9 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   };
 
   const totals = {
+    customerInvoiceTotal: n(customerInvoiceTotal),
+    reportedExpenseRecognition: n(reportedExpenseRecognition),
+    accruedSalaryExpenses: n(accruedSalaryExpenses),
     customerCollections: n(totalCollections),
     staffLoanCashOutflow: n(staffLoanCashOutflow),
     nonOperatingCashOutflows: n(nonOperatingCashOutflows),
@@ -1289,7 +1287,7 @@ export const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, t
         status: { in: ['FINALIZED', 'PARTIALLY_PAID', 'PAID'] },
         OR: [
           { finalizedAt: utcRange },
-          { generatedAt: utcRange },
+          { finalizedAt: null, generatedAt: utcRange },
         ],
         ...branchFilter,
       },
@@ -1474,10 +1472,7 @@ export const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, t
   let salaryExpenses = toDec(0);
   for (const run of payrollRuns) {
     for (const p of run.payslips) {
-      const snap = typeof p.snapshot === 'string' ? JSON.parse(p.snapshot) : p.snapshot || {};
-      const advanceRecovery = toDec(snap.advanceRecoveryAmount || 0);
-      const salAmt = toDec(p.netPayable ?? p.grossPayable ?? 0).plus(advanceRecovery);
-      salaryExpenses = salaryExpenses.plus(salAmt);
+      salaryExpenses = salaryExpenses.plus(recognizedSalaryExpense(p));
     }
   }
 

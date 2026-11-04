@@ -2276,6 +2276,8 @@ export type IncomeExpenseItemType =
   | 'INVENTORY_WRITEOFF';
 
 export interface IncomeExpenseReportRow {
+  invoiceId?: string;
+  invoiceBillTotal?: number;
   tipAmount?: number;
   collectionAmount?: number;
   paymentEventType?: string;
@@ -2361,6 +2363,9 @@ export interface IncomeExpenseReport {
   kpis: IncomeExpenseReportKPIs;
   rows: IncomeExpenseReportRow[];
   totals: {
+    customerInvoiceTotal?: number;
+    reportedExpenseRecognition?: number;
+    accruedSalaryExpenses?: number;
     customerCollections?: number;
     staffLoanCashOutflow?: number;
     nonOperatingCashOutflows?: number;
