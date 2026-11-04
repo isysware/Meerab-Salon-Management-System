@@ -1,3 +1,4 @@
+import { loadCollectionEvents, collectionTotals } from './collectionEvents.js';
 import prisma from '../../config/prisma.js';
 import { dateOnly, ymd } from '../../lib/dates.js';
 import { round2, toDec } from '../../lib/money.js';
@@ -20,7 +21,7 @@ export const taxReport = async (actor, query = {}) => {
     ...(ctx.branchId ? { branchId: ctx.branchId } : {}),
     ...(actor.role === 'ACCOUNTANT' ? { processedByUserId: actor.id } : {}),
   };
-  const [branches, invoices, refunds] = await Promise.all([
+  const [branches, invoices, refunds, collections] = await Promise.all([
     prisma.branch.findMany({ select: { id: true, name: true } }),
     prisma.invoice.findMany({
       // Keep original recognition even after a void. Its dated reversal offsets it once.
@@ -36,6 +37,7 @@ export const taxReport = async (actor, query = {}) => {
       },
       orderBy: { refundDate: 'asc' },
     }),
+    loadCollectionEvents(scope, ctx.fromStr, ctx.toStr),
   ]);
   const branchNames = new Map(branches.map(b => [b.id, b.name]));
   const lines = new Map();
@@ -125,18 +127,22 @@ export const taxReport = async (actor, query = {}) => {
     ...row, count: row.count.toNumber(), taxableBase: number(row.taxableBase), taxAmount: number(row.taxAmount),
   }));
   const sum = field => selected.reduce((total, row) => total.plus(row[field]), toDec(0));
+  const collectionRows = collections.filter(e => !search || [e.invoice.invoiceNumber, e.line.name, e.invoice.clientName, branchNames.get(e.invoice.branchId), e.line.staffName, e.record.method, e.record.refundNumber].some(v => v?.toLowerCase().includes(search)));
+  const collected = collectionTotals(collectionRows);
   const tax = sum('taxAmount');
   const base = sum('taxableBase');
   return formatReportResponse(ctx.meta, {
+    collectionRows: collectionRows.map(e => ({ id: e.id, invoiceNumber: e.invoice.invoiceNumber, date: e.date, method: e.record.method, eventType: e.kind, collectedNet: number(e.collectedNet), taxCollected: number(e.collectedTax) })),
     rows: serviceRows, serviceRows, serviceSummary, invoiceRows,
     kpis: {
       totalInvoicesTaxed: invoiceRows.length, totalServicesTaxed: serviceRows.length,
-      totalTaxableSales: number(base), totalTaxCollected: number(sum('grossTax')),
+      totalTaxableSales: number(base), totalTaxCharged: number(sum('grossTax')),
+      totalTaxCollected: collected.taxCollected, collectedRevenue: collected.collectedRevenue,
       totalTaxRefunded: number(sum('refundedTax')), netTaxLiability: number(tax),
     },
     totals: {
       totalServices: serviceRows.length, taxableBase: number(base),
-      taxAmount: number(tax), netTax: number(tax), total: number(base.plus(tax)),
+      taxCollected: collected.taxCollected, taxAmount: number(tax), netTax: number(tax), total: number(base.plus(tax)),
     },
   });
 };

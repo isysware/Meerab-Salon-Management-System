@@ -128,6 +128,8 @@ import {
 import { User, Role } from '../types/auth';
 
 export interface BranchFinancialMetrics {
+  collectedRevenue?: number;
+  taxCollected?: number;
   branchId: string;
   branchName: string;
   branchCode: string;

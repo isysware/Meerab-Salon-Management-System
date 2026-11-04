@@ -44,7 +44,7 @@ const labelClass = 'block text-[11px] font-bold text-slate-500 uppercase trackin
 
 function formatCurrency(val: number): string {
   const num = Number(val) || 0;
-  return Math.abs(num).toLocaleString('en-US', {
+  return num.toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -186,6 +186,7 @@ export const StaffPerformancePage: React.FC = () => {
     let totalGrossSales = 0;
     let totalDiscount = 0;
     let totalNetSales = 0;
+    let totalCollectedSales = 0;
     let totalEstimatedCommission = 0;
     let totalFinalizedCommission = 0;
     let totalAllocatedTips = 0;
@@ -202,6 +203,7 @@ export const StaffPerformancePage: React.FC = () => {
       totalGrossSales += r.attributedGrossSales;
       totalDiscount += r.discountAllocation;
       totalNetSales += r.attributedNetSales;
+      totalCollectedSales += r.collectedSales ?? 0;
       totalEstimatedCommission += r.estimatedCommission;
       totalFinalizedCommission += r.finalizedCommission;
       totalAllocatedTips += r.allocatedTips;
@@ -219,6 +221,7 @@ export const StaffPerformancePage: React.FC = () => {
       totalGrossSales,
       totalDiscount,
       totalNetSales,
+      totalCollectedSales,
       totalEstimatedCommission,
       totalFinalizedCommission,
       totalAllocatedTips,
@@ -272,8 +275,9 @@ export const StaffPerformancePage: React.FC = () => {
       'Unique Clients',
       'Gross Sales (PKR)',
       'Discount (PKR)',
-      'Attributed Net Sales (PKR)',
-      'Estimated Commission (PKR)',
+      'Invoiced Net Sales (PKR)',
+      'Collected Net Sales (PKR)',
+      'Earned Collection Commission (PKR)',
       'Finalized Commission (PKR)',
       'Allocated Tips (PKR)',
       'Worked Hours',
@@ -293,6 +297,7 @@ export const StaffPerformancePage: React.FC = () => {
         r.attributedGrossSales.toFixed(2),
         r.discountAllocation.toFixed(2),
         r.attributedNetSales.toFixed(2),
+        (r.collectedSales ?? 0).toFixed(2),
         r.estimatedCommission.toFixed(2),
         r.finalizedCommission.toFixed(2),
         r.allocatedTips.toFixed(2),
@@ -311,6 +316,7 @@ export const StaffPerformancePage: React.FC = () => {
         aggregatedMetrics.totalGrossSales.toFixed(2),
         aggregatedMetrics.totalDiscount.toFixed(2),
         aggregatedMetrics.totalNetSales.toFixed(2),
+        aggregatedMetrics.totalCollectedSales.toFixed(2),
         aggregatedMetrics.totalEstimatedCommission.toFixed(2),
         aggregatedMetrics.totalFinalizedCommission.toFixed(2),
         aggregatedMetrics.totalAllocatedTips.toFixed(2),
@@ -344,8 +350,9 @@ export const StaffPerformancePage: React.FC = () => {
       'Unique Clients',
       'Gross Sales (PKR)',
       'Discount (PKR)',
-      'Attributed Net Sales (PKR)',
-      'Estimated Commission (PKR)',
+      'Invoiced Net Sales (PKR)',
+      'Collected Net Sales (PKR)',
+      'Earned Collection Commission (PKR)',
       'Finalized Commission (PKR)',
       'Allocated Tips (PKR)',
       'Worked Hours',
@@ -365,6 +372,7 @@ export const StaffPerformancePage: React.FC = () => {
         r.attributedGrossSales.toFixed(2),
         r.discountAllocation.toFixed(2),
         r.attributedNetSales.toFixed(2),
+        (r.collectedSales ?? 0).toFixed(2),
         r.estimatedCommission.toFixed(2),
         r.finalizedCommission.toFixed(2),
         r.allocatedTips.toFixed(2),
@@ -383,6 +391,7 @@ export const StaffPerformancePage: React.FC = () => {
         aggregatedMetrics.totalGrossSales.toFixed(2),
         aggregatedMetrics.totalDiscount.toFixed(2),
         aggregatedMetrics.totalNetSales.toFixed(2),
+        aggregatedMetrics.totalCollectedSales.toFixed(2),
         aggregatedMetrics.totalEstimatedCommission.toFixed(2),
         aggregatedMetrics.totalFinalizedCommission.toFixed(2),
         aggregatedMetrics.totalAllocatedTips.toFixed(2),
@@ -410,7 +419,8 @@ export const StaffPerformancePage: React.FC = () => {
       'Branch',
       'Units',
       'Clients',
-      'Attributed Net Sales',
+      'Invoiced Net Sales',
+      'Collected Net Sales',
       'Commission',
       'Tips',
       'Worked Hours',
@@ -423,6 +433,7 @@ export const StaffPerformancePage: React.FC = () => {
       `${r.totalServiceUnits} (${r.directServicesCount} dir / ${r.packageComponentsCount} pkg)`,
       r.uniqueClientsCount,
       formatCurrency(r.attributedNetSales),
+      formatCurrency(r.collectedSales ?? 0),
       formatCurrency(r.estimatedCommission),
       formatCurrency(r.allocatedTips),
       `${r.workedHours}h (OT ${r.approvedOvertimeMinutes}m)`,
@@ -435,6 +446,7 @@ export const StaffPerformancePage: React.FC = () => {
       `${aggregatedMetrics.totalUnits} Units`,
       aggregatedMetrics.totalUniqueClients,
       formatCurrency(aggregatedMetrics.totalNetSales),
+      formatCurrency(aggregatedMetrics.totalCollectedSales),
       formatCurrency(aggregatedMetrics.totalEstimatedCommission),
       formatCurrency(aggregatedMetrics.totalAllocatedTips),
       `${aggregatedMetrics.totalWorkedHours}h`,
@@ -670,7 +682,7 @@ export const StaffPerformancePage: React.FC = () => {
       {/* ── 3. ROW 3 PURE WHITE FROSTED BLUR KPI CARDS (when filtered) ── */}
       {hasFiltered && filteredRecords.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {/* Card 1: Attributed Net Sales */}
+          {/* Card 1: Invoiced Net Sales */}
           <div className="p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
             <div className="flex items-center justify-between relative z-10">
               <div className="w-8 h-8 rounded-xl bg-white/90 shadow-2xs border border-white/80 flex items-center justify-center text-emerald-600">
@@ -683,6 +695,7 @@ export const StaffPerformancePage: React.FC = () => {
             <div className="mt-3 relative z-10">
               <span className="text-2xl sm:text-3xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
                 PKR {formatCurrency(aggregatedMetrics.totalNetSales)}
+                      <span className="block text-xs text-emerald-700">Collected: PKR {formatCurrency(aggregatedMetrics.totalCollectedSales)}</span>
               </span>
               <span className="text-xs text-[#78616C] font-medium mt-1 block">
                 Gross: PKR {formatCurrency(aggregatedMetrics.totalGrossSales)}
@@ -850,7 +863,7 @@ export const StaffPerformancePage: React.FC = () => {
                   <th className="py-3 px-4">Branch</th>
                   <th className="py-3 px-4 text-center">Units (Dir / Pkg)</th>
                   <th className="py-3 px-4 text-center">Clients</th>
-                  <th className="py-3 px-4 text-right">Attributed Net Sales</th>
+                  <th className="py-3 px-4 text-right">Invoiced / Collected Net Sales</th>
                   <th className="py-3 px-4 text-right">Commission (Est / Fin)</th>
                   <th className="py-3 px-4 text-right">Tips (Alloc / Due)</th>
                   <th className="py-3 px-4 text-center">Worked Hours</th>
@@ -897,6 +910,7 @@ export const StaffPerformancePage: React.FC = () => {
                       </td>
                       <td className="py-3 px-4 text-right">
                         <div className="font-semibold text-slate-900 font-mono tabular-nums">PKR {formatCurrency(record.attributedNetSales)}</div>
+                        <div className="text-xs text-emerald-700">Collected: PKR {formatCurrency(record.collectedSales ?? 0)}</div>
                         <div className="text-[11px] text-slate-400 font-mono tabular-nums">
                           Gross: PKR {formatCurrency(record.attributedGrossSales)}
                         </div>
@@ -1081,7 +1095,7 @@ export const StaffPerformancePage: React.FC = () => {
                     <th className="py-2.5 px-3">Client</th>
                     <th className="py-2.5 px-3 text-right">Price</th>
                     <th className="py-2.5 px-3 text-right">Discount</th>
-                    <th className="py-2.5 px-3 text-right">Net Sales</th>
+                    <th className="py-2.5 px-3 text-right">Collected Net</th>
                     <th className="py-2.5 px-3 text-right">Commission</th>
                   </tr>
                 </thead>

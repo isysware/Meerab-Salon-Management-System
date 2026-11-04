@@ -1,8 +1,9 @@
 import type { CashDrawerReportRow } from '@/types/salon';
 
-// Opening float already belongs to totalCashIn; show it only once in the formula.
-export const drawerDebits = (row: Pick<CashDrawerReportRow, 'totalCashIn' | 'openingFloat'>) =>
-  Math.round((row.totalCashIn - row.openingFloat) * 100) / 100;
+// Period reports carry openingBalance separately; all in-period receipts remain debits.
+// Retain compatibility with older full-session payloads.
+export const drawerDebits = (row: Pick<CashDrawerReportRow, 'totalCashIn' | 'openingFloat' | 'openingBalance'>) =>
+  row.openingBalance !== undefined ? row.totalCashIn : Math.round((row.totalCashIn - row.openingFloat) * 100) / 100;
 
 export const drawerMoney = (amount: number | null | undefined, signed = false) => {
   if (amount == null) return '\u2014';

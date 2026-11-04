@@ -1997,7 +1997,7 @@ export interface StaffCommissionReportRow {
   earned: number;
   reversed: number;
   net: number;
-  runStatus: 'IN_RUN' | 'NOT_RUN';
+  runStatus: 'IN_RUN' | 'NOT_RUN' | 'CALCULATED';
 }
 
 export interface StaffCommissionReportStaff {
@@ -2054,6 +2054,8 @@ export interface SalesInvoiceReportRow {
 }
 
 export interface SalesInvoicesReportKPIs {
+  collectedRevenue?: number;
+  taxCollected?: number;
   totalInvoices: number;
   grossSales: number;
   totalDiscounts: number;
@@ -2398,6 +2400,8 @@ export interface TaxReportServiceSummary {
 }
 
 export interface TaxReportKPIs {
+  totalTaxCharged?: number;
+  collectedRevenue?: number;
   totalInvoicesTaxed: number;
   totalServicesTaxed?: number;
   totalTaxableSales: number;
@@ -2623,6 +2627,8 @@ export interface PaymentAccountMovementRow {
 }
 
 export interface PaymentAccountsReportKPIs {
+  totalDebits?: number;
+  totalCredits?: number;
   totalOpeningBalance: number;
   totalMoneyIn: number;
   totalMoneyOut: number;
@@ -2649,6 +2655,7 @@ export interface PaymentAccountsReportQuery {
 }
 
 export interface PaymentAccountsReport {
+  collections?: { collectedRevenue: number; taxCollected: number; tipsCollected: number; actualCollections: number };
   meta: {
     branchId: string;
     branchName: string;
@@ -2962,6 +2969,8 @@ export interface StaffPerformanceServiceItem {
 }
 
 export interface StaffPerformanceRecord {
+  invoicedSales?: number;
+  collectedSales?: number;
   staffId: string;
   staffName: string;
   staffCode: string;
@@ -3021,6 +3030,7 @@ export interface TenderBreakdown {
 }
 
 export interface CashDrawerReportKPIs {
+  totalOpeningBalance?: number;
   totalSessions: number;
   openSessionsCount: number;
   settledSessionsCount: number;
@@ -3043,6 +3053,7 @@ export interface CashDrawerReportKPIs {
 }
 
 export interface CashDrawerReportRow {
+  openingBalance?: number;
   id: string;
   sessionCode: string;
   branchId: string;
@@ -3093,6 +3104,7 @@ export interface CashDrawerReportQuery {
 }
 
 export interface CashDrawerReport {
+  collections?: { collectedRevenue: number; taxCollected: number; tipsCollected: number; actualCollections: number };
   transactions?: Array<{ id: string; drawerId: string; date: string; time: string; reference?: string; type: string; direction: 'IN' | 'OUT'; amount: number; actor: string; description?: string }>;
   meta: {
     branchId: string;
@@ -3129,6 +3141,10 @@ export interface DetailedExpenseCategoryItem {
 }
 
 export interface DetailedExpensesReportKPIs {
+  unpaidSalaries?: number;
+  unpaidCommissions?: number;
+  paidSalaries?: number;
+  paidCommissions?: number;
   totalExpenses: number;
   cashExpenses: number;
   onlineExpenses: number;
@@ -3181,6 +3197,7 @@ export interface DetailedExpensesReportQuery {
 }
 
 export interface DetailedExpensesReport {
+  liabilities?: { unpaidSalaries: number; unpaidCommissions: number };
   meta: {
     branchId: string;
     branchName: string;

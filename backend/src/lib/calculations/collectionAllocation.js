@@ -11,26 +11,30 @@ import Decimal from 'decimal.js';
 export const toDec = (v) => {
   if (v instanceof Decimal) return v;
   if (typeof v === 'number' || typeof v === 'string') return new Decimal(v || 0);
-  if (v && typeof v.toNumber === 'function') return new Decimal(v.toNumber());
+  if (v && typeof v.toNumber === 'function') return new Decimal(v.toString());
   return new Decimal(0);
 };
 
 export const round2 = (v) => toDec(v).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
 
 export const extractCommissionRate = (rateVal, fallbackVal = 0) => {
-  if (rateVal !== undefined && rateVal !== null && rateVal !== '') {
-    const d = toDec(rateVal);
-    if (!d.isNaN() && d.greaterThan(0)) {
-      return d.lessThanOrEqualTo(1) ? round2(d.times(100)) : round2(d);
-    }
-  }
-  if (fallbackVal !== undefined && fallbackVal !== null && fallbackVal !== '') {
-    const d = toDec(fallbackVal);
-    if (!d.isNaN() && d.greaterThan(0)) {
-      return d.lessThanOrEqualTo(1) ? round2(d.times(100)) : round2(d);
-    }
-  }
-  return toDec(0);
+  // Persisted snapshots are percentages (0–100), including 1% and explicit zero.
+  const value = rateVal !== undefined && rateVal !== null && rateVal !== '' ? rateVal : fallbackVal;
+  const rate = toDec(value);
+  return rate.isFinite() && rate.gte(0) ? round2(Decimal.min(100, rate)) : toDec(0);
+};
+
+/** Exact, deterministic proportional split. Remaining cents flow to later parts. */
+export const allocateRounded = (amount, weights) => {
+  let remaining = round2(amount);
+  let weightLeft = weights.reduce((sum, weight) => sum.plus(toDec(weight)), toDec(0));
+  return weights.map(weight => {
+    const w = toDec(weight);
+    const part = weightLeft.gt(0) ? round2(remaining.times(w).div(weightLeft)) : toDec(0);
+    remaining = remaining.minus(part);
+    weightLeft = weightLeft.minus(w);
+    return part;
+  });
 };
 
 /**
@@ -111,7 +115,11 @@ export function allocatePaymentToInvoice({ invoice, paymentAmount, previousBillP
   let totalCollectedTax = toDec(0);
   let totalEarnedCommission = toDec(0);
 
-  for (const line of lines) {
+  const weights = lines.map(line => round2(toDec(line.netSales).plus(line.tax || 0)));
+  const previousParts = allocateRounded(bPrev, weights);
+  const currentParts = allocateRounded(bCurr, weights);
+
+  for (const [lineIndex, line] of lines.entries()) {
     const lNet = round2(line.netSales);
     const lTax = round2(line.tax || 0);
     const lTotal = round2(lNet.plus(lTax));
@@ -121,8 +129,8 @@ export function allocatePaymentToInvoice({ invoice, paymentAmount, previousBillP
     }
 
     // Cumulative line payment at bPrev and bCurr
-    const pLinePrev = bPrev.equals(billTotal) ? lTotal : round2(lTotal.times(bPrev).dividedBy(billTotal));
-    const pLineCurr = bCurr.equals(billTotal) ? lTotal : round2(lTotal.times(bCurr).dividedBy(billTotal));
+    const pLinePrev = previousParts[lineIndex];
+    const pLineCurr = currentParts[lineIndex];
     const deltaLinePaid = round2(pLineCurr.minus(pLinePrev));
 
     // Cumulative net (excl tax) at bPrev and bCurr
@@ -155,33 +163,26 @@ export function allocatePaymentToInvoice({ invoice, paymentAmount, previousBillP
             toDec(0)
           );
           const hasCustom = totalStaffAllocated.greaterThan(0);
+          const staffWeights = validAssigned.map(st => hasCustom ? toDec(st.allocatedAmount || 0) : toDec(1));
+          const staffPrevious = allocateRounded(netLinePrev, staffWeights);
+          const staffCurrent = allocateRounded(netLineCurr, staffWeights);
 
-          for (const st of validAssigned) {
+          for (const [staffIndex, st] of validAssigned.entries()) {
             const stId = st.staffId || st.id;
-            const stAlloc = hasCustom ? toDec(st.allocatedAmount || 0) : lNet.dividedBy(validAssigned.length);
 
             // Cumulative staff net
-            const staffCumNetPrev = netLinePrev.equals(lNet)
-              ? round2(stAlloc)
-              : round2(stAlloc.times(netLinePrev).dividedBy(lNet));
-            const staffCumNetCurr = netLineCurr.equals(lNet)
-              ? round2(stAlloc)
-              : round2(stAlloc.times(netLineCurr).dividedBy(lNet));
+            const staffCumNetPrev = staffPrevious[staffIndex];
+            const staffCumNetCurr = staffCurrent[staffIndex];
             const deltaStaffNet = round2(staffCumNetCurr.minus(staffCumNetPrev));
 
             const ratePercent = extractCommissionRate(st.staffCommissionRate, st.commissionRate || line.staffCommissionRate);
 
             if (ratePercent.greaterThan(0) && deltaStaffNet.greaterThan(0)) {
-              // Target full commission for this staff on this line
-              const fullStaffComm = round2(stAlloc.times(ratePercent).dividedBy(100));
+
 
               // Cumulative commission at bPrev and bCurr
-              const cumCommPrev = bPrev.equals(billTotal)
-                ? fullStaffComm
-                : round2(fullStaffComm.times(bPrev).dividedBy(billTotal));
-              const cumCommCurr = bCurr.equals(billTotal)
-                ? fullStaffComm
-                : round2(fullStaffComm.times(bCurr).dividedBy(billTotal));
+              const cumCommPrev = round2(staffCumNetPrev.times(ratePercent).dividedBy(100));
+              const cumCommCurr = round2(staffCumNetCurr.times(ratePercent).dividedBy(100));
               const commAmount = round2(cumCommCurr.minus(cumCommPrev));
 
               if (commAmount.greaterThan(0)) {
@@ -212,34 +213,22 @@ export function allocatePaymentToInvoice({ invoice, paymentAmount, previousBillP
         }
       } else if (components.length > 0) {
         // Line components breakdown (packages or multi-staff assigned services)
-        for (const comp of components) {
+        const componentWeights = components.map(c => c.allocatedAmount ?? toDec(lNet).times(c.allocationPercentage || 0).div(100));
+        const componentPrevious = allocateRounded(netLinePrev, componentWeights);
+        const componentCurrent = allocateRounded(netLineCurr, componentWeights);
+        for (const [componentIndex, comp] of components.entries()) {
           const compStaffId = comp.staffId;
           if (!compStaffId || compStaffId === 'house' || compStaffId === 'unassigned') continue;
 
-          const rawAlloc = toDec(comp.allocatedAmount || 0);
-          const compAlloc = rawAlloc.greaterThan(0)
-            ? rawAlloc
-            : (toDec(comp.allocationPercentage || 0).greaterThan(0)
-                ? round2(lNet.times(toDec(comp.allocationPercentage)).dividedBy(100))
-                : round2(lNet.dividedBy(components.length)));
-          const compCumNetPrev = netLinePrev.equals(lNet)
-            ? round2(compAlloc)
-            : round2(compAlloc.times(netLinePrev).dividedBy(lNet));
-          const compCumNetCurr = netLineCurr.equals(lNet)
-            ? round2(compAlloc)
-            : round2(compAlloc.times(netLineCurr).dividedBy(lNet));
+          const compCumNetPrev = componentPrevious[componentIndex];
+          const compCumNetCurr = componentCurrent[componentIndex];
           const deltaCompNet = round2(compCumNetCurr.minus(compCumNetPrev));
 
           const ratePercent = extractCommissionRate(comp.staffCommissionRate, comp.commissionRate || line.staffCommissionRate);
 
           if (ratePercent.greaterThan(0) && deltaCompNet.greaterThan(0)) {
-            const fullCompComm = round2(compAlloc.times(ratePercent).dividedBy(100));
-            const cumCommPrev = bPrev.equals(billTotal)
-              ? fullCompComm
-              : round2(fullCompComm.times(bPrev).dividedBy(billTotal));
-            const cumCommCurr = bCurr.equals(billTotal)
-              ? fullCompComm
-              : round2(fullCompComm.times(bCurr).dividedBy(billTotal));
+            const cumCommPrev = round2(compCumNetPrev.times(ratePercent).dividedBy(100));
+            const cumCommCurr = round2(compCumNetCurr.times(ratePercent).dividedBy(100));
             const commAmount = round2(cumCommCurr.minus(cumCommPrev));
 
             if (commAmount.greaterThan(0)) {
@@ -272,13 +261,8 @@ export function allocatePaymentToInvoice({ invoice, paymentAmount, previousBillP
         const ratePercent = extractCommissionRate(line.staffCommissionRate, line.commissionRate || (line.staff ? line.staff.commissionRate : 0));
 
         if (ratePercent.greaterThan(0)) {
-          const fullLineComm = round2(lNet.times(ratePercent).dividedBy(100));
-          const cumCommPrev = bPrev.equals(billTotal)
-            ? fullLineComm
-            : round2(fullLineComm.times(bPrev).dividedBy(billTotal));
-          const cumCommCurr = bCurr.equals(billTotal)
-            ? fullLineComm
-            : round2(fullLineComm.times(bCurr).dividedBy(billTotal));
+          const cumCommPrev = round2(netLinePrev.times(ratePercent).dividedBy(100));
+          const cumCommCurr = round2(netLineCurr.times(ratePercent).dividedBy(100));
           const commAmount = round2(cumCommCurr.minus(cumCommPrev));
 
           if (commAmount.greaterThan(0)) {

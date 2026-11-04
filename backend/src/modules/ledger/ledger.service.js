@@ -1,7 +1,7 @@
 // src/modules/ledger/ledger.service.js
 import prisma from '../../config/prisma.js';
 import { resolveReadBranch } from '../../lib/scope.js';
-import { dateOnly } from '../../lib/dates.js';
+import { startOfDay, endOfDay, toDateString } from '../../lib/dates.js';
 import { toDec, round2, toNum } from '../../lib/money.js';
 
 export const getGeneralLedger = async (actor, query) => {
@@ -61,7 +61,7 @@ export const getGeneralLedger = async (actor, query) => {
   }
 
   if (fromDate) {
-    const priorDate = dateOnly(fromDate);
+    const priorDate = startOfDay(fromDate);
 
     const [priorDrawerIn, priorDrawerOut, priorAccountIn, priorAccountOut] = await Promise.all([
       includeCash && !query.accountId
@@ -119,12 +119,10 @@ export const getGeneralLedger = async (actor, query) => {
   if (fromDate || toDate) {
     const dateFilter = {};
     if (fromDate) {
-      dateFilter.gte = dateOnly(fromDate);
+      dateFilter.gte = startOfDay(fromDate);
     }
     if (toDate) {
-      const end = dateOnly(toDate);
-      end.setDate(end.getDate() + 1);
-      dateFilter.lt = end;
+      dateFilter.lte = endOfDay(toDate);
     }
     drawerWhere.createdAt = dateFilter;
     accountWhere.createdAt = dateFilter;
@@ -151,7 +149,7 @@ export const getGeneralLedger = async (actor, query) => {
   const cashRows = drawerMovements.map((m) => ({
     id: m.id,
     createdAt: m.createdAt,
-    date: m.createdAt.toISOString().slice(0, 10),
+    date: toDateString(m.createdAt),
     channel: 'CASH',
     branchId: m.branchId,
     branchName: branchMap.get(m.branchId)?.name ?? 'Unknown Branch',
@@ -172,7 +170,7 @@ export const getGeneralLedger = async (actor, query) => {
   const bankRows = accountMovements.map((m) => ({
     id: m.id,
     createdAt: m.createdAt,
-    date: m.createdAt.toISOString().slice(0, 10),
+    date: toDateString(m.createdAt),
     channel: 'BANK',
     branchId: m.branchId,
     branchName: branchMap.get(m.branchId)?.name ?? 'Unknown Branch',

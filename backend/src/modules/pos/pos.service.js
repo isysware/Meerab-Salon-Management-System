@@ -5,6 +5,7 @@
 //   client link → appointment marked BILLED.
 // Tax and tips are liabilities: they are never part of netSales or the commission base.
 
+import { invoiceBalanceAsOf } from '../reports/collectionEvents.js';
 import Decimal from 'decimal.js';
 import { randomUUID } from 'node:crypto';
 import prisma from '../../config/prisma.js';
@@ -76,16 +77,22 @@ export const getInvoice = async (actor, id) => {
 
 /** Open invoices of a client, matched by client id or by phone digits (walk-ins without a profile). */
 export const clientOutstanding = async (actor, { branchId, clientIdOrPhone }) => {
+  if (actor.role === 'STAFF') throw forbidden('FORBIDDEN', 'Staff cannot access customer dues.');
   const b = resolveWriteBranch(actor, branchId);
+  if (!b) throw forbidden('BRANCH_REQUIRED', 'A branch assignment is required to access customer dues.');
   const digits = normalizePhoneDigits(clientIdOrPhone);
   const rows = await prisma.invoice.findMany({
-    where: { branchId: b, ...(actor.role === 'ACCOUNTANT' ? { processedByUserId: actor.id } : {}), status: { in: ['UNPAID', 'PARTIAL'] }, amountDue: { gt: 0 }, lifecycle: { not: 'VOIDED' } },
+    where: { branchId: b, ...(actor.role === 'ACCOUNTANT' ? { processedByUserId: actor.id } : {}), lifecycle: { not: 'VOIDED' } },
     include: invoiceInclude,
     orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
   });
   return rows
     .filter((i) => i.clientId === clientIdOrPhone || (digits.length >= 10 && normalizePhoneDigits(i.clientPhone) === digits))
-    .map(toInvoiceDTO);
+    .map(i => {
+      const balance = invoiceBalanceAsOf(i);
+      return { ...toInvoiceDTO(i), amountDue: balance.outstanding.toNumber(),
+        status: balance.outstanding.isZero() ? 'PAID' : balance.retainedBill.gt(0) ? 'PARTIAL' : 'UNPAID' };
+    }).filter(i => i.amountDue > 0);
 };
 
 // ═══ SHARED PAYMENT HANDLING ══════════════════════════════════════════════════

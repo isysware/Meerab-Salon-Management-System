@@ -291,9 +291,9 @@ export const BranchOperationalSections: React.FC<BranchOperationalSectionsProps>
 
           <div className="relative z-10 mt-4">
             <h3 className="text-2xl lg:text-3xl font-extrabold tracking-tight font-mono">
-              {formatCurrency(metrics.actualCollections ?? metrics.grossSales ?? 0)}
+              {formatCurrency(metrics.collectedRevenue ?? 0)}
             </h3>
-            <p className="text-xs text-white/80 font-medium mt-1">Total Actual Collections Today</p>
+            <p className="text-xs text-white/80 font-medium mt-1">Collected Revenue Today (excl. tax & tips)</p>
           </div>
         </div>
       </div>

@@ -42,7 +42,7 @@ const formatPKR = (amt: number, withSign = false) => {
   if (withSign) {
     return num >= 0 ? `+${formatted}` : `-${formatted}`;
   }
-  return formatted;
+  return num < 0 ? `-${formatted}` : formatted;
 };
 
 const formatDateParts = (dateStr: string) => {
@@ -226,6 +226,9 @@ export const SalesInvoicesPage: React.FC = () => {
   const handleExportExcel = () => {
     if (!reportData || !reportData.rows.length) return;
     const meta: [string, string][] = [
+      ['Basis', 'Original invoice values; dated collections/refunds/reversals; outstanding as of period end. Sales totals include only invoices/credits dated in period.'],
+      ['Collected Revenue (excl. tax/tips)', formatPKR(reportData.kpis.collectedRevenue ?? 0)],
+      ['Tax Collected', formatPKR(reportData.kpis.taxCollected ?? 0)],
       ['Report', 'Sales & Invoices Report'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -248,7 +251,7 @@ export const SalesInvoicesPage: React.FC = () => {
       'Tax (PKR)',
       'Tip (PKR)',
       'Total (PKR)',
-      'Paid (PKR)',
+      'Period Collections (PKR)',
       'Remaining (PKR)',
     ];
 
@@ -277,6 +280,9 @@ export const SalesInvoicesPage: React.FC = () => {
   const handleExportPdf = () => {
     if (!reportData || !reportData.rows.length) return;
     const meta: [string, string][] = [
+      ['Basis', 'Original invoice values; dated collections/refunds/reversals; outstanding as of period end. Sales totals include only invoices/credits dated in period.'],
+      ['Collected Revenue (excl. tax/tips)', formatPKR(reportData.kpis.collectedRevenue ?? 0)],
+      ['Tax Collected', formatPKR(reportData.kpis.taxCollected ?? 0)],
       ['Report', 'Sales & Invoices Report'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -299,7 +305,7 @@ export const SalesInvoicesPage: React.FC = () => {
       'Tax (PKR)',
       'Tip (PKR)',
       'Total (PKR)',
-      'Paid (PKR)',
+      'Period Collections (PKR)',
       'Remaining (PKR)',
     ];
 
@@ -331,6 +337,9 @@ export const SalesInvoicesPage: React.FC = () => {
       return;
     }
     const meta: [string, string][] = [
+      ['Basis', 'Original invoice values; dated collections/refunds/reversals; outstanding as of period end. Sales totals include only invoices/credits dated in period.'],
+      ['Collected Revenue (excl. tax/tips)', formatPKR(reportData.kpis.collectedRevenue ?? 0)],
+      ['Tax Collected', formatPKR(reportData.kpis.taxCollected ?? 0)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
@@ -340,7 +349,7 @@ export const SalesInvoicesPage: React.FC = () => {
       ['Total Tips', formatPKR(reportData.totals.tip || 0)],
       ['Total Paid', formatPKR(reportData.totals.paid || 0)],
     ];
-    const headers = ['#', 'Invoice #', 'Date', 'Client', 'Branch', 'Sold By', 'Status', 'Net Sales', 'Tax', 'Tip', 'Total', 'Paid', 'Remaining'];
+    const headers = ['#', 'Invoice #', 'Date', 'Client', 'Branch', 'Sold By', 'Status', 'Net Sales', 'Tax', 'Tip', 'Total', 'Period Collections', 'Remaining'];
     const rows = reportData.rows.map((r, i) => [
       i + 1,
       r.invoiceNumber,
@@ -587,6 +596,7 @@ export const SalesInvoicesPage: React.FC = () => {
             <div className="flex items-center gap-2.5 font-bold text-sm tracking-wide text-white">
               <Receipt className="w-4 h-4 stroke-[2.5]" />
               <span>Sales & Invoices Register</span>
+              <span className="text-xs font-normal">Collected revenue: PKR {formatPKR(reportData?.kpis.collectedRevenue ?? 0)} (excl. tax/tips). Original invoice columns; period collections; dues as of end date.</span>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -635,7 +645,7 @@ export const SalesInvoicesPage: React.FC = () => {
                   <th className="py-3.5 px-4 font-medium text-[#475569] text-right whitespace-nowrap">Tax</th>
                   <th className="py-3.5 px-4 font-medium text-[#475569] text-right whitespace-nowrap">Tip</th>
                   <th className="py-3.5 px-4 font-medium text-[#475569] text-right whitespace-nowrap">Total</th>
-                  <th className="py-3.5 px-4 font-medium text-[#475569] text-right whitespace-nowrap">Paid</th>
+                  <th className="py-3.5 px-4 font-medium text-[#475569] text-right whitespace-nowrap">Period Collections</th>
                   <th className="py-3.5 px-4 font-medium text-[#475569] text-right whitespace-nowrap">Remaining</th>
                   <th className="py-3.5 px-4 font-medium text-[#475569] text-center w-16">Action</th>
                 </tr>
@@ -846,7 +856,7 @@ export const SalesInvoicesPage: React.FC = () => {
                     +{formatPKR(totals.taxCharged ?? totals.tax ?? 0)}
                   </td>
                   <td className="py-3.5 px-4 text-right tabular-nums text-[#475569]">
-                    +{formatPKR(totals.tip || 0)}
+                    {formatPKR(totals.tip || 0, true)}
                   </td>
                   <td className="py-3.5 px-4 text-right tabular-nums font-bold text-slate-800">
                     {formatPKR(totals.total)}
@@ -866,7 +876,7 @@ export const SalesInvoicesPage: React.FC = () => {
                     Net Paid Collections
                   </td>
                   <td colSpan={8} className="py-3 px-4 text-right tabular-nums font-bold text-[#10B981] text-sm">
-                    +{formatPKR(totals.paid)}
+                    {formatPKR(totals.paid, true)}
                   </td>
                   <td className="py-3.5 px-4"></td>
                 </tr>

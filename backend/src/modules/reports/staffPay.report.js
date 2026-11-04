@@ -5,6 +5,7 @@
 //    liability = earned − reversed − paid (opening before `from`, closing at `to`).
 
 import prisma from '../../config/prisma.js';
+import { loadCollectionEvents, payoutEvents } from './collectionEvents.js';
 import { forbidden } from '../../lib/AppError.js';
 import { resolveReadBranch } from '../../lib/scope.js';
 import { dateOnly, endOfDay, startOfDay, ymd } from '../../lib/dates.js';
@@ -85,60 +86,56 @@ export const staffSalaryReport = async (actor, q) => {
 export const staffCommissionReport = async (actor, q) => {
   noAccountant(actor);
   const b = resolveReadBranch(actor, q.branchId);
-  const where = { ...(b ? { branchId: b } : {}), ...(q.staffId ? { staffId: q.staffId } : {}) };
-  const from = dateOnly(q.startDate);
-  const to = dateOnly(q.endDate);
-
-  const [events, opening, payments, openingPaid, staff] = await Promise.all([
-    prisma.commissionEvent.findMany({ where: { ...where, eventDate: { gte: from, lte: to }, ...(q.invoiceNumber ? { invoiceNumber: q.invoiceNumber } : {}) }, orderBy: [{ eventDate: 'asc' }, { createdAt: 'asc' }] }),
-    prisma.commissionEvent.groupBy({ by: ['staffId', 'type'], where: { ...where, eventDate: { lt: from } }, _sum: { amount: true } }),
-    prisma.commissionPayment.findMany({ where: { ...where, status: 'COMPLETED', paidAt: { gte: startOfDay(q.startDate), lte: endOfDay(q.endDate) } } }),
-    prisma.commissionPayment.groupBy({ by: ['staffId'], where: { ...where, status: 'COMPLETED', paidAt: { lt: startOfDay(q.startDate) } }, _sum: { amount: true } }),
-    prisma.staff.findMany({ where: b ? { branchId: b } : {}, select: { id: true, name: true, employeeCode: true } }),
+  const scope = b ? { branchId: b } : {};
+  const staffFilter = q.staffId && q.staffId !== 'ALL' ? { staffId: q.staffId } : {};
+  const [collections, payments, staff, recordedEvents] = await Promise.all([
+    loadCollectionEvents(scope, null, q.endDate),
+    prisma.commissionPayment.findMany({ where: { ...scope, ...staffFilter, status: { in: ['COMPLETED', 'REVERSED'] }, paidAt: { lte: endOfDay(q.endDate) } } }),
+    prisma.staff.findMany({ where: { ...scope, ...(staffFilter.staffId ? { id: staffFilter.staffId } : {}) }, select: { id: true, name: true, employeeCode: true } }),
+    prisma.commissionEvent.findMany({ where: { ...scope, ...staffFilter, eventDate: { gte: dateOnly(q.startDate), lte: dateOnly(q.endDate) } },
+      select: { invoiceId: true, lineId: true, staffId: true, componentId: true, eventDate: true, consumedByRunId: true } }),
   ]);
-  const lines = await prisma.invoiceLine.findMany({
-    where: { id: { in: [...new Set(events.map((e) => e.lineId))] } }, include: { components: true, invoice: { select: { clientName: true } } },
-  });
-  const lineById = new Map(lines.map((l) => [l.id, l]));
-  const staffById = new Map(staff.map((s) => [s.id, s]));
-
-  let rows = events.map((e) => {
-    const line = lineById.get(e.lineId);
-    const comp = e.componentId ? line?.components.find((c) => c.id === e.componentId) : null;
-    const earn = e.type === 'EARN';
+  const staffById = new Map(staff.map(s => [s.id, s]));
+  const recordedStatus = new Map();
+  const eventKey = (invoiceId, lineId, staffId, componentId, date) => [invoiceId, lineId, staffId, componentId || '', date].join(':');
+  for (const event of recordedEvents) {
+    const key = eventKey(event.invoiceId, event.lineId, event.staffId, event.componentId, ymd(event.eventDate));
+    recordedStatus.set(key, event.consumedByRunId || recordedStatus.get(key) === 'IN_RUN' ? 'IN_RUN' : 'NOT_RUN');
+  }
+  const allRows = collections.flatMap(event => event.commissions.map(c => {
+    const comp = event.line.components?.find(component => component.id === c.componentId);
     return {
-      eventId: e.id, date: ymd(e.eventDate), staffId: e.staffId, staffName: staffById.get(e.staffId)?.name ?? '', invoiceId: e.invoiceId,
-      invoiceNumber: e.invoiceNumber, customer: line?.invoice.clientName ?? '', itemName: comp ? `${line?.name} › ${comp.serviceName}` : line?.name ?? '',
-      source: comp ? 'PACKAGE' : (line?.type ?? 'SERVICE'), eventType: e.type,
-      attributedNetSales: (earn ? 1 : -1) * num(e.attributedNet), rateSnapshot: num(e.rate),
-      earned: earn ? num(e.amount) : 0, reversed: earn ? 0 : num(e.amount), net: (earn ? 1 : -1) * num(e.amount),
-      runStatus: e.consumedByRunId ? 'IN_RUN' : 'NOT_RUN',
+      eventId: event.id + ':' + c.staffId + ':' + (c.componentId || ''), date: event.date,
+      staffId: c.staffId, staffName: staffById.get(c.staffId)?.name || c.staffName || '',
+      invoiceId: event.invoice.id, invoiceNumber: event.invoice.invoiceNumber, customer: event.invoice.clientName || '',
+      itemName: comp ? event.line.name + ' / ' + comp.serviceName : event.line.name,
+      source: event.line.type === 'CUSTOM_SERVICE' ? 'SERVICE' : event.line.type,
+      eventType: c.amount.lt(0) || c.attributedNet.lt(0) ? 'REVERSAL' : 'EARN', attributedNetSales: num(c.attributedNet), rateSnapshot: num(c.rate),
+      earned: c.amount.gt(0) ? num(c.amount) : 0, reversed: c.amount.lt(0) ? num(c.amount.negated()) : 0,
+      net: num(c.amount), runStatus: recordedStatus.get(eventKey(event.invoice.id, event.line.id, c.staffId, c.componentId, event.date)) || 'CALCULATED',
     };
-  });
-  if (q.source) rows = rows.filter((r) => r.source === q.source);
-
-  const ids = [...new Set([...rows.map((r) => r.staffId), ...payments.map((p) => p.staffId), ...opening.map((o) => o.staffId), ...openingPaid.map((o) => o.staffId)])];
-  const byStaff = ids.map((id) => {
-    const mine = rows.filter((r) => r.staffId === id);
-    const op = (t) => toDec(opening.find((o) => o.staffId === id && o.type === t)?._sum.amount ?? 0);
-    const openingLiability = round2(op('EARN').minus(op('REVERSAL')).minus(openingPaid.find((o) => o.staffId === id)?._sum.amount ?? 0));
-    const earned = sumBy(mine, (r) => r.earned);
-    const reversed = sumBy(mine, (r) => r.reversed);
-    const paid = sumBy(payments.filter((p) => p.staffId === id), (p) => p.amount);
-    return {
-      staffId: id, staffName: staffById.get(id)?.name ?? '', employeeCode: staffById.get(id)?.employeeCode ?? '',
-      attributedNetSales: sumBy(mine, (r) => r.attributedNetSales).toNumber(), earned: earned.toNumber(), reversed: reversed.toNumber(),
-      net: round2(earned.minus(reversed)).toNumber(), paid: paid.toNumber(), openingLiability: openingLiability.toNumber(),
-      outstanding: round2(openingLiability.plus(earned).minus(reversed).minus(paid)).toNumber(),
-    };
-  }).sort((a, b2) => a.employeeCode.localeCompare(b2.employeeCode));
-
+  })).filter(r => staffById.has(r.staffId));
+  const period = allRows.filter(r => r.date >= q.startDate && r.date <= q.endDate);
+  const rows = period.filter(r => (!q.source || q.source === 'ALL' || r.source === q.source)
+    && (!q.invoiceNumber || r.invoiceNumber === q.invoiceNumber));
+  const paidEvents = payoutEvents(payments).filter(p => p.date <= q.endDate);
+  // Source/invoice filters select detail rows only. Staff balances include all sources:
+  // payouts have no invoice allocation and must not be arbitrarily assigned to a line.
+  const byStaff = staff.map(st => {
+    const mine = period.filter(r => r.staffId === st.id);
+    const paid = paidEvents.filter(p => p.staffId === st.id);
+    const openingLiability = sumBy(allRows.filter(r => r.staffId === st.id && r.date < q.startDate), r => r.net)
+      .minus(sumBy(paid.filter(p => p.date < q.startDate), p => p.signedAmount));
+    const earned = sumBy(mine, r => r.earned), reversed = sumBy(mine, r => r.reversed);
+    const settled = sumBy(paid.filter(p => p.date >= q.startDate), p => p.signedAmount);
+    return { staffId: st.id, staffName: st.name, employeeCode: st.employeeCode,
+      attributedNetSales: num(sumBy(mine, r => r.attributedNetSales)), earned: num(earned), reversed: num(reversed),
+      net: num(earned.minus(reversed)), paid: num(settled), openingLiability: num(openingLiability),
+      outstanding: num(openingLiability.plus(earned).minus(reversed).minus(settled)) };
+  }).sort((a, b) => a.employeeCode.localeCompare(b.employeeCode));
   const totals = Object.fromEntries(['attributedNetSales', 'earned', 'reversed', 'net', 'paid', 'openingLiability', 'outstanding']
-    .map((f) => [f, sumBy(byStaff, (r) => r[f]).toNumber()]));
-  return {
-    filters: { branchId: b ?? 'ALL', startDate: q.startDate, endDate: q.endDate, staffId: q.staffId, source: q.source, invoiceNumber: q.invoiceNumber },
-    dateBasis: 'Commission earn/reversal event date; payouts by paid date. Base excludes discounts, tax and tips.',
-    summary: totals, byStaff, rows, totals,
-  };
+    .map(key => [key, num(sumBy(byStaff, row => row[key]))]));
+  return { filters: { ...q, branchId: b || 'ALL' },
+    dateBasis: 'Actual customer payment/refund/reversal dates; net of tax and tips. Staff balances include all sources; source/invoice filters apply to detail rows only.',
+    summary: totals, byStaff, rows, totals };
 };
-

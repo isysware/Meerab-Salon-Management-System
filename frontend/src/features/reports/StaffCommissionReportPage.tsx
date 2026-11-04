@@ -35,7 +35,7 @@ const labelClass = 'block text-[11px] font-bold text-slate-500 uppercase trackin
 
 const formatPKR = (amt: number) => {
   const num = Number(amt) || 0;
-  return Math.abs(num).toLocaleString('en-US', {
+  return num.toLocaleString('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -178,6 +178,7 @@ export const StaffCommissionReportPage: React.FC = () => {
     if (!reportData) return;
     const meta: [string, string][] = [
       ['Report', 'Staff Commission Reports'],
+      ['Calculation Basis', reportData.dateBasis || 'Actual eligible customer collections; balances include all sources'],
       ['Branch', branchName(selectedBranch)],
       ['From Date', fromDate || '—'],
       ['To Date', toDate || '—'],
@@ -189,7 +190,7 @@ export const StaffCommissionReportPage: React.FC = () => {
     const staffHeaders = [
       'Staff',
       'Employee Code',
-      'Attributed Net Sales',
+      'Eligible Collected Net Sales',
       'Opening Liability',
       'Earned',
       'Reversed',
@@ -265,6 +266,7 @@ export const StaffCommissionReportPage: React.FC = () => {
     if (!reportData) return;
     const meta: [string, string][] = [
       ['Report', 'Staff Commission Reports'],
+      ['Calculation Basis', reportData.dateBasis || 'Actual eligible customer collections; balances include all sources'],
       ['Branch', branchName(selectedBranch)],
       ['Date Range', `${fromDate} to ${toDate}`],
       ['Generated At', new Date().toLocaleString()],
@@ -273,7 +275,7 @@ export const StaffCommissionReportPage: React.FC = () => {
     const staffHeaders = [
       'Staff',
       'Employee Code',
-      'Attributed Net Sales',
+      'Eligible Collected Net Sales',
       'Opening Liability',
       'Earned',
       'Reversed',
@@ -403,6 +405,7 @@ export const StaffCommissionReportPage: React.FC = () => {
 
   return (
     <div className="w-full max-w-full space-y-6 text-slate-800 font-sans">
+      {reportData ? <p className="text-xs text-slate-600">{reportData.dateBasis}</p> : null}
       {/* Top Header Card */}
       <div className="border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] p-6 rounded-[24px] flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -600,7 +603,7 @@ export const StaffCommissionReportPage: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] p-5 rounded-[24px] flex items-center justify-between">
                 <div>
-                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Attributed Net Sales</p>
+                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Eligible Collected Net Sales</p>
                   <p className="text-xl font-bold text-slate-900 mt-1 font-mono tabular-nums">PKR {formatPKR(t.attributedNetSales)}</p>
                   <p className="text-[11px] text-slate-400 mt-0.5">Completed services baseline</p>
                 </div>
@@ -717,7 +720,7 @@ export const StaffCommissionReportPage: React.FC = () => {
                     <tr className="bg-[#FAF8F9] border-b border-rose-100/60 text-[#B82E69] font-bold text-[11px] uppercase tracking-wider">
                       <th className="py-3.5 px-4">Staff</th>
                       <th className="py-3.5 px-4">Employee Code</th>
-                      <th className="py-3.5 px-4 text-right">Attributed Net Sales</th>
+                      <th className="py-3.5 px-4 text-right">Eligible Collected Net Sales</th>
                       <th className="py-3.5 px-4 text-right">Opening Liability</th>
                       <th className="py-3.5 px-4 text-right">Earned</th>
                       <th className="py-3.5 px-4 text-right">Reversed</th>
@@ -854,7 +857,7 @@ export const StaffCommissionReportPage: React.FC = () => {
                                     : 'bg-slate-100 text-slate-600 border-slate-200'
                                 }`}
                               >
-                                {r.runStatus === 'IN_RUN' ? 'In Run' : 'Not Run'}
+                                {r.runStatus === 'IN_RUN' ? 'In Run' : r.runStatus === 'CALCULATED' ? 'Calculated' : 'Not Run'}
                               </span>
                             </td>
                           </tr>

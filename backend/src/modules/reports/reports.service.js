@@ -12,6 +12,7 @@ import { max0, round2, toDec } from '../../lib/money.js';
 import { listAppointments } from '../appointments/appointments.service.js';
 import { inventorySummary } from '../inventory/inventory.service.js';
 import { resolveReportContext, formatReportResponse } from '../../lib/reportRange.js';
+import { loadCollectionEvents, staffShares, payoutEvents, collectionTotals, collectionReceipts } from './collectionEvents.js';
 import { allocatePaymentToInvoice } from '../../lib/calculations/collectionAllocation.js';
 
 const n = (d) => round2(d ?? 0).toNumber();
@@ -114,9 +115,10 @@ const computePerformance = async (staffList, startDate, endDate, filters = {}) =
   if (!staffList.length) return [];
   const ids = staffList.map((s) => s.id);
   const period = range(startDate, endDate);
-  const activeInvoice = { date: period, lifecycle: { not: 'VOIDED' } };
+  const performanceScope = { branchId: { in: [...new Set(staffList.map(s => s.branchId))] } };
+  const activeInvoice = { ...performanceScope, date: period, lifecycle: { not: 'VOIDED' } };
 
-  const [lines, statements, allocations, payouts, attendance, overtime] = await Promise.all([
+  const [lines, statements, allocations, payouts, attendance, overtime, collectionEvents, commissionPayments] = await Promise.all([
     prisma.invoiceLine.findMany({
       where: {
         type: { not: 'PRODUCT' },
@@ -137,6 +139,8 @@ const computePerformance = async (staffList, startDate, endDate, filters = {}) =
     prisma.tipPayout.findMany({ where: { staffId: { in: ids }, OR: [{ payoutDate: period }, { reversalDate: period }] } }),
     prisma.attendanceRecord.findMany({ where: { staffId: { in: ids }, workDate: period } }),
     prisma.overtimeRecord.findMany({ where: { staffId: { in: ids }, workDate: period, status: 'APPROVED' } }),
+    loadCollectionEvents({ branchId: { in: [...new Set(staffList.map(s => s.branchId))] } }, startDate, endDate),
+    prisma.commissionPayment.findMany({ where: { ...performanceScope, staffId: { in: ids }, status: { in: ['COMPLETED', 'REVERSED'] }, paidAt: { lte: endOfDay(endDate) } } }),
   ]);
 
   const branches = await prisma.branch.findMany({ where: { id: { in: [...new Set(staffList.map((s) => s.branchId))] } } });
@@ -154,68 +158,43 @@ const computePerformance = async (staffList, startDate, endDate, filters = {}) =
     let commissionEligibleNet = toDec(0);
     let commission = toDec(0);
 
+    let collected = toDec(0);
+    const matches = (line, share) => (!filters.packageId || filters.packageId === 'ALL' || (line.type === 'PACKAGE' && line.itemId === filters.packageId))
+      && (!filters.serviceId || filters.serviceId === 'ALL' || (share.serviceId || line.itemId) === filters.serviceId);
     for (const line of lines) {
-      const inv = line.invoice;
-      const lineGross = toDec(line.unitPrice).times(line.quantity);
-      const clientKey = inv.clientId || inv.clientName?.trim().toLowerCase();
-
-      if (['SERVICE', 'CUSTOM_SERVICE'].includes(line.type) && line.staffId === st.id) {
-        if (filters.serviceId && filters.serviceId !== 'ALL' && line.itemId !== filters.serviceId) continue;
-        if (filters.packageId && filters.packageId !== 'ALL') continue;
-        const rate = toDec(line.staffCommissionRate);
-        const earned = round2(toDec(line.netSales).times(rate).dividedBy(100));
-        direct += Number(line.quantity);
-        gross = gross.plus(lineGross);
-        disc = disc.plus(line.discountAllocated);
-        net = net.plus(line.netSales);
-        if (rate.gt(0)) {
-          commissionEligibleNet = commissionEligibleNet.plus(line.netSales);
-        }
-        commission = commission.plus(earned);
-        if (clientKey) clients.add(clientKey);
-        detailedServices.push({
-          invoiceId: inv.id, invoiceNumber: inv.invoiceNumber, date: ymd(inv.date), time: inv.time, clientName: inv.clientName,
-          itemId: line.itemId, serviceName: line.name, itemType: 'SERVICE',
-          cataloguePrice: n(lineGross), discountAllocated: n(line.discountAllocated), netSales: n(line.netSales),
-          commissionRatePercent: rate.toNumber(), commissionEarned: n(earned),
-        });
+      for (const share of staffShares(line, line.netSales).filter(c => c.staffId === st.id && matches(line, c))) {
+        const proportion = toDec(line.netSales).gt(0) ? share.net.div(line.netSales) : toDec(0);
+        const discount = round2(toDec(line.discountAllocated).times(proportion));
+        gross = gross.plus(share.net).plus(discount);
+        disc = disc.plus(discount); net = net.plus(share.net);
+        if (line.type === 'PACKAGE') comps += Number(share.quantity || line.quantity || 1);
+        else direct += Number(line.quantity || 1);
+        const key = line.invoice.clientId || line.invoice.clientName?.trim().toLowerCase();
+        if (key) clients.add(key);
       }
-
-      if (line.type === 'PACKAGE') {
-        if (filters.packageId && filters.packageId !== 'ALL' && line.itemId !== filters.packageId) continue;
-        const netRatio = lineGross.gt(0) ? toDec(line.netSales).dividedBy(lineGross) : toDec(1);
-        for (const c of [...line.components].sort((a, b) => a.sortOrder - b.sortOrder)) {
-          if (c.staffId !== st.id) continue;
-          if (filters.serviceId && filters.serviceId !== 'ALL' && c.serviceId !== filters.serviceId) continue;
-          const allocated = toDec(c.allocatedAmount);
-          const allocatedNet = round2(allocated.times(netRatio));
-          const rate = toDec(c.staffCommissionRate);
-          const earned = round2(allocatedNet.times(rate).dividedBy(100));
-          comps += c.quantity || 1;
-          gross = gross.plus(allocated);
-          disc = disc.plus(allocated.minus(allocatedNet));
-          net = net.plus(allocatedNet);
-          if (rate.gt(0)) {
-            commissionEligibleNet = commissionEligibleNet.plus(allocatedNet);
-          }
-          commission = commission.plus(earned);
-          if (clientKey) clients.add(clientKey);
-          detailedServices.push({
-            invoiceId: inv.id, invoiceNumber: inv.invoiceNumber, date: ymd(inv.date), time: inv.time, clientName: inv.clientName,
-            itemId: c.serviceId, serviceName: `${c.serviceName} (${line.name})`, itemType: 'PACKAGE_COMPONENT',
-            cataloguePrice: n(allocated), discountAllocated: n(allocated.minus(allocatedNet)), netSales: n(allocatedNet),
-            commissionRatePercent: rate.toNumber(), commissionEarned: n(earned),
-          });
-        }
+    }
+    for (const event of collectionEvents) {
+      const line = event.line;
+      if (line.type === 'PRODUCT') continue;
+      for (const share of event.staffAllocations.filter(c => c.staffId === st.id && matches(line, c))) {
+        const earned = event.commissions.filter(c => c.staffId === st.id && c.componentId === share.componentId)
+          .reduce((total, c) => total.plus(c.amount), toDec(0));
+        collected = collected.plus(share.net); commission = commission.plus(earned);
+        if (toDec(share.staffCommissionRate || 0).gt(0)) commissionEligibleNet = commissionEligibleNet.plus(share.net);
+        const collectedDiscount = toDec(line.netSales).gt(0) ? round2(toDec(line.discountAllocated).times(share.net).div(line.netSales)) : toDec(0);
+        detailedServices.push({ invoiceId: event.invoice.id, invoiceNumber: event.invoice.invoiceNumber,
+          date: event.date, time: event.record.time || '', clientName: event.invoice.clientName,
+          itemId: share.serviceId || line.itemId, serviceName: share.serviceName ? share.serviceName + ' (' + line.name + ')' : line.name,
+          itemType: line.type === 'PACKAGE' ? 'PACKAGE_COMPONENT' : 'SERVICE',
+          cataloguePrice: n(share.net.plus(collectedDiscount)), discountAllocated: n(collectedDiscount), netSales: n(share.net),
+          commissionRatePercent: n(share.staffCommissionRate), commissionEarned: n(earned), eventType: event.kind });
       }
     }
 
     const myStatements = of(statements, st.id);
     const finalized = myStatements.reduce((s, x) => s.plus(x.netPayable), toDec(0));
-    const paidCommission = myStatements
-      .flatMap((x) => x.payments)
-      .filter((p) => p.status === 'COMPLETED')
-      .reduce((s, p) => s.plus(p.amount), toDec(0));
+    const paidCommission = payoutEvents(commissionPayments.filter(p => p.staffId === st.id))
+      .filter(p => p.date >= startDate && p.date <= endDate).reduce((total, p) => total.plus(p.signedAmount), toDec(0));
     const allocatedTips = of(allocations, st.id).reduce((s, a) => s.plus(a.amount), toDec(0));
     const inPeriod = (x) => x && ymd(x) >= startDate && ymd(x) <= endDate;
     const paidTips = of(payouts, st.id).reduce((s, p) => s.plus(inPeriod(p.payoutDate) ? p.amount : 0).minus(inPeriod(p.reversalDate) ? p.amount : 0), toDec(0));
@@ -237,6 +216,8 @@ const computePerformance = async (staffList, startDate, endDate, filters = {}) =
       attributedGrossSales: n(gross),
       discountAllocation: n(disc),
       attributedNetSales: n(net),
+      invoicedSales: n(net),
+      collectedSales: n(collected),
       commissionEligibleSales: n(commissionEligibleNet),
       estimatedCommission: n(commission),
       finalizedCommission: n(finalized),
@@ -272,6 +253,7 @@ export const personalPerformance = async (actor, q = {}) => {
   if (!actor.staffId) throw forbidden('FORBIDDEN', 'Staff record associated with the authenticated user could not be found.');
   const staff = await prisma.staff.findUnique({ where: { id: actor.staffId } });
   if (!staff) throw notFound('STAFF_NOT_FOUND', 'Staff record associated with the authenticated user could not be found.');
+  if (!actor.branchId || staff.branchId !== actor.branchId) throw forbidden('BRANCH_FORBIDDEN', 'Staff reports require the assigned branch.');
   const today = await getBusinessDate();
   const startDate = q.startDate || `${today.slice(0, 7)}-01`;
   const endDate = q.endDate || today;
@@ -280,330 +262,7 @@ export const personalPerformance = async (actor, q = {}) => {
 
 // ═══ SALES & INVOICES REPORT (Spec §9.2) ═════════════════════════════════════
 
-export const salesInvoicesReport = async (actor, q = {}) => {
-  if (actor.role === 'STAFF') throw forbidden('FORBIDDEN', 'Access Denied: Staff members cannot access sales & invoices report.');
-
-  const ctx = await resolveReportContext(actor, q, 'INVOICE_POSTING');
-
-  const dateRange = { gte: dateOnly(ctx.fromStr), lte: dateOnly(ctx.toStr) };
-  const where = {
-    date: dateRange,
-    ...(ctx.branchId ? { branchId: ctx.branchId } : {}),
-  };
-
-  // Scope to actor if ACCOUNTANT, or apply cashier/soldBy filter for administrators
-  if (actor.role === 'ACCOUNTANT') {
-    where.processedByUserId = actor.id;
-  } else if (q.soldByUserId && q.soldByUserId !== 'ALL') {
-    where.processedByUserId = q.soldByUserId;
-  } else if (q.accountantId && q.accountantId !== 'ALL') {
-    where.processedByUserId = q.accountantId;
-  } else if (q.userId && q.userId !== 'ALL') {
-    where.processedByUserId = q.userId;
-  }
-
-  if (q.paymentStatus && q.paymentStatus !== 'ALL') {
-    where.status = q.paymentStatus;
-  }
-
-  if (q.lifecycle && q.lifecycle !== 'ALL') {
-    where.lifecycle = q.lifecycle;
-  }
-
-  if (q.paymentMethod && q.paymentMethod !== 'ALL') {
-    where.paymentMethod = q.paymentMethod;
-  }
-
-  if (q.staffId && q.staffId !== 'ALL') {
-    where.OR = [
-      { staffId: q.staffId },
-      { lines: { some: { staffId: q.staffId } } },
-    ];
-  }
-
-  if (q.clientId) {
-    where.clientId = q.clientId;
-  }
-
-  if (q.search && q.search.trim()) {
-    const s = q.search.trim();
-    where.AND = [
-      ...(where.AND || []),
-      {
-        OR: [
-          { invoiceNumber: { contains: s, mode: 'insensitive' } },
-          { clientName: { contains: s, mode: 'insensitive' } },
-          { clientPhone: { contains: s, mode: 'insensitive' } },
-        ],
-      },
-    ];
-  }
-
-  const invoices = await prisma.invoice.findMany({
-    where,
-    include: {
-      lines: {
-        select: {
-          id: true,
-          name: true,
-          type: true,
-          staffId: true,
-          staffName: true,
-          quantity: true,
-          unitPrice: true,
-          discountAllocated: true,
-          netSales: true,
-          tax: true,
-          total: true,
-        },
-      },
-      payments: {
-        select: {
-          id: true,
-          amount: true,
-          method: true,
-          paymentAccountId: true,
-          paymentAccountName: true,
-          date: true,
-        },
-      },
-      refunds: {
-        select: {
-          id: true,
-          refundNumber: true,
-          type: true,
-          refundDate: true,
-          netReversed: true,
-          taxReversed: true,
-          tipReversed: true,
-          cashOut: true,
-          receivableCancelled: true,
-          reason: true,
-        },
-      },
-    },
-    orderBy: [
-      { date: 'desc' },
-      { createdAt: 'desc' },
-    ],
-  });
-
-  const branches = await prisma.branch.findMany({
-    select: { id: true, name: true },
-  });
-  const branchMap = new Map(branches.map((b) => [b.id, b.name]));
-
-  let totalGross = toDec(0);
-  let totalDiscount = toDec(0);
-  let totalNetSales = toDec(0);
-  let totalTaxCharged = toDec(0);
-  let totalTaxReversed = toDec(0);
-  let totalTips = toDec(0);
-  let totalInvoiceAmount = toDec(0);
-  let totalPaid = toDec(0);
-  let totalRefunded = toDec(0);
-  let totalOutstanding = toDec(0);
-
-  let activeCount = 0;
-  let partiallyRefundedCount = 0;
-  let refundedCount = 0;
-  let voidedCount = 0;
-
-  let totalCashCollected = toDec(0);
-  let totalOnlineCollected = toDec(0);
-  const onlineAccountsMap = new Map();
-
-  for (const inv of invoices) {
-    for (const p of inv.payments) {
-      const amt = toDec(p.amount);
-      if (p.method === 'CASH') {
-        totalCashCollected = totalCashCollected.plus(amt);
-      } else {
-        totalOnlineCollected = totalOnlineCollected.plus(amt);
-        const accName = p.paymentAccountName || 'Online Account';
-        const accId = p.paymentAccountId || 'online';
-        const existing = onlineAccountsMap.get(accName) || { accountId: accId, accountName: accName, amount: toDec(0), count: 0 };
-        existing.amount = existing.amount.plus(amt);
-        existing.count += 1;
-        onlineAccountsMap.set(accName, existing);
-      }
-    }
-    // Deduct actually paid refunds from cash & online collection totals
-    if (inv.lifecycle !== 'VOIDED') {
-      for (const r of inv.refunds) {
-        const cashOut = toDec(r.cashOut || 0);
-        if (cashOut.greaterThan(0)) {
-          if (r.method === 'CASH') {
-            totalCashCollected = totalCashCollected.minus(cashOut);
-          } else {
-            totalOnlineCollected = totalOnlineCollected.minus(cashOut);
-            for (const acc of onlineAccountsMap.values()) {
-              if (r.accountId && acc.accountId === r.accountId) {
-                acc.amount = acc.amount.minus(cashOut);
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  const onlineAccountsBreakdown = Array.from(onlineAccountsMap.values()).map((a) => ({
-    accountId: a.accountId,
-    accountName: a.accountName,
-    amount: n(max0(a.amount)),
-    count: a.count,
-  }));
-
-  const rows = invoices.map((inv) => {
-    const gross = toDec(inv.subtotal);
-    const discount = toDec(inv.discount);
-    const netSales = toDec(inv.netSales);
-    const taxCharged = toDec(inv.tax);
-    const tip = toDec(inv.tip);
-    const total = toDec(inv.total);
-    const paid = inv.lifecycle === 'VOIDED' ? toDec(0) : toDec(inv.amountPaid);
-    const outstanding = inv.lifecycle === 'VOIDED' ? toDec(0) : toDec(inv.amountDue);
-
-    const refundedNet = inv.refunds.reduce((sum, r) => sum.plus(r.netReversed), toDec(0));
-    const refundedTax = inv.refunds.reduce((sum, r) => sum.plus(r.taxReversed), toDec(0));
-    const refundedTip = inv.refunds.reduce((sum, r) => sum.plus(r.tipReversed), toDec(0));
-    const refundedCashOut = inv.refunds.reduce((sum, r) => sum.plus(r.cashOut || 0), toDec(0));
-    const totalRefund = refundedNet.plus(refundedTax).plus(refundedTip);
-
-    if (inv.lifecycle !== 'VOIDED') {
-      totalGross = totalGross.plus(gross);
-      totalDiscount = totalDiscount.plus(discount);
-      totalNetSales = totalNetSales.plus(netSales).minus(refundedNet);
-      totalTaxCharged = totalTaxCharged.plus(taxCharged).minus(refundedTax);
-      totalTaxReversed = totalTaxReversed.plus(refundedTax);
-      totalTips = totalTips.plus(tip).minus(refundedTip);
-      totalInvoiceAmount = totalInvoiceAmount.plus(total).minus(totalRefund);
-      totalPaid = totalPaid.plus(paid);
-      totalOutstanding = totalOutstanding.plus(outstanding);
-    }
-    totalRefunded = totalRefunded.plus(totalRefund);
-
-    if (inv.lifecycle === 'ACTIVE') activeCount++;
-    else if (inv.lifecycle === 'PARTIALLY_REFUNDED') partiallyRefundedCount++;
-    else if (inv.lifecycle === 'REFUNDED') refundedCount++;
-    else if (inv.lifecycle === 'VOIDED') voidedCount++;
-
-    const linesSummary = inv.lines.map((l) => `${l.name} (${Number(l.quantity)})`).join(', ') || 'General';
-    const staffSummary = [...new Set(inv.lines.map((l) => l.staffName).filter(Boolean))].join(', ') || inv.staffName || 'Unassigned';
-
-    let rowCash = toDec(0);
-    let rowOnline = toDec(0);
-    for (const p of inv.payments) {
-      if (p.method === 'CASH') rowCash = rowCash.plus(toDec(p.amount));
-      else rowOnline = rowOnline.plus(toDec(p.amount));
-    }
-    if (inv.lifecycle !== 'VOIDED') {
-      for (const r of inv.refunds) {
-        const cashOut = toDec(r.cashOut || 0);
-        if (cashOut.greaterThan(0)) {
-          if (r.method === 'CASH') rowCash = max0(rowCash.minus(cashOut));
-          else rowOnline = max0(rowOnline.minus(cashOut));
-        }
-      }
-    }
-
-    return {
-      id: inv.id,
-      invoiceNumber: inv.invoiceNumber,
-      date: ymd(inv.date),
-      time: inv.time,
-      branchId: inv.branchId,
-      branchName: branchMap.get(inv.branchId) || 'Branch',
-      clientId: inv.clientId,
-      clientName: inv.clientName,
-      clientPhone: inv.clientPhone,
-      customerSource: inv.customerSource,
-      soldByUserId: inv.processedByUserId,
-      soldByName: inv.processedByName,
-      staffSummary,
-      linesSummary,
-      paymentMethod: inv.paymentMethod,
-      paymentStatus: inv.status,
-      lifecycle: inv.lifecycle,
-      gross: n(gross),
-      discount: n(discount),
-      netSales: n(netSales),
-      tax: n(taxCharged),
-      taxCharged: n(taxCharged),
-      taxReversed: n(refundedTax),
-      netTaxLiability: n(taxCharged.minus(refundedTax)),
-      tip: n(tip),
-      total: n(total),
-      paid: n(paid),
-      refunded: n(totalRefund),
-      refundedAmount: n(totalRefund),
-      refundedCashOut: n(refundedCashOut),
-      outstanding: n(outstanding),
-      cashPaid: n(rowCash),
-      onlinePaid: n(rowOnline),
-      payments: inv.payments.map((p) => ({
-        id: p.id,
-        amount: n(p.amount),
-        method: p.method,
-        paymentAccountId: p.paymentAccountId,
-        paymentAccountName: p.paymentAccountName,
-        date: ymd(p.date),
-      })),
-      notes: inv.notes,
-      refundCount: inv.refunds.length,
-    };
-  });
-
-  const netTaxLiability = totalTaxCharged.minus(totalTaxReversed);
-
-  const kpis = {
-    totalInvoices: invoices.length,
-    grossSales: n(totalGross),
-    totalDiscounts: n(totalDiscount),
-    netSales: n(totalNetSales),
-    taxCharged: n(totalTaxCharged),
-    taxReversed: n(totalTaxReversed),
-    netTaxLiability: n(netTaxLiability),
-    tipsCollected: n(totalTips),
-    invoiceTotal: n(totalInvoiceAmount),
-    totalPaid: n(totalPaid),
-    totalRefunded: n(totalRefunded),
-    totalOutstanding: n(totalOutstanding),
-    totalCashCollected: n(totalCashCollected),
-    totalOnlineCollected: n(totalOnlineCollected),
-    activeCount,
-    partiallyRefundedCount,
-    refundedCount,
-    voidedCount,
-  };
-
-  const tenderBreakdown = {
-    totalCash: n(totalCashCollected),
-    totalOnline: n(totalOnlineCollected),
-    grandTotal: n(totalCashCollected.plus(totalOnlineCollected)),
-    onlineAccounts: onlineAccountsBreakdown,
-  };
-
-  const totals = {
-    gross: n(totalGross),
-    discount: n(totalDiscount),
-    netSales: n(totalNetSales),
-    tax: n(totalTaxCharged),
-    taxCharged: n(totalTaxCharged),
-    taxReversed: n(totalTaxReversed),
-    netTaxLiability: n(netTaxLiability),
-    tip: n(totalTips),
-    total: n(totalInvoiceAmount),
-    paid: n(totalPaid),
-    refunded: n(totalRefunded),
-    outstanding: n(totalOutstanding),
-    cashCollected: n(totalCashCollected),
-    onlineCollected: n(totalOnlineCollected),
-  };
-
-  return formatReportResponse(ctx.meta, { kpis, tenderBreakdown, rows, totals });
-};
+export { salesInvoicesReport } from './salesCollections.report.js';
 
 // ═══ INCOME & EXPENSE REPORT ══════════════════════════════════════════════════
 
@@ -2439,9 +2098,6 @@ export const paymentAccountsReport = async (actor, query = {}) => {
     ...branchFilter,
     accountId: { in: accountIds },
     createdAt: { gte: ctx.fromDate, lte: ctx.toDate },
-    ...(query.transactionType && query.transactionType !== 'ALL' ? { type: query.transactionType } : {}),
-    ...(query.direction && query.direction !== 'ALL' ? { direction: query.direction } : {}),
-    ...(query.sourceModule && query.sourceModule !== 'ALL' ? { sourceModule: query.sourceModule } : {}),
   };
 
   const movements = await prisma.accountMovement.findMany({
@@ -2459,7 +2115,7 @@ export const paymentAccountsReport = async (actor, query = {}) => {
         },
       },
     },
-    orderBy: [{ createdAt: 'asc' }],
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
 
   // 4. Calculate Running Balance per Account
@@ -2517,8 +2173,11 @@ export const paymentAccountsReport = async (actor, query = {}) => {
 
   // Apply optional search filter
   const search = query.search?.trim().toLowerCase();
+  const visibleRows = rawRows.filter(r => (!query.direction || query.direction === 'ALL' || r.direction === query.direction)
+    && (!query.transactionType || query.transactionType === 'ALL' || r.type === query.transactionType)
+    && (!query.sourceModule || query.sourceModule === 'ALL' || r.sourceModule === query.sourceModule));
   const filteredRows = search
-    ? rawRows.filter((r) =>
+    ? visibleRows.filter((r) =>
         (r.reference && r.reference.toLowerCase().includes(search)) ||
         (r.description && r.description.toLowerCase().includes(search)) ||
         (r.userName && r.userName.toLowerCase().includes(search)) ||
@@ -2526,7 +2185,11 @@ export const paymentAccountsReport = async (actor, query = {}) => {
         (r.sourceModule && r.sourceModule.toLowerCase().includes(search)) ||
         (r.type && r.type.toLowerCase().includes(search))
       )
-    : rawRows;
+    : visibleRows;
+
+  // Customer receipts are a separate revenue/tax reconciliation, never added to ledger movements.
+  const accountCollections = (await loadCollectionEvents(branchFilter, ctx.fromStr, ctx.toStr))
+    .filter(e => e.record.method !== 'CASH' && accountIds.includes(e.record.paymentAccountId || e.record.accountId));
 
   // 5. Account Summaries (Portfolio Breakdown)
   const accountsSummary = accounts.map((a) => {
@@ -2565,6 +2228,7 @@ export const paymentAccountsReport = async (actor, query = {}) => {
       netMovement: n(netMove),
       closingBalance: n(closing),
       transactionCount: accRows.length,
+      ...collectionTotals(accountCollections.filter(e => (e.record.paymentAccountId || e.record.accountId) === a.id)),
     };
   });
 
@@ -2587,6 +2251,8 @@ export const paymentAccountsReport = async (actor, query = {}) => {
 
   const kpis = {
     totalOpeningBalance: n(totalOpening),
+    totalDebits: n(totalMoneyIn.plus(totalTransfersIn)),
+    totalCredits: n(totalMoneyOut.plus(totalTransfersOut)),
     totalMoneyIn: n(totalMoneyIn),
     totalMoneyOut: n(totalMoneyOut),
     totalTransfersIn: n(totalTransfersIn),
@@ -2607,7 +2273,9 @@ export const paymentAccountsReport = async (actor, query = {}) => {
     netMovement: n(totalClosing.minus(totalOpening)),
   };
 
-  return formatReportResponse(ctx.meta, {
+  return formatReportResponse({ ...ctx.meta, basisNote: 'Balances and account summaries include all movements. Filters select detail rows only. Bank movements include tax/tips, transfers and non-sales items; they are not revenue. Customer collection components use business receipt dates; ledger balances use posting timestamps.' }, {
+    collections: collectionTotals(accountCollections),
+    filteredTotals: { moneyIn: n(filteredRows.reduce((sum, r) => sum.plus(r.debit), toDec(0))), moneyOut: n(filteredRows.reduce((sum, r) => sum.plus(r.credit), toDec(0))) },
     kpis,
     rows: filteredRows,
     totals,
@@ -2618,14 +2286,14 @@ export const paymentAccountsReport = async (actor, query = {}) => {
 // ═══ CASH DRAWER CUSTODY & SESSION REPORT ══════════════════════════════════
 
 export const cashDrawerReport = async (actor, query = {}) => {
-  const ctx = await resolveReportContext(actor, query, 'CUSTODY');
-  const dateRange = { gte: dateOnly(ctx.fromStr), lte: dateOnly(ctx.toStr) };
+  if (actor.role === 'STAFF') throw forbidden('FORBIDDEN', 'Staff cannot access cash drawer reports.');
+  const ctx = await resolveReportContext(actor, query, 'MOVEMENT_TIMESTAMP');
   const branchFilter = ctx.branchId ? { branchId: ctx.branchId } : {};
 
   // 1. Fetch cash drawers
   const drawerWhere = {
     ...branchFilter,
-    OR: [{ date: dateRange }, { movements: { some: { createdAt: { gte: ctx.fromDate, lte: ctx.toDate } } } }],
+    createdAt: { lte: ctx.toDate },
     ...(query.status && query.status !== 'ALL' ? { status: query.status } : {}),
     ...(actor.role === 'ACCOUNTANT'
       ? { custodianUserId: actor.id }
@@ -2636,9 +2304,11 @@ export const cashDrawerReport = async (actor, query = {}) => {
     where: drawerWhere,
     include: {
       movements: {
-        orderBy: { createdAt: 'asc' },
+        where: { createdAt: { lte: ctx.toDate } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       },
       settlements: {
+        where: { createdAt: { lte: ctx.toDate } },
         select: {
           id: true,
           status: true,
@@ -2659,33 +2329,12 @@ export const cashDrawerReport = async (actor, query = {}) => {
   const branchMap = new Map(branches.map((b) => [b.id, b.name]));
 
   // 2. Fetch invoice payments in this range for digital tender breakdown (Cash vs Online accounts)
-  const paymentRecords = await prisma.invoicePayment.findMany({
-    where: {
-      ...branchFilter,
-      OR: [{ date: dateRange }, { reversalDate: dateRange }],
-      ...(actor.role === 'ACCOUNTANT'
-        ? { processedByUserId: actor.id }
-        : (query.custodianUserId && query.custodianUserId !== 'ALL' ? { processedByUserId: query.custodianUserId } : {})),
-    },
-    select: {
-      id: true,
-      amount: true,
-      method: true,
-      paymentAccountId: true,
-      paymentAccountName: true,
-      drawerId: true,
-      processedByUserId: true,
-      processedByName: true,
-      date: true,
-      reversalDate: true,
-    },
-  });
-
-  const inPeriod = (date) => date && ymd(date) >= ctx.fromStr && ymd(date) <= ctx.toStr;
-  const invoicePayments = paymentRecords.flatMap((payment) => [
-    ...(inPeriod(payment.date) ? [payment] : []),
-    ...(inPeriod(payment.reversalDate) ? [{ ...payment, amount: toDec(payment.amount).negated(), date: payment.reversalDate }] : []),
-  ]);
+  const custodian = actor.role === 'ACCOUNTANT' ? actor.id : query.custodianUserId;
+  const collectionEvents = (await loadCollectionEvents(branchFilter, ctx.fromStr, ctx.toStr)).filter(e =>
+    !custodian || custodian === 'ALL' || (e.kind === 'REFUND' ? e.record.byUserId : e.kind === 'PAYMENT_REVERSAL' ? e.record.reversedByUserId : e.record.processedByUserId) === custodian);
+  const invoicePayments = collectionReceipts(collectionEvents).map(e => ({ ...e.record, id: e.id, date: dateOnly(e.date),
+    amount: e.billCollected.plus(e.tip), paymentAccountId: e.record.paymentAccountId || e.record.accountId,
+    paymentAccountName: e.record.paymentAccountName, processedByUserId: e.record.processedByUserId || e.record.byUserId, method: e.record.method }));
   const transactions = drawers.flatMap((drawer) => drawer.movements.filter((movement) => movement.createdAt >= ctx.fromDate && movement.createdAt <= ctx.toDate).map((movement) => ({
     id: movement.id, drawerId: drawer.id, date: toDateString(movement.createdAt), time: toTimeString(movement.createdAt), reference: movement.reference,
     sourceId: movement.sourceId, type: movement.type, direction: movement.direction, amount: n(toDec(movement.amount)),
@@ -2709,7 +2358,7 @@ export const cashDrawerReport = async (actor, query = {}) => {
   const onlineAccountMap = new Map();
 
   for (const acc of paymentAccounts) {
-    onlineAccountMap.set(acc.name, {
+    onlineAccountMap.set(acc.id, {
       accountId: acc.id,
       accountName: acc.name,
       accountType: acc.accountType,
@@ -2726,7 +2375,7 @@ export const cashDrawerReport = async (actor, query = {}) => {
     } else {
       overallOnlineReceipts = overallOnlineReceipts.plus(amt);
       const accName = ip.paymentAccountName || 'Online Account';
-      const existing = onlineAccountMap.get(accName) || {
+      const existing = onlineAccountMap.get(ip.paymentAccountId || 'unknown') || {
         accountId: ip.paymentAccountId || '',
         accountName: accName,
         accountType: 'ONLINE',
@@ -2736,45 +2385,7 @@ export const cashDrawerReport = async (actor, query = {}) => {
       };
       existing.amount = existing.amount.plus(amt);
       existing.count += 1;
-      onlineAccountMap.set(accName, existing);
-    }
-  }
-
-  const refundRecords = await prisma.invoiceRefund.findMany({
-    where: {
-      refundDate: dateRange,
-      invoice: {
-        ...branchFilter,
-        ...(actor.role === 'ACCOUNTANT'
-          ? { processedByUserId: actor.id }
-          : (query.custodianUserId && query.custodianUserId !== 'ALL' ? { processedByUserId: query.custodianUserId } : {})),
-      },
-    },
-    select: {
-      id: true,
-      refundNumber: true,
-      cashOut: true,
-      method: true,
-      accountId: true,
-      drawerId: true,
-    },
-  });
-
-  for (const ref of refundRecords) {
-    const out = toDec(ref.cashOut || 0);
-    if (out.greaterThan(0)) {
-      if (ref.method === 'CASH') {
-        overallCashReceipts = overallCashReceipts.minus(out);
-      } else {
-        overallOnlineReceipts = overallOnlineReceipts.minus(out);
-        if (ref.accountId) {
-          for (const acc of onlineAccountMap.values()) {
-            if (acc.accountId === ref.accountId) {
-              acc.amount = acc.amount.minus(out);
-            }
-          }
-        }
-      }
+      onlineAccountMap.set(ip.paymentAccountId || 'unknown', existing);
     }
   }
 
@@ -2783,14 +2394,14 @@ export const cashDrawerReport = async (actor, query = {}) => {
     accountName: a.accountName,
     accountType: a.accountType,
     providerName: a.providerName,
-    amount: n(max0(a.amount)),
+    amount: n(a.amount),
     count: a.count,
   }));
 
   // Map online collections per drawer (by drawerId or by custodianUserId + date)
   const onlineByDrawer = new Map();
   for (const ip of invoicePayments) {
-    if (ip.method === 'ONLINE_ACCOUNT') {
+    if (ip.method !== 'CASH') {
       const amt = toDec(ip.amount);
       const key = ip.drawerId || `${ip.processedByUserId}_${ymd(ip.date)}`;
       const current = onlineByDrawer.get(key) || { total: toDec(0), accounts: new Map() };
@@ -2803,6 +2414,7 @@ export const cashDrawerReport = async (actor, query = {}) => {
 
   // 3. Aggregate drawers
   let totalOpeningFloat = toDec(0);
+  let totalOpeningBalance = toDec(0);
   let totalCashSales = toDec(0);
   let totalDuesCollected = toDec(0);
   let totalCashTips = toDec(0);
@@ -2830,7 +2442,9 @@ export const cashDrawerReport = async (actor, query = {}) => {
     let otherCashOut = toDec(0);
     let cashOut = toDec(0);
 
-    for (const m of d.movements) {
+    const openingBalance = d.movements.filter(m => m.createdAt < ctx.fromDate).reduce((sum, m) => m.direction === 'IN' ? sum.plus(m.amount) : sum.minus(m.amount), toDec(0));
+    const periodMovements = d.movements.filter(m => m.createdAt >= ctx.fromDate && m.createdAt <= ctx.toDate);
+    for (const m of periodMovements) {
       const amt = toDec(m.amount);
       if (m.direction === 'IN') {
         cashIn = cashIn.plus(amt);
@@ -2848,16 +2462,15 @@ export const cashDrawerReport = async (actor, query = {}) => {
       }
     }
 
-    const expectedCash = cashIn.minus(cashOut);
+    const expectedCash = openingBalance.plus(cashIn).minus(cashOut);
     const countedCash =
-      d.lastCountedCash !== null && d.lastCountedCash !== undefined
+      d.lastCountedAt && d.lastCountedAt >= ctx.fromDate && d.lastCountedAt <= ctx.toDate && d.lastCountedCash !== null && d.lastCountedCash !== undefined
         ? toDec(d.lastCountedCash)
         : null;
-    const variance =
-      countedCash !== null && d.lastVariance !== null && d.lastVariance !== undefined
-        ? toDec(d.lastVariance)
-        : (countedCash !== null ? countedCash.minus(expectedCash) : null);
+    const countBalance = d.movements.filter(m => d.lastCountedAt && m.createdAt <= d.lastCountedAt).reduce((sum, m) => m.direction === 'IN' ? sum.plus(m.amount) : sum.minus(m.amount), toDec(0));
+    const variance = countedCash !== null ? countedCash.minus(countBalance) : null;
 
+    totalOpeningBalance = totalOpeningBalance.plus(openingBalance);
     totalOpeningFloat = totalOpeningFloat.plus(openingFloat);
     totalCashSales = totalCashSales.plus(cashSales);
     totalDuesCollected = totalDuesCollected.plus(duesCollected);
@@ -2891,8 +2504,9 @@ export const cashDrawerReport = async (actor, query = {}) => {
       custodianName: d.custodianName,
       date: ymd(d.date),
       openedAt: d.createdAt.toISOString(),
-      closedAt: d.closedAt ? d.closedAt.toISOString() : null,
-      status: d.status,
+      closedAt: d.closedAt && d.closedAt <= ctx.toDate ? d.closedAt.toISOString() : null,
+      status: d.closedAt && d.closedAt > ctx.toDate ? 'OPEN' : d.status,
+      openingBalance: n(openingBalance),
       openingFloat: n(openingFloat),
       cashSales: n(cashSales),
       duesCollected: n(duesCollected),
@@ -2918,7 +2532,7 @@ export const cashDrawerReport = async (actor, query = {}) => {
             reviewedByName: latestSettlement.receivedByName,
           }
         : null,
-      movementCount: d.movements.length,
+      movementCount: periodMovements.length,
     };
   });
 
@@ -2938,6 +2552,7 @@ export const cashDrawerReport = async (actor, query = {}) => {
     openSessionsCount: drawers.filter((d) => d.status === 'OPEN').length,
     settledSessionsCount: drawers.filter((d) => d.status === 'SETTLED').length,
     pendingSessionsCount: drawers.filter((d) => d.status === 'SETTLEMENT_PENDING').length,
+    totalOpeningBalance: n(totalOpeningBalance),
     totalOpeningFloat: n(totalOpeningFloat),
     totalCashSales: n(totalCashSales),
     totalDuesCollected: n(totalDuesCollected),
@@ -2965,6 +2580,7 @@ export const cashDrawerReport = async (actor, query = {}) => {
   };
 
   const totals = {
+    openingBalance: n(totalOpeningBalance),
     openingFloat: n(totalOpeningFloat),
     cashSales: n(totalCashSales),
     cashIn: n(totalCashIn),
@@ -2978,7 +2594,8 @@ export const cashDrawerReport = async (actor, query = {}) => {
     onlineTotal: n(overallOnlineReceipts),
   };
 
-  return formatReportResponse(ctx.meta, {
+  return formatReportResponse({ ...ctx.meta, basisNote: 'Opening balance is carry-forward before the period; expected cash is opening plus period IN minus OUT. Counts use their recorded timestamp; unavailable historical counts are blank. Tender totals are customer receipts including tax/tips, separate from custody transfers. Session status is current unless a future close is known. Search selects detail rows only.' }, {
+    collections: collectionTotals(collectionEvents),
     kpis,
     tenderBreakdown,
     rows: filteredRows,
@@ -2989,185 +2606,8 @@ export const cashDrawerReport = async (actor, query = {}) => {
 
 // ═══ DETAILED OPERATIONAL EXPENSES REPORT ══════════════════════════════════
 
-export const detailedExpensesReport = async (actor, query = {}) => {
-  const ctx = await resolveReportContext(actor, query, 'RECOGNITION');
-  const dateRange = { gte: dateOnly(ctx.fromStr), lte: dateOnly(ctx.toStr) };
-  const branchFilter = ctx.branchId ? { branchId: ctx.branchId } : {};
+export { detailedExpensesReport } from './paidExpenses.report.js';
 
-  const where = {
-    expenseDate: dateRange,
-    ...branchFilter,
-    ...(query.category && query.category !== 'ALL' ? { category: query.category } : {}),
-    ...(query.status && query.status !== 'ALL'
-      ? { status: query.status }
-      : { status: { not: 'DRAFT' } }),
-    ...(query.paymentSource && query.paymentSource !== 'ALL' ? { paymentSource: query.paymentSource } : {}),
-    ...(query.paymentAccountId && query.paymentAccountId !== 'ALL' ? { paymentAccountId: query.paymentAccountId } : {}),
-    ...(actor.role === 'ACCOUNTANT'
-      ? { OR: [{ createdByUserId: actor.id }, { paidByUserId: actor.id }] }
-      : (query.createdByUserId && query.createdByUserId !== 'ALL' ? { createdByUserId: query.createdByUserId } : {})),
-  };
-
-  const [expenses, branches, categories, paymentAccounts] = await Promise.all([
-    prisma.expense.findMany({
-      where,
-      orderBy: [{ expenseDate: 'desc' }, { createdAt: 'desc' }],
-    }),
-    prisma.branch.findMany({ select: { id: true, name: true } }),
-    prisma.expenseCategory.findMany({
-      where: { ...branchFilter, isActive: true },
-      select: { id: true, name: true },
-      orderBy: { name: 'asc' },
-    }),
-    prisma.paymentAccount.findMany({
-      where: { ...branchFilter, isActive: true },
-      select: { id: true, name: true, accountType: true },
-      orderBy: { name: 'asc' },
-    }),
-  ]);
-
-  const branchMap = new Map(branches.map((b) => [b.id, b.name]));
-
-  let totalExpenses = toDec(0);
-  let totalCashExpenses = toDec(0);
-  let totalOnlineExpenses = toDec(0);
-  let postedCount = 0;
-  let reversedCount = 0;
-  let draftCount = 0;
-
-  const categoryMap = new Map();
-  const onlineAccountMap = new Map();
-
-  for (const acc of paymentAccounts) {
-    onlineAccountMap.set(acc.name, {
-      accountId: acc.id,
-      accountName: acc.name,
-      amount: toDec(0),
-      count: 0,
-    });
-  }
-
-  const rawRows = expenses.map((exp) => {
-    const amt = toDec(exp.amount);
-    const isPosted = exp.status === 'POSTED';
-    const isReversed = exp.status === 'REVERSED';
-    const isDraft = exp.status === 'DRAFT';
-
-    if (isPosted) postedCount++;
-    else if (isReversed) reversedCount++;
-    else if (isDraft) draftCount++;
-
-    if (isPosted) {
-      totalExpenses = totalExpenses.plus(amt);
-      if (exp.paymentSource === 'CASH_DRAWER') {
-        totalCashExpenses = totalCashExpenses.plus(amt);
-      } else {
-        totalOnlineExpenses = totalOnlineExpenses.plus(amt);
-        const accName = exp.paymentAccountName || 'Online Account';
-        const existing = onlineAccountMap.get(accName) || {
-          accountId: exp.paymentAccountId || '',
-          accountName: accName,
-          amount: toDec(0),
-          count: 0,
-        };
-        existing.amount = existing.amount.plus(amt);
-        existing.count += 1;
-        onlineAccountMap.set(accName, existing);
-      }
-
-      const catName = exp.category || 'General';
-      categoryMap.set(catName, (categoryMap.get(catName) || toDec(0)).plus(amt));
-    }
-
-    return {
-      id: exp.id,
-      voucherNumber: exp.voucherNumber,
-      date: ymd(exp.expenseDate),
-      time: exp.time,
-      branchId: exp.branchId,
-      branchName: branchMap.get(exp.branchId) || 'Branch',
-      category: exp.category,
-      title: exp.title,
-      payee: exp.payee,
-      description: exp.description || '',
-      amount: n(amt),
-      paymentSource: exp.paymentSource,
-      paymentAccountId: exp.paymentAccountId,
-      paymentAccountName: exp.paymentAccountName,
-      status: exp.status,
-      externalReference: exp.externalReference || '',
-      notes: exp.notes || '',
-      createdByUserId: exp.createdByUserId,
-      createdByName: exp.createdByName,
-      paidByName: exp.paidByName || '',
-      isReversalRecord: exp.isReversalRecord,
-      reversalReason: exp.reversalReason || '',
-      reversedByName: exp.reversedByName || '',
-    };
-  });
-
-  let filteredRows = rawRows;
-  if (query.search && query.search.trim()) {
-    const s = query.search.toLowerCase().trim();
-    filteredRows = rawRows.filter(
-      (r) =>
-        r.voucherNumber.toLowerCase().includes(s) ||
-        r.title.toLowerCase().includes(s) ||
-        r.payee.toLowerCase().includes(s) ||
-        r.category.toLowerCase().includes(s) ||
-        r.branchName.toLowerCase().includes(s) ||
-        r.createdByName.toLowerCase().includes(s) ||
-        r.externalReference.toLowerCase().includes(s)
-    );
-  }
-
-  const categoryBreakdown = Array.from(categoryMap.entries()).map(([name, sum]) => ({
-    categoryName: name,
-    amount: n(sum),
-  })).sort((a, b) => b.amount - a.amount);
-
-  const onlineAccountsBreakdown = Array.from(onlineAccountMap.values()).map((a) => ({
-    accountId: a.accountId,
-    accountName: a.accountName,
-    amount: n(a.amount),
-    count: a.count,
-  }));
-
-  const kpis = {
-    totalExpenses: n(totalExpenses),
-    cashExpenses: n(totalCashExpenses),
-    onlineExpenses: n(totalOnlineExpenses),
-    totalVouchersCount: expenses.length,
-    postedCount,
-    reversedCount,
-    draftCount,
-    categoryCount: categoryMap.size,
-  };
-
-  const tenderBreakdown = {
-    totalCash: n(totalCashExpenses),
-    totalOnline: n(totalOnlineExpenses),
-    grandTotal: n(totalExpenses),
-    onlineAccounts: onlineAccountsBreakdown,
-  };
-
-  const totals = {
-    amount: n(totalExpenses),
-    cash: n(totalCashExpenses),
-    online: n(totalOnlineExpenses),
-  };
-
-  return formatReportResponse(ctx.meta, {
-    kpis,
-    tenderBreakdown,
-    categoryBreakdown,
-    categories: categories.map((c) => c.name),
-    rows: filteredRows,
-    totals,
-  });
-};
-
-// ═══ INVENTORY & SUPPLY CHAIN REPORTS SUITE ══════════════════════════════════
 export const inventoryReport = async (actor, query = {}) => {
   denyNonAdmins(actor, 'inventory reports');
 
@@ -4096,319 +3536,4 @@ export { taxReport } from './tax.report.js';
 
 // ═══ DETAILED INCOME REPORT (Report 07) ═════════════════════════════════════════
 
-export const detailedIncomeReport = async (actor, query = {}) => {
-  if (actor.role === 'STAFF') throw forbidden('FORBIDDEN', 'Access Denied: Staff members cannot access detailed income report.');
-
-  const ctx = await resolveReportContext(actor, query, 'INVOICE_POSTING');
-  const dateRange = { gte: dateOnly(ctx.fromStr), lte: dateOnly(ctx.toStr) };
-  const where = {
-    date: dateRange,
-    ...(ctx.branchId ? { branchId: ctx.branchId } : {}),
-  };
-
-  if (actor.role === 'ACCOUNTANT') {
-    where.processedByUserId = actor.id;
-  } else if (query.soldByUserId && query.soldByUserId !== 'ALL') {
-    where.processedByUserId = query.soldByUserId;
-  }
-
-  if (query.paymentStatus && query.paymentStatus !== 'ALL') {
-    where.status = query.paymentStatus;
-  }
-
-  if (query.lifecycle && query.lifecycle !== 'ALL') {
-    where.lifecycle = query.lifecycle;
-  } else {
-    where.lifecycle = { not: 'VOIDED' };
-  }
-
-  if (query.paymentMethod && query.paymentMethod !== 'ALL') {
-    where.paymentMethod = query.paymentMethod;
-  }
-
-  if (query.staffId && query.staffId !== 'ALL') {
-    where.OR = [
-      { staffId: query.staffId },
-      { lines: { some: { staffId: query.staffId } } },
-    ];
-  }
-
-  if (query.sourceType && query.sourceType !== 'ALL') {
-    where.lines = { some: { type: query.sourceType } };
-  }
-
-  if (query.search && query.search.trim()) {
-    const s = query.search.trim();
-    where.AND = [
-      ...(where.AND || []),
-      {
-        OR: [
-          { invoiceNumber: { contains: s, mode: 'insensitive' } },
-          { clientName: { contains: s, mode: 'insensitive' } },
-          { clientPhone: { contains: s, mode: 'insensitive' } },
-          { lines: { some: { name: { contains: s, mode: 'insensitive' } } } },
-        ],
-      },
-    ];
-  }
-
-  const [branches, invoices] = await Promise.all([
-    prisma.branch.findMany({ select: { id: true, name: true, city: true } }),
-    prisma.invoice.findMany({
-      where,
-      include: {
-        lines: {
-          include: {
-            components: {
-              select: {
-                id: true,
-                serviceCode: true,
-                serviceName: true,
-                quantity: true,
-                staffId: true,
-                staffName: true,
-                allocatedAmount: true,
-                allocationPercentage: true,
-              },
-            },
-          },
-          orderBy: { sortOrder: 'asc' },
-        },
-        payments: {
-          select: {
-            id: true,
-            receiptNumber: true,
-            amount: true,
-            method: true,
-            paymentAccountId: true,
-            paymentAccountName: true,
-            date: true,
-            time: true,
-            kind: true,
-          },
-          orderBy: { date: 'asc' },
-        },
-        refunds: {
-          select: {
-            id: true,
-            refundNumber: true,
-            type: true,
-            refundDate: true,
-            netReversed: true,
-            taxReversed: true,
-            tipReversed: true,
-            cashOut: true,
-            receivableCancelled: true,
-            method: true,
-            reason: true,
-            byName: true,
-            lines: {
-              select: {
-                id: true,
-                lineId: true,
-                quantity: true,
-                net: true,
-                tax: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-    }),
-  ]);
-
-  const branchMap = new Map(branches.map((b) => [b.id, b.name]));
-
-  let totalGross = toDec(0);
-  let totalDiscount = toDec(0);
-  let totalNetSales = toDec(0);
-  let totalRefundedNet = toDec(0);
-  let totalRecognizedNet = toDec(0);
-  let totalTax = toDec(0);
-  let totalNetTax = toDec(0);
-  let totalTips = toDec(0);
-  let totalPaid = toDec(0);
-
-  let serviceRevenue = toDec(0);
-  let productRevenue = toDec(0);
-  let packageRevenue = toDec(0);
-
-  let serviceCount = 0;
-  let productCount = 0;
-  let packageCount = 0;
-
-  const rows = [];
-
-  for (const inv of invoices) {
-    const isVoided = inv.lifecycle === 'VOIDED';
-    const invPayments = inv.payments.map((p) => ({
-      id: p.id,
-      receiptNumber: p.receiptNumber,
-      amount: n(p.amount),
-      method: p.method,
-      paymentAccountId: p.paymentAccountId,
-      paymentAccountName: p.paymentAccountName || (p.method === 'CASH' ? 'Cash Drawer' : 'Online Account'),
-      date: ymd(p.date),
-      time: p.time,
-      kind: p.kind,
-    }));
-
-    if (!isVoided) {
-      totalPaid = totalPaid.plus(toDec(inv.amountPaid));
-      totalTips = totalTips.plus(toDec(inv.tip));
-    }
-
-    for (const line of inv.lines) {
-      if (query.sourceType && query.sourceType !== 'ALL' && line.type !== query.sourceType) {
-        continue;
-      }
-      if (query.staffId && query.staffId !== 'ALL' && line.staffId !== query.staffId) {
-        continue;
-      }
-
-      const lineGross = toDec(line.quantity).times(toDec(line.unitPrice));
-      const lineDiscount = toDec(line.discountAllocated);
-      const lineNet = toDec(line.netSales);
-      const lineTax = toDec(line.tax);
-
-      let lineRefundNet = toDec(0);
-      let lineRefundTax = toDec(0);
-      for (const ref of inv.refunds) {
-        for (const rl of ref.lines || []) {
-          if (rl.lineId === line.id) {
-            lineRefundNet = lineRefundNet.plus(toDec(rl.net));
-            lineRefundTax = lineRefundTax.plus(toDec(rl.tax));
-          }
-        }
-      }
-
-      const recognizedNet = isVoided ? toDec(0) : lineNet.minus(lineRefundNet);
-      const netTax = isVoided ? toDec(0) : lineTax.minus(lineRefundTax);
-
-      if (!isVoided) {
-        totalGross = totalGross.plus(lineGross);
-        totalDiscount = totalDiscount.plus(lineDiscount);
-        totalNetSales = totalNetSales.plus(lineNet);
-        totalRefundedNet = totalRefundedNet.plus(lineRefundNet);
-        totalRecognizedNet = totalRecognizedNet.plus(recognizedNet);
-        totalTax = totalTax.plus(lineTax);
-        totalNetTax = totalNetTax.plus(netTax);
-
-        if (line.type === 'SERVICE' || line.type === 'CUSTOM_SERVICE') {
-          serviceRevenue = serviceRevenue.plus(recognizedNet);
-          serviceCount += Number(line.quantity);
-        } else if (line.type === 'PRODUCT') {
-          productRevenue = productRevenue.plus(recognizedNet);
-          productCount += Number(line.quantity);
-        } else if (line.type === 'PACKAGE') {
-          packageRevenue = packageRevenue.plus(recognizedNet);
-          packageCount += Number(line.quantity);
-        }
-      }
-
-      rows.push({
-        id: line.id,
-        invoiceId: inv.id,
-        invoiceNumber: inv.invoiceNumber,
-        date: ymd(inv.date),
-        time: inv.time,
-        branchId: inv.branchId,
-        branchName: branchMap.get(inv.branchId) || 'Branch',
-        incomeSource: line.type,
-        clientId: inv.clientId,
-        clientName: inv.clientName || 'Walk-in Customer',
-        clientPhone: inv.clientPhone || '',
-        itemCode: line.code || '—',
-        itemName: line.name,
-        staffId: line.staffId,
-        staffName: line.staffName || 'Staff',
-        quantity: Number(line.quantity),
-        unitPrice: n(toDec(line.unitPrice)),
-        gross: n(lineGross),
-        discount: n(lineDiscount),
-        netSales: n(lineNet),
-        refundedNet: n(lineRefundNet),
-        recognizedNet: n(recognizedNet),
-        taxRate: round2(toDec(line.taxRate).times(100)).toNumber(),
-        tax: n(lineTax),
-        netTax: n(netTax),
-        total: n(toDec(line.total)),
-        paymentStatus: inv.status,
-        lifecycle: inv.lifecycle,
-        createdByName: inv.processedByName,
-        payments: invPayments,
-        refunds: inv.refunds.map((r) => ({
-          id: r.id,
-          refundNumber: r.refundNumber,
-          type: r.type,
-          refundDate: ymd(r.refundDate),
-          method: r.method,
-          reason: r.reason,
-          byName: r.byName,
-          netReversed: n(r.netReversed),
-          taxReversed: n(r.taxReversed),
-          tipReversed: n(r.tipReversed),
-          cashOut: n(r.cashOut),
-          receivableCancelled: n(r.receivableCancelled),
-          lineRefund: r.lines?.find((rl) => rl.lineId === line.id)
-            ? {
-                quantity: Number(r.lines.find((rl) => rl.lineId === line.id).quantity),
-                net: n(r.lines.find((rl) => rl.lineId === line.id).net),
-                tax: n(r.lines.find((rl) => rl.lineId === line.id).tax),
-              }
-            : null,
-        })),
-        components: (line.components || []).map((c) => ({
-          id: c.id,
-          serviceCode: c.serviceCode,
-          serviceName: c.serviceName,
-          quantity: c.quantity,
-          staffId: c.staffId,
-          staffName: c.staffName,
-          allocatedAmount: n(toDec(c.allocatedAmount)),
-          allocationPercentage: Number(c.allocationPercentage),
-        })),
-      });
-    }
-  }
-
-  const kpis = {
-    totalTransactions: rows.length,
-    grossSales: n(totalGross),
-    totalDiscounts: n(totalDiscount),
-    netSales: n(totalNetSales),
-    totalRefunded: n(totalRefundedNet),
-    recognizedNetRevenue: n(totalRecognizedNet),
-    totalTaxCharged: n(totalTax),
-    netTaxLiability: n(totalNetTax),
-    tipsCollected: n(totalTips),
-    serviceRevenue: n(serviceRevenue),
-    serviceCount,
-    productRevenue: n(productRevenue),
-    productCount,
-    packageRevenue: n(packageRevenue),
-    packageCount,
-    totalPaid: n(totalPaid),
-  };
-
-  const totals = {
-    gross: n(totalGross),
-    discount: n(totalDiscount),
-    netSales: n(totalNetSales),
-    refundedNet: n(totalRefundedNet),
-    recognizedNet: n(totalRecognizedNet),
-    tax: n(totalTax),
-    netTax: n(totalNetTax),
-  };
-
-  return formatReportResponse(ctx.meta, { kpis, rows, totals });
-};
-
-
-
-
-
-
-
-
+export { detailedIncomeReport } from './detailedCollections.report.js';

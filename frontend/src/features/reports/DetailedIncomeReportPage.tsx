@@ -159,7 +159,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
       ['To Date', toDate || reportData.meta.to || '—'],
       ['Source Filter', sourceType],
       ['Total Line Transactions', String(reportData.kpis.totalTransactions)],
-      ['Total Recognized Net Revenue', formatPKR(reportData.kpis.recognizedNetRevenue)],
+      ['Total Collected Net Revenue', formatPKR(reportData.kpis.recognizedNetRevenue)],
     ];
 
     const headers = [
@@ -175,7 +175,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
       'Unit Price',
       'Gross',
       'Discount',
-      'Net Recognized',
+      'Collected Net',
       'Tax',
       'Total',
       'Status',
@@ -217,7 +217,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
       ['Total Transactions', String(reportData.kpis.totalTransactions)],
-      ['Recognized Net Revenue', `PKR ${formatPKR(reportData.kpis.recognizedNetRevenue)}`],
+      ['Collected Net Revenue', `PKR ${formatPKR(reportData.kpis.recognizedNetRevenue)}`],
     ];
 
     const headers = [
@@ -249,7 +249,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
     ]);
 
     printReportWindow({
-      title: 'Detailed Income Report (Recognized Revenue)',
+      title: 'Detailed Income Report (Collected Revenue)',
       meta,
       headers,
       rows,
@@ -283,11 +283,11 @@ export const DetailedIncomeReportPage: React.FC = () => {
                   Detailed Income Report
                 </h1>
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#FDF2F5] text-[#B82E69] border border-[#B82E69]/20 uppercase tracking-wider">
-                  Recognized Revenue
+                  Collected Revenue
                 </span>
               </div>
               <p className="text-xs text-[#78616C] font-medium mt-0.5">
-                Transaction-level recognized revenue register: granular drilldown by service, package component and retail product
+                Transaction-level collection register by payment date: granular drilldown by service, package component and retail product
               </p>
             </div>
           </div>
@@ -441,11 +441,11 @@ export const DetailedIncomeReportPage: React.FC = () => {
               <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Total Lines</span>
                 <span className="text-xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">{reportData.kpis.totalTransactions}</span>
-                <div className="text-[10px] text-slate-400 mt-1">Recognized items</div>
+                <div className="text-[10px] text-slate-400 mt-1">Collection line events</div>
               </div>
 
               <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Gross Sales</span>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Collected Gross Allocation</span>
                 <span className="text-xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.grossSales)}</span>
                 <div className="text-[10px] text-slate-400 mt-1">Before discount</div>
               </div>
@@ -453,7 +453,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
               <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
                 <span className="text-[10px] font-bold text-[#B82E69] uppercase tracking-wider block mb-1">Net Revenue</span>
                 <span className="text-xl font-extrabold text-[#B82E69] font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.recognizedNetRevenue)}</span>
-                <div className="text-[10px] text-emerald-600 mt-1">P&L recognized sales</div>
+                <div className="text-[10px] text-emerald-600 mt-1">Actual receipts excluding tax and tips</div>
               </div>
 
               <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
@@ -475,7 +475,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
               </div>
 
               <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
-                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block mb-1">Sales Tax Net</span>
+                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block mb-1">Tax Collected Net</span>
                 <span className="text-xl font-extrabold text-slate-800 font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.netTaxLiability)}</span>
                 <div className="text-[10px] text-slate-400 mt-1">Excluded tax liability</div>
               </div>
@@ -497,7 +497,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
                     </span>
                   </div>
                   <p className="text-[11px] text-[#78616C] mt-0.5">
-                    Recognized revenues across services, products, and packages
+                    Collected revenues across services, products, and packages
                   </p>
                 </div>
               </div>
@@ -545,7 +545,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
                     <th className="py-3.5 px-3 text-center w-14 font-medium text-[#475569]">Qty</th>
                     <th className="py-3.5 px-3 text-right whitespace-nowrap font-medium text-[#475569]">Gross</th>
                     <th className="py-3.5 px-3 text-right whitespace-nowrap font-medium text-[#475569]">Discount</th>
-                    <th className="py-3.5 px-3 text-right whitespace-nowrap font-bold text-[#9D2558]">Recognized Net</th>
+                    <th className="py-3.5 px-3 text-right whitespace-nowrap font-bold text-[#9D2558]">Collected Net</th>
                     <th className="py-3.5 px-3 text-right whitespace-nowrap font-medium text-[#475569]">Tax</th>
                     <th className="py-3.5 px-3 text-right whitespace-nowrap font-medium text-[#475569]">Total</th>
                     <th className="py-3.5 px-3 text-center w-24 font-medium text-[#475569]">Status</th>
@@ -632,7 +632,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
                               {row.discount > 0 ? `-PKR ${formatPKR(row.discount)}` : '0.00'}
                             </td>
 
-                            {/* Recognized Net */}
+                            {/* Collected Net */}
                             <td className="py-3.5 px-3 text-right tabular-nums whitespace-nowrap">
                               <div className="font-bold text-[#9D2558]">PKR {formatPKR(row.recognizedNet)}</div>
                               {row.refundedNet > 0 && (
@@ -710,7 +710,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
                                     <div className="flex items-center justify-between mb-2">
                                       <span className="font-bold text-[#23151D]">Invoice Payment Audit (Cash / Bank Accounts):</span>
                                       <span className="text-[11px] text-slate-500 italic">
-                                        * Income recognized once upon invoice posting. Subsequent collections update only Cash/Receivables without re-booking revenue.
+                                        * Collections are shown on payment dates, net of tax and tips. Later refunds and reversals appear on their own dates.
                                       </span>
                                     </div>
                                     {row.payments && row.payments.length > 0 ? (
@@ -736,7 +736,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
                                       <div className="flex items-center justify-between mb-2">
                                         <span className="font-bold text-rose-800">Linked Refund & Reversal Entries ({row.invoiceNumber}):</span>
                                         <span className="text-[11px] text-slate-500 italic">
-                                          * Linked reversals deducted from recognized turnover; actual refunds paid out on refund date.
+                                          * Only actual refunded collections reduce collected revenue. Credits against unpaid dues reduce outstanding balances.
                                         </span>
                                       </div>
                                       <div className="flex flex-wrap gap-2">
@@ -793,14 +793,14 @@ export const DetailedIncomeReportPage: React.FC = () => {
                       +PKR {formatPKR(totals.tax)}
                     </td>
                     <td className="py-3.5 px-3 text-right tabular-nums font-bold text-slate-900">
-                      PKR {formatPKR(totals.recognizedNet + totals.tax)}
+                      PKR {formatPKR(totals.recognizedNet + totals.netTax)}
                     </td>
                     <td colSpan={2}></td>
                   </tr>
 
                   <tr>
                     <td colSpan={8} className="py-3 px-3 text-right font-medium text-slate-700">
-                      Recognized Net Revenue Summary
+                      Collected Net Revenue Summary
                     </td>
                     <td colSpan={7} className="py-3 px-3 text-right text-xs">
                       <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold mr-4">
@@ -813,7 +813,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
                         Packages: PKR {formatPKR(reportData?.kpis.packageRevenue || 0)}
                       </span>
                       <span className="inline-flex items-center gap-1 text-[#9D2558] font-bold">
-                        P&L Recognized Total: PKR {formatPKR(totals.recognizedNet)}
+                        Collected Revenue Total: PKR {formatPKR(totals.recognizedNet)}
                       </span>
                     </td>
                   </tr>

@@ -4,6 +4,8 @@
 // account balances from movement ledgers. Tips are shown separately — never as revenue.
 
 import prisma from '../../config/prisma.js';
+import { loadCollectionEvents, collectionTotals } from '../reports/collectionEvents.js';
+import { loadStaffPayments } from '../reports/paidExpenses.report.js';
 import { forbidden, notFound } from '../../lib/AppError.js';
 import { assertBranchAccess, resolveReadBranch } from '../../lib/scope.js';
 import { dateOnly, getBusinessDate, ymd } from '../../lib/dates.js';
@@ -30,7 +32,7 @@ export const computeBranchMetrics = async (branchIds, date, { id, name, code }) 
   const scope = inBranches(branchIds);
   const live = { ...scope, lifecycle: { not: 'VOIDED' } };
 
-  const [sales, refunds, dues, payments, expenses, reversals, onDuty, apptCount, drawers, accounts] = await Promise.all([
+  const [sales, refunds, dues, payments, expenses, reversals, onDuty, apptCount, drawers, accounts, collectionEvents, staffPayments] = await Promise.all([
     prisma.invoice.aggregate({ where: { ...live, date: day }, _sum: { subtotal: true, discount: true, netSales: true, tax: true }, _count: true }),
     prisma.invoiceRefund.findMany({ where: { refundDate: day, invoice: scope }, select: { netReversed: true, taxReversed: true, tipReversed: true, cashOut: true, method: true } }),
     prisma.invoice.aggregate({ where: { ...live, amountDue: { gt: 0 } }, _sum: { amountDue: true } }),
@@ -41,6 +43,8 @@ export const computeBranchMetrics = async (branchIds, date, { id, name, code }) 
     prisma.appointment.count({ where: { ...scope, date: day } }),
     prisma.cashDrawer.findMany({ where: { ...scope, kind: 'DRAWER', status: { in: ['OPEN', 'SETTLEMENT_PENDING'] } } }),
     prisma.paymentAccount.findMany({ where: { OR: [scope, { branches: { some: { id: scope.branchId } } }] }, select: { id: true } }),
+    loadCollectionEvents(scope, date, date),
+    loadStaffPayments(scope, date),
   ]);
 
   const netReversed = refunds.reduce((s, r) => s.plus(toDec(r.netReversed)), toDec(0));
@@ -60,8 +64,11 @@ export const computeBranchMetrics = async (branchIds, date, { id, name, code }) 
 
   const cashCollected = grossCashCollected.minus(cashRefundsPaid);
   const onlineCollected = grossOnlineCollected.minus(onlineRefundsPaid);
-  const actualCollections = cashCollected.plus(onlineCollected);
-  const totalExpensesPaid = sumOf(expenses, 'amount').minus(sumOf(reversals, 'amount'));
+  const collected = collectionTotals(collectionEvents);
+  const actualCollections = toDec(collected.actualCollections);
+  const staffPaid = [...staffPayments.salary, ...staffPayments.commission].filter(p => p.date === date)
+    .reduce((total, p) => total.plus(p.signedAmount), toDec(0));
+  const totalExpensesPaid = sumOf(expenses, 'amount').minus(sumOf(reversals, 'amount')).plus(staffPaid);
   const custody = (await drawerDTOs(prisma, drawers)).reduce((s, d) => s.plus(d.expectedInDrawer), toDec(0));
   const balances = await accountBalances(accounts.map((a) => a.id), { branchIds });
   const onlineBalancesTotal = [...balances.values()].reduce((s, b) => s.plus(b), toDec(0));
@@ -72,10 +79,12 @@ export const computeBranchMetrics = async (branchIds, date, { id, name, code }) 
     totalDiscounts: n(sumOf(sales, 'discount')),
     netSales: n(max0(sumOf(sales, 'netSales').minus(netReversed))),
     taxBilled: n(max0(sumOf(sales, 'tax').minus(taxReversed))),
-    tipsCollected: n(tipsCollected),
+    tipsCollected: collected.tipsCollected,
+    collectedRevenue: collected.collectedRevenue,
+    taxCollected: collected.taxCollected,
     actualCollections: n(actualCollections),
-    cashCollected: n(cashCollected),
-    onlineCollected: n(onlineCollected),
+    cashCollected: collectionTotals(collectionEvents.filter(e => e.record.method === 'CASH')).actualCollections,
+    onlineCollected: collectionTotals(collectionEvents.filter(e => e.record.method !== 'CASH')).actualCollections,
     grossCashCollected: n(grossCashCollected),
     grossOnlineCollected: n(grossOnlineCollected),
     refundsPaid: n(totalRefundsPaid),
@@ -85,7 +94,7 @@ export const computeBranchMetrics = async (branchIds, date, { id, name, code }) 
     cashInCustody: n(custody),
     onlineBalancesTotal: n(onlineBalancesTotal),
     totalExpensesPaid: n(totalExpensesPaid),
-    netOperatingCashFlow: n(actualCollections.minus(totalExpensesPaid)),
+    netOperatingCashFlow: n(toDec(collected.collectedRevenue).minus(totalExpensesPaid)),
     activeStaffOnDuty: onDuty,
     appointmentsTodayCount: apptCount,
     invoicesCount: sales._count,
@@ -113,29 +122,20 @@ const computeRevenueTrend = async (scope) => {
 
   const results = await Promise.all(
     months.map(async (m) => {
-      const [invAgg, expAgg, payAgg, refAgg] = await Promise.all([
-        prisma.invoice.aggregate({
-          where: { ...scope, lifecycle: { not: 'VOIDED' }, date: { gte: m.start, lte: m.end } },
-          _sum: { netSales: true },
-        }),
-        prisma.expense.aggregate({
-          where: { ...scope, status: 'POSTED', isReversalRecord: false, expenseDate: { gte: m.start, lte: m.end } },
-          _sum: { amount: true },
-        }),
-        prisma.invoicePayment.aggregate({
-          where: { ...scope, date: { gte: m.start, lte: m.end } },
-          _sum: { amount: true },
-        }),
-        prisma.invoiceRefund.aggregate({
-          where: { refundDate: { gte: m.start, lte: m.end }, invoice: scope },
-          _sum: { netReversed: true, cashOut: true },
-        }),
+      const [expenseEvents, collections, staffPayments] = await Promise.all([
+        prisma.expense.findMany({ where: { ...scope, status: { in: ['POSTED', 'REVERSED'] }, expenseDate: { gte: m.start, lte: m.end } },
+          select: { amount: true, isReversalRecord: true } }),
+        loadCollectionEvents(scope, ymd(m.start), ymd(m.end)),
+        loadStaffPayments(scope, ymd(m.end)),
       ]);
+      const paidStaff = [...staffPayments.salary, ...staffPayments.commission].filter(p => p.date >= ymd(m.start) && p.date <= ymd(m.end))
+        .reduce((sum, p) => sum.plus(p.signedAmount), toDec(0));
+      const paidExpenses = expenseEvents.reduce((sum, e) => sum.plus(toDec(e.amount).times(e.isReversalRecord ? -1 : 1)), paidStaff);
       return {
         label: m.label,
-        revenue: n(max0(toDec(invAgg._sum?.netSales ?? 0).minus(toDec(refAgg._sum?.netReversed ?? 0)))),
-        expenses: n(expAgg._sum?.amount ?? 0),
-        collections: n(max0(toDec(payAgg._sum?.amount ?? 0).minus(toDec(refAgg._sum?.cashOut ?? 0)))),
+        revenue: collectionTotals(collections).collectedRevenue,
+        expenses: n(paidExpenses),
+        collections: collectionTotals(collections).actualCollections,
       };
     })
   );
@@ -356,7 +356,7 @@ export const accountantDashboard = async (actor, { branchId } = {}) => {
   const scope = { branchId: branch.id };
   const me = actor.id;
 
-  const [drawer, payments, myRefunds, expensesPaid, settlements, unpaid, receiptInvoices, disbursements] = await Promise.all([
+  const [drawer, payments, myRefunds, expensesPaid, settlements, unpaid, receiptInvoices, disbursements, collectionEvents] = await Promise.all([
     prisma.cashDrawer.findFirst({ where: { ...scope, kind: 'DRAWER', custodianUserId: me, status: { in: ['OPEN', 'SETTLEMENT_PENDING'] } }, orderBy: { createdAt: 'desc' } }),
     prisma.invoicePayment.groupBy({ by: ['method'], where: { ...scope, date: dateOnly(date), processedByUserId: me }, _sum: { amount: true } }),
     prisma.invoiceRefund.findMany({ where: { invoice: scope, refundDate: dateOnly(date), byUserId: me }, select: { cashOut: true, method: true } }),
@@ -365,14 +365,17 @@ export const accountantDashboard = async (actor, { branchId } = {}) => {
     prisma.invoice.aggregate({ where: { ...scope, processedByUserId: me, lifecycle: { not: 'VOIDED' }, status: { in: ['UNPAID', 'PARTIAL'] } }, _sum: { amountDue: true }, _count: true }),
     recentInvoices({ ...scope, processedByUserId: me }),
     prisma.expense.findMany({ where: { ...scope, paidByUserId: me }, orderBy: [{ expenseDate: 'desc' }, { createdAt: 'desc' }], take: 5 }),
+    loadCollectionEvents(scope, date, date),
   ]);
   const d = drawer ? (await drawerDTOs(prisma, [drawer]))[0] : null;
   const pending = settlements.find((s) => s.status === 'SUBMITTED');
   const lastApproved = settlements.find((s) => s.status === 'APPROVED');
   const myCashRefunds = myRefunds.filter((r) => r.method === 'CASH').reduce((s, r) => s.plus(toDec(r.cashOut || 0)), toDec(0));
   const myOnlineRefunds = myRefunds.filter((r) => r.method === 'ONLINE_ACCOUNT').reduce((s, r) => s.plus(toDec(r.cashOut || 0)), toDec(0));
-  const todayCashCollected = n(max0(sumOf(payments.find((p) => p.method === 'CASH') ?? {}, 'amount').minus(myCashRefunds)));
-  const todayOnlineCollected = n(max0(sumOf(payments.find((p) => p.method === 'ONLINE_ACCOUNT') ?? {}, 'amount').minus(myOnlineRefunds)));
+  const ownCollections = collectionEvents.filter(e => (e.kind === 'REFUND' ? e.record.byUserId
+    : e.kind === 'PAYMENT_REVERSAL' ? e.record.reversedById : e.record.processedByUserId) === me);
+  const todayCashCollected = collectionTotals(ownCollections.filter(e => e.record.method === 'CASH')).actualCollections;
+  const todayOnlineCollected = collectionTotals(ownCollections.filter(e => e.record.method !== 'CASH')).actualCollections;
 
   return {
     branch: (await branchDTOs([branch]))[0],
@@ -404,27 +407,29 @@ export const staffDashboard = async (actor) => {
   if (!actor.staffId) throw forbidden('FORBIDDEN', 'Staff record associated with the authenticated user could not be found.');
   const staff = await prisma.staff.findUnique({ where: { id: actor.staffId }, include: { branch: true } });
   if (!staff) throw notFound('STAFF_NOT_FOUND', `Staff profile '${actor.staffId}' not found.`);
+  if (!actor.branchId || staff.branchId !== actor.branchId) throw forbidden('BRANCH_FORBIDDEN', 'Staff reports require the assigned branch.');
   const date = await getBusinessDate();
   const { start, end } = monthBounds(date);
   const month = { gte: dateOnly(start), lte: dateOnly(end) };
   const sid = staff.id;
 
   const [events, tips, overtime, today, week, lines] = await Promise.all([
-    prisma.commissionEvent.findMany({ where: { staffId: sid, eventDate: month } }),
+    loadCollectionEvents({ branchId: staff.branchId }, start, date),
     prisma.tipAllocation.aggregate({ where: { staffId: sid, status: { not: 'CANCELLED' }, allocationDate: month }, _sum: { amount: true } }),
     prisma.overtimeRecord.findMany({ where: { staffId: sid, workDate: month, status: 'APPROVED' } }),
     prisma.attendanceRecord.findUnique({ where: { staffId_workDate: { staffId: sid, workDate: dateOnly(date) } } }),
     prisma.attendanceRecord.findMany({ where: { staffId: sid, workDate: { gte: dateOnly(addDays(date, -6)), lte: dateOnly(date) } } }),
     prisma.invoiceLine.findMany({
-      where: { staffId: sid, type: { not: 'PRODUCT' }, invoice: { lifecycle: { not: 'VOIDED' } } },
+      where: { OR: [{ staffId: sid }, { components: { some: { staffId: sid } } }], type: { not: 'PRODUCT' }, invoice: { branchId: staff.branchId, lifecycle: { not: 'VOIDED' } } },
       include: { invoice: { select: { date: true, clientName: true } } },
       orderBy: { invoice: { date: 'desc' } }, take: 200,
     }),
   ]);
 
-  const earnEvents = events.filter((e) => e.type === 'EARN');
+  const earnEvents = events.flatMap(e => e.commissions).filter(c => c.staffId === sid);
+  const collectedSales = events.flatMap(e => e.line.type === 'PRODUCT' ? [] : e.staffAllocations).filter(c => c.staffId === sid).reduce((sum, c) => sum.plus(c.net), toDec(0));
   const monthlyLines = lines.filter((l) => ymd(l.invoice.date) >= start && ymd(l.invoice.date) <= end);
-  const earned = events.reduce((s, e) => s.plus(e.amount), toDec(0)); // EARN + dated REVERSAL
+  const earned = earnEvents.reduce((s, e) => s.plus(e.amount), toDec(0)); // Signed collection earnings and reversals
   const tipsTotal = sumOf(tips, 'amount');
   const otMinutes = overtime.reduce((s, o) => s + o.approvedMinutes, 0);
   const otPay = overtime.reduce((s, o) => s.plus(o.amount ?? 0), toDec(0));
@@ -436,7 +441,7 @@ export const staffDashboard = async (actor) => {
     staffMember: toStaffDTO(staff),
     branch: (await branchDTOs([staff.branch]))[0],
     monthlyServicesCompletedCount: monthlyLines.length,
-    monthlyServiceSalesTotal: n(earnEvents.reduce((s, e) => s.plus(e.attributedNet), toDec(0))),
+    monthlyServiceSalesTotal: n(collectedSales),
     earnedCommissionTotal: n(earned),
     personalTipsTotal: n(tipsTotal),
     attendanceSummary: {

@@ -1,0 +1,96 @@
+import prisma from '../../config/prisma.js';
+import { forbidden } from '../../lib/AppError.js';
+import { dateOnly } from '../../lib/dates.js';
+import { round2, toDec } from '../../lib/money.js';
+import { resolveReportContext, formatReportResponse } from '../../lib/reportRange.js';
+import { loadCollectionEvents, payoutEvents } from './collectionEvents.js';
+
+const n = value => round2(value ?? 0).toNumber();
+const sum = (rows, field) => rows.reduce((total, row) => total.plus(row[field] ?? 0), toDec(0));
+
+/** Paid salary and commission are separate settlements, including legacy payroll-linked commission. */
+export async function loadStaffPayments(scope, to, db = prisma) {
+  const paidAt = { lte: new Date(`${to}T23:59:59.999+05:00`) };
+  const [salary, commission] = await Promise.all([
+    db.payrollPayment.findMany({ where: { ...scope, paidAt, status: { in: ['COMPLETED', 'REVERSED'] } } }),
+    db.commissionPayment.findMany({ where: { ...scope, paidAt, status: { in: ['COMPLETED', 'REVERSED'] } } }),
+  ]);
+  // PayrollPayment.amount is salary only. Linked commission rows represent the commission once.
+  return { salary: payoutEvents(salary), commission: payoutEvents(commission) };
+}
+
+export async function detailedExpensesReport(actor, query = {}) {
+  if (!['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT'].includes(actor.role)) throw forbidden('FORBIDDEN', 'Access Denied: Financial reports are restricted.');
+  const ctx = await resolveReportContext(actor, query, 'PAYMENT_DATE');
+  const scope = ctx.branchId ? { branchId: ctx.branchId } : {};
+  const admin = ['SUPER_ADMIN', 'ADMIN'].includes(actor.role);
+  const [expenses, branches, categories, payments, slips, commissions] = await Promise.all([
+    prisma.expense.findMany({ where: { ...scope, expenseDate: { gte: dateOnly(ctx.fromStr), lte: dateOnly(ctx.toStr) },
+      ...(actor.role === 'ACCOUNTANT' ? { OR: [{ paidByUserId: actor.id }, { createdByUserId: actor.id }] } : {}) } }),
+    prisma.branch.findMany({ where: ctx.branchId ? { id: ctx.branchId } : {}, select: { id: true, name: true } }),
+    prisma.expenseCategory.findMany({ where: { ...scope, isActive: true }, select: { name: true } }),
+    admin ? loadStaffPayments(scope, ctx.toStr) : { salary: [], commission: [] },
+    admin ? prisma.payslip.findMany({ where: { run: { ...scope, finalizedAt: { lte: ctx.toDate },
+      OR: [{ cancelledAt: null }, { cancelledAt: { gt: ctx.toDate } }] } }, include: { run: true } }) : [],
+    admin ? loadCollectionEvents(scope, null, ctx.toStr) : [],
+  ]);
+  const names = new Map(branches.map(b => [b.id, b.name]));
+  const rawRows = expenses.map(e => ({
+    ...e, date: e.expenseDate.toISOString().slice(0, 10), branchName: names.get(e.branchId) || 'Branch',
+    // Original paid voucher remains positive; its separately dated reversal is negative.
+    amount: n(toDec(e.amount).times(e.isReversalRecord ? -1 : 1)),
+    paidAmount: e.status === 'DRAFT' ? 0 : n(toDec(e.amount).times(e.isReversalRecord ? -1 : 1)),
+    status: e.isReversalRecord ? 'REVERSED' : e.status === 'DRAFT' ? 'DRAFT' : 'POSTED',
+    sourceType: 'OPERATING_EXPENSE', externalReference: e.externalReference || '', notes: e.notes || '',
+    description: e.description || '', reversalReason: e.reversalReason || '', reversedByName: e.reversedByName || '',
+  }));
+  for (const [sourceType, events] of [['SALARY', payments.salary], ['COMMISSION', payments.commission]]) {
+    for (const p of events.filter(p => p.date >= ctx.fromStr && p.date <= ctx.toStr)) rawRows.push({
+      id: `${sourceType}-${p.eventId}`, voucherNumber: p.paymentNumber, date: p.date, time: '',
+      branchId: p.branchId, branchName: names.get(p.branchId) || 'Branch', category: sourceType === 'SALARY' ? 'Payroll & Salaries' : 'Staff Commission',
+      title: `${p.reversal ? 'Reversal: ' : ''}${sourceType === 'SALARY' ? 'Salary' : 'Commission'} payment`,
+      payee: p.staffName, description: `${p.reversal ? 'Reversal of ' : ''}${p.paymentNumber}`,
+      sourceType, amount: n(p.signedAmount), paidAmount: n(p.signedAmount),
+      paymentSource: p.method === 'CASH' ? 'CASH_DRAWER' : 'ONLINE_ACCOUNT',
+      paymentAccountId: p.onlineAccountId, paymentAccountName: p.onlineAccountName,
+      status: p.reversal ? 'REVERSED' : 'POSTED', externalReference: p.reference || '', notes: p.notes || '',
+      createdByUserId: p.paidByUserId, createdByName: p.paidByName, paidByName: p.paidByName,
+      isReversalRecord: p.reversal, reversalReason: p.reversalReason || '', reversedByName: p.reversedByName || '',
+    });
+  }
+  const search = query.search?.trim().toLowerCase();
+  const rows = rawRows.filter(r => (!query.category || query.category === 'ALL' || r.category === query.category)
+    && (query.status && query.status !== 'ALL' ? r.status === query.status : r.status !== 'DRAFT' || query.status === 'ALL')
+    && (!query.paymentSource || query.paymentSource === 'ALL' || r.paymentSource === query.paymentSource)
+    && (!query.paymentAccountId || query.paymentAccountId === 'ALL' || r.paymentAccountId === query.paymentAccountId)
+    && (!query.createdByUserId || query.createdByUserId === 'ALL' || r.createdByUserId === query.createdByUserId)
+    && (!search || [r.voucherNumber, r.title, r.payee, r.category, r.branchName, r.createdByName, r.externalReference].some(v => v?.toLowerCase().includes(search))))
+    .sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+  const cash = sum(rows.filter(r => r.paymentSource === 'CASH_DRAWER'), 'paidAmount');
+  const online = sum(rows.filter(r => r.paymentSource !== 'CASH_DRAWER'), 'paidAmount');
+  const total = cash.plus(online);
+  const categoryNames = [...new Set(rows.map(r => r.category))];
+  const accountIds = [...new Set(rows.filter(r => r.paymentSource === 'ONLINE_ACCOUNT').map(r => r.paymentAccountId || 'online'))];
+  const onlineAccounts = accountIds.map(id => {
+    const selected = rows.filter(r => r.paymentSource === 'ONLINE_ACCOUNT' && (r.paymentAccountId || 'online') === id);
+    return { accountId: id, accountName: selected[0]?.paymentAccountName || 'Online Account', amount: n(sum(selected, 'paidAmount')), count: selected.length };
+  });
+  const salaryPayable = sum(slips, 'netPayable').minus(sum(payments.salary.filter(p => p.date <= ctx.toStr), 'signedAmount'));
+  const commissionEarned = commissions.reduce((total, e) => total.plus(e.commissions.reduce((s, c) => s.plus(c.amount), toDec(0))), toDec(0));
+  const commissionPayable = commissionEarned.minus(sum(payments.commission.filter(p => p.date <= ctx.toStr), 'signedAmount'));
+  return formatReportResponse({ ...ctx.meta, liabilityBasis: 'Branch closing liabilities at period end; not reduced by table filters.' }, {
+    rows, categories: [...new Set([...categories.map(c => c.name), ...rawRows.map(r => r.category)])].sort(),
+    kpis: { totalExpenses: n(total), cashExpenses: n(cash), onlineExpenses: n(online), totalVouchersCount: rows.length,
+      totalPostedAmount: n(sum(rows.filter(r => r.status === 'POSTED'), 'paidAmount')),
+      totalReversedAmount: n(sum(rows.filter(r => r.status === 'REVERSED'), 'paidAmount').negated()),
+      postedCount: rows.filter(r => r.status === 'POSTED').length, reversedCount: rows.filter(r => r.status === 'REVERSED').length,
+      draftCount: rows.filter(r => r.status === 'DRAFT').length, categoryCount: categoryNames.length,
+      paidSalaries: n(sum(rows.filter(r => r.sourceType === 'SALARY'), 'paidAmount')),
+      paidCommissions: n(sum(rows.filter(r => r.sourceType === 'COMMISSION'), 'paidAmount')),
+      ...(admin ? { unpaidSalaries: n(salaryPayable), unpaidCommissions: n(commissionPayable) } : {}) },
+    liabilities: admin ? { unpaidSalaries: n(salaryPayable), unpaidCommissions: n(commissionPayable) } : undefined,
+    tenderBreakdown: { totalCash: n(cash), totalOnline: n(online), grandTotal: n(total), onlineAccounts },
+    categoryBreakdown: categoryNames.map(categoryName => ({ categoryName, amount: n(sum(rows.filter(r => r.category === categoryName), 'paidAmount')) })),
+    totals: { amount: n(total), cash: n(cash), online: n(online) },
+  });
+}

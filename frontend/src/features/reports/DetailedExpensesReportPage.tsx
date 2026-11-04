@@ -38,7 +38,7 @@ const formatPKR = (amt: number, withSign = false) => {
   if (withSign) {
     return num >= 0 ? `+${formatted}` : `-${formatted}`;
   }
-  return formatted;
+  return num < 0 ? `-${formatted}` : formatted;
 };
 
 const formatDateParts = (dateStr: string) => {
@@ -139,6 +139,8 @@ export const DetailedExpensesReportPage: React.FC = () => {
     if (!reportData || !reportData.rows.length) return;
     const meta: [string, string][] = [
       ['Report', 'Detailed Expenses Report'],
+      ['Basis', 'Actual paid expenses; unpaid liabilities shown separately'],
+      ...(reportData.liabilities ? [['Unpaid Salaries (branch, period end)', formatPKR(reportData.liabilities.unpaidSalaries)], ['Unpaid Commissions (branch, period end)', formatPKR(reportData.liabilities.unpaidCommissions)]] as [string, string][] : []),
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
@@ -227,6 +229,7 @@ export const DetailedExpensesReportPage: React.FC = () => {
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
       ['Total Expenses', formatPKR(reportData.totals.amount)],
+      ...(reportData.liabilities ? [['Unpaid Salaries (branch, period end)', formatPKR(reportData.liabilities.unpaidSalaries)], ['Unpaid Commissions (branch, period end)', formatPKR(reportData.liabilities.unpaidCommissions)]] as [string, string][] : []),
     ];
     const headers = ['#', 'Voucher #', 'Date', 'Branch', 'Category', 'Title', 'Payee', 'Source', 'Status', 'Amount'];
     const rows = reportData.rows.map((r, i) => [
@@ -260,6 +263,12 @@ export const DetailedExpensesReportPage: React.FC = () => {
 
   return (
     <div className="w-full max-w-full space-y-6 text-slate-800 font-sans">
+      {reportData?.liabilities ? (
+        <div className="rounded-xl border border-slate-200 bg-white/75 p-3 text-xs text-slate-600">
+          Unpaid at period end: salaries PKR {formatPKR(reportData.liabilities.unpaidSalaries)}; commissions PKR {formatPKR(reportData.liabilities.unpaidCommissions)}.
+          These branch liabilities are separate from paid expenses and do not change with table filters.
+        </div>
+      ) : null}
       {/* ── 1. TOP HEADER BANNER (FROSTED GLASS CONTAINER) ── */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-5 sm:p-6 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)]">
         <div className="min-w-0 flex-1">
@@ -412,7 +421,7 @@ export const DetailedExpensesReportPage: React.FC = () => {
                 PKR {formatPKR((kpis as any).totalPostedAmount ?? (kpis as any).totalExpenses ?? reportData?.totals?.amount ?? 0)}
               </span>
               <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Total settled vouchers
+                Actual paid expenses, salaries and commissions
               </span>
             </div>
           </div>
@@ -432,7 +441,7 @@ export const DetailedExpensesReportPage: React.FC = () => {
                 PKR {formatPKR((kpis as any).totalReversedAmount ?? 0)}
               </span>
               <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Voided vouchers amount
+                Dated expense reversals
               </span>
             </div>
           </div>
@@ -633,7 +642,7 @@ export const DetailedExpensesReportPage: React.FC = () => {
                         {/* 10. Amount */}
                         <td className="py-3.5 px-4 text-right font-mono tabular-nums font-bold whitespace-nowrap text-[13px]">
                           {isReversed ? (
-                            <span className="line-through text-slate-400">PKR {formatPKR(row.amount)}</span>
+                            <span className="text-rose-600">PKR {formatPKR(row.amount)}</span>
                           ) : (
                             <span className="text-slate-900">PKR {formatPKR(row.amount)}</span>
                           )}
@@ -655,7 +664,7 @@ export const DetailedExpensesReportPage: React.FC = () => {
                 {/* Row 1: TOTALS (PKR) */}
                 <tr className="border-b border-white/60">
                   <td colSpan={9} className="py-3.5 px-4 text-right font-bold text-slate-800 tracking-wide">
-                    TOTAL POSTED EXPENSES (PKR)
+                    NET PAID EXPENSES (PKR)
                   </td>
                   <td className="py-3.5 px-4 text-right font-mono tabular-nums font-bold text-slate-900">
                     PKR {formatPKR((kpis as any).totalExpenses ?? (kpis as any).totalPostedAmount ?? reportData?.totals?.amount ?? 0)}

@@ -185,6 +185,9 @@ export const TaxReportPage: React.FC = () => {
   const handleExportExcel = () => {
     if (!reportData) return;
     const meta: [string, string][] = [
+      ['Basis', 'Statutory output tax uses invoice/credit dates. Collected tax uses actual receipt/refund/reversal dates; tax remittances and input credits are not calculated here.'],
+      ['Tax Charged', formatPKR(reportData.kpis.totalTaxCharged ?? 0)],
+      ['Net Tax Collected', formatPKR(reportData.kpis.totalTaxCollected)],
       ['Report', 'Tax Management & Summary Report'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -278,6 +281,9 @@ export const TaxReportPage: React.FC = () => {
   const handleExportCsv = () => {
     if (!reportData) return;
     const meta: [string, string][] = [
+      ['Basis', 'Statutory output tax uses invoice/credit dates. Collected tax uses actual receipt/refund/reversal dates; tax remittances and input credits are not calculated here.'],
+      ['Tax Charged', formatPKR(reportData.kpis.totalTaxCharged ?? 0)],
+      ['Net Tax Collected', formatPKR(reportData.kpis.totalTaxCollected)],
       ['Report', 'Tax Management & Summary Report'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -356,11 +362,14 @@ export const TaxReportPage: React.FC = () => {
       return;
     }
     const meta: [string, string][] = [
+      ['Basis', 'Statutory output tax uses invoice/credit dates. Collected tax uses actual receipt/refund/reversal dates; tax remittances and input credits are not calculated here.'],
+      ['Tax Charged', formatPKR(reportData.kpis.totalTaxCharged ?? 0)],
+      ['Net Tax Collected', formatPKR(reportData.kpis.totalTaxCollected)],
       ['Report', 'Tax Management & Summary Report'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['Period', `${formatDateDisplay(reportData.meta.from)} – ${formatDateDisplay(reportData.meta.to)}`],
       ['Total Taxable Sales', `PKR ${formatPKR(reportData.kpis.totalTaxableSales)}`],
-      ['Gross Tax Collected', `PKR ${formatPKR(reportData.kpis.totalTaxCollected)}`],
+      ['Net Tax Collected', `PKR ${formatPKR(reportData.kpis.totalTaxCollected)}`],
       ['Tax Refunded', `PKR ${formatPKR(reportData.kpis.totalTaxRefunded)}`],
       ['Net Tax Liability', `PKR ${formatPKR(reportData.kpis.netTaxLiability)}`],
     ];
@@ -471,6 +480,7 @@ export const TaxReportPage: React.FC = () => {
 
   return (
     <div className="w-full max-w-full space-y-6 text-slate-800 font-sans">
+      <p className="text-xs text-slate-600">Collected tax follows actual payment, refund and reversal dates. Statutory output tax follows invoice and credit dates; remittances and input-tax credits are not calculated here.</p>
       {/* ── 1. TOP HEADER BANNER (Frosted Glassmorphism) ── */}
       <div className="relative overflow-hidden rounded-[24px] border border-white/90 bg-white/75 p-6 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)]">
         <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-gradient-to-br from-[#B82E69]/10 via-[#D94883]/5 to-transparent blur-3xl" />
@@ -608,15 +618,15 @@ export const TaxReportPage: React.FC = () => {
                 <Receipt className="w-4 h-4" />
               </div>
               <span className="bg-emerald-50 text-emerald-700 shadow-2xs border border-white/60 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                Gross Tax
+                Collected Tax
               </span>
             </div>
             <div className="mt-3 relative z-10">
               <span className="text-2xl sm:text-3xl font-extrabold text-emerald-600 font-mono tabular-nums tracking-tight block">
-                PKR {formatPKR(reportData.kpis?.totalTaxCollected ?? reportData.totals.taxAmount ?? 0)}
+                PKR {formatPKR(reportData.kpis?.totalTaxCollected ?? 0)}
               </span>
               <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Total output tax collected
+                Net tax from actual customer receipts
               </span>
             </div>
           </div>
@@ -916,10 +926,10 @@ export const TaxReportPage: React.FC = () => {
 
                   <tr className="border-b border-slate-200/60">
                     <td colSpan={8} className="py-2.5 px-4 text-right font-semibold text-slate-700">
-                      Total Sales Tax Collected (Gross)
+                      Statutory Output Tax Charged (Gross)
                     </td>
                     <td colSpan={4} className="py-2.5 px-4 text-right font-bold font-mono tabular-nums text-emerald-600">
-                      +PKR {formatPKR(reportData?.kpis.totalTaxCollected ?? 0)}
+                      +PKR {formatPKR(reportData?.kpis.totalTaxCharged ?? 0)}
                     </td>
                   </tr>
 

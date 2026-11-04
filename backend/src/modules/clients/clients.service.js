@@ -1,6 +1,7 @@
 // src/modules/clients/clients.service.js
 // Customer directory. Balances/visits are always DERIVED from invoices & appointments.
 
+import { invoiceBalanceAsOf } from '../reports/collectionEvents.js';
 import prisma from '../../config/prisma.js';
 import { auditLog } from '../../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../../lib/AppError.js';
@@ -9,8 +10,6 @@ import { ymd } from '../../lib/dates.js';
 import { toDec } from '../../lib/money.js';
 import { formatPhoneNumber, normalizePhoneDigits } from '../../lib/phone.js';
 import { toClientDTO } from './clients.mapper.js';
-
-const OPEN_INVOICE = { status: { in: ['UNPAID', 'PARTIAL'] }, lifecycle: { not: 'VOIDED' }, amountDue: { gt: 0 } };
 
 /**
  * Derived stats per client: outstanding dues and distinct visit dates
@@ -30,10 +29,15 @@ export const clientStats = async (clientIds, tx = prisma, actor) => {
     s.bookingOutstandingBalance = toDec(s.bookingOutstandingBalance || 0).plus(toDec(b.totalAmount).minus(paid)).toNumber();
   }
 
-  const dues = await tx.invoice.groupBy({
-    by: ['clientId'], where: { clientId: { in: clientIds }, ...ownSales, ...OPEN_INVOICE }, _sum: { amountDue: true },
+  const branchId = actor ? resolveReadBranch(actor) : undefined;
+  const dues = await tx.invoice.findMany({
+    where: { clientId: { in: clientIds }, ...ownSales, ...(branchId ? { branchId } : {}), lifecycle: { not: 'VOIDED' } },
+    include: { lines: { include: { components: true } }, payments: true, refunds: { include: { lines: true } } },
   });
-  for (const d of dues) stats.get(d.clientId).outstandingBalance = toDec(d._sum.amountDue ?? 0).toNumber();
+  for (const invoice of dues) {
+    const stat = stats.get(invoice.clientId);
+    stat.outstandingBalance = toDec(stat.outstandingBalance).plus(invoiceBalanceAsOf(invoice).outstanding).toNumber();
+  }
 
   const invoiceDays = await tx.invoice.findMany({
     where: { clientId: { in: clientIds }, ...ownSales, lifecycle: { not: 'VOIDED' } }, select: { clientId: true, date: true }, distinct: ['clientId', 'date'],

@@ -32,7 +32,7 @@ beforeEach(() => {
   vi.clearAllMocks(); data.invoices = []; data.refunds = [];
   db.branch.findUnique.mockResolvedValue({ name: 'Branch' });
   db.branch.findMany.mockResolvedValue([{ id: 'b1', name: 'Branch' }, { id: 'b2', name: 'Other' }]);
-  db.invoice.findMany.mockImplementation(async ({ where }) => data.invoices.filter(i => inRange(i.date, where.date)
+  db.invoice.findMany.mockImplementation(async ({ where }) => data.invoices.filter(i => where.date && inRange(i.date, where.date)
     && matchesScope(i, where) && (!where.lifecycle?.not || i.lifecycle !== where.lifecycle.not)));
   db.invoiceRefund.findMany.mockImplementation(async ({ where }) => data.refunds.filter(r => inRange(r.refundDate, where.refundDate)
     && matchesScope(r.invoice, where.invoice)));
@@ -52,7 +52,7 @@ describe('tax report sale and reversal reconciliation', () => {
     data.invoices = [sale()];
     const report = await taxReport(actor, query);
     expectNet(report, 10000, 1000);
-    expect(report.kpis).toMatchObject({ totalTaxCollected: 1000, totalTaxRefunded: 0 });
+    expect(report.kpis).toMatchObject({ totalTaxCharged: 1000, totalTaxRefunded: 0 });
   });
 
   it.each(['VOID', 'REFUND'])('nets a fully reversed sale to zero for %s, including every table', async type => {
@@ -60,7 +60,7 @@ describe('tax report sale and reversal reconciliation', () => {
     data.invoices = [invoice]; data.refunds = [reverse(invoice, { type })];
     const report = await taxReport(actor, query);
     expectNet(report, 0, 0);
-    expect(report.kpis).toMatchObject({ totalTaxCollected: 1000, totalTaxRefunded: 1000 });
+    expect(report.kpis).toMatchObject({ totalTaxCharged: 1000, totalTaxRefunded: 1000 });
     expect(report.invoiceRows).toHaveLength(1);
     expect(report.serviceRows[0].taxAmount).toBe(0);
     expect(report.serviceSummary[0].count).toBe(0);
@@ -104,7 +104,7 @@ describe('tax report sale and reversal reconciliation', () => {
     data.invoices = [invoice]; data.refunds = [reverse(invoice)];
     const report = await taxReport(actor, { ...query, search: 'facial' });
     expectNet(report, 0, 0);
-    expect(report.kpis).toMatchObject({ totalTaxCollected: 1000, totalTaxRefunded: 1000 });
+    expect(report.kpis).toMatchObject({ totalTaxCharged: 1000, totalTaxRefunded: 1000 });
     expectNet(await taxReport(actor, { ...query, search: 'haircut' }), 10000, 1000);
     expectNet(await taxReport(actor, { ...query, search: 'missing' }), 0, 0);
   });

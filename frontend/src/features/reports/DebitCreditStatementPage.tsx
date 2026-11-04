@@ -47,8 +47,14 @@ const formatPKR = (amt: number, withSign = false) => {
   if (withSign) {
     return num >= 0 ? `+${formatted}` : `-${formatted}`;
   }
-  return formatted;
+  return num < 0 ? `-${formatted}` : formatted;
 };
+
+const collectionExportMeta = (collections?: { collectedRevenue: number; taxCollected: number; tipsCollected: number }): [string, string][] => collections ? [
+  ['Customer Collected Revenue (Excl. Tax/Tips)', formatPKR(collections.collectedRevenue)],
+  ['Customer Tax Collected', formatPKR(collections.taxCollected)],
+  ['Customer Tips Collected', formatPKR(collections.tipsCollected)],
+] : [];
 
 const formatDateDisplay = (dateStr: string) => {
   if (!dateStr) return '—';
@@ -220,12 +226,12 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
       r.reference,
       r.userName || '—',
       r.description,
-      r.moneyIn.toFixed(2),
-      r.moneyOut.toFixed(2),
+      (r.direction === 'IN' ? r.amount : 0).toFixed(2),
+      (r.direction === 'OUT' ? r.amount : 0).toFixed(2),
       r.runningBalance.toFixed(2),
       'COMPLETED',
     ]);
-    downloadReportCsv('debit-credit-payment-accounts', [], [{ headers, rows }]);
+    downloadReportCsv('debit-credit-payment-accounts', [['Basis', 'Balances include all movements; filters select detail rows. Transfers and tax/tips are cash movements, not revenue.'], ...collectionExportMeta(accountsReport.collections)], [{ headers, rows }]);
   };
 
   const handleExportAccountsExcel = () => {
@@ -257,12 +263,12 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
       r.reference,
       r.userName || '—',
       r.description,
-      r.moneyIn.toFixed(2),
-      r.moneyOut.toFixed(2),
+      (r.direction === 'IN' ? r.amount : 0).toFixed(2),
+      (r.direction === 'OUT' ? r.amount : 0).toFixed(2),
       r.runningBalance.toFixed(2),
       'COMPLETED',
     ]);
-    downloadReportExcel('debit-credit-payment-accounts', [], [{ headers, rows }]);
+    downloadReportExcel('debit-credit-payment-accounts', [['Basis', 'Balances include all movements; filters select detail rows. Transfers and tax/tips are cash movements, not revenue.'], ...collectionExportMeta(accountsReport.collections)], [{ headers, rows }]);
   };
 
   const handlePrintAccounts = () => {
@@ -275,23 +281,24 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
       r.sourceModule,
       r.reference,
       r.userName || '—',
-      r.moneyIn.toFixed(2),
-      r.moneyOut.toFixed(2),
+      (r.direction === 'IN' ? r.amount : 0).toFixed(2),
+      (r.direction === 'OUT' ? r.amount : 0).toFixed(2),
       r.runningBalance.toFixed(2),
     ]);
     printReportWindow({
       title: 'Debit / Credit Statement — Payment Accounts',
+      meta: [['Basis', 'Full account balances; filters select detail rows only.'], ...collectionExportMeta(accountsReport.collections)],
       headers,
       rows,
       totals: [
-        'TOTALS (PKR)',
+        'ACCOUNT TOTALS (ALL MOVEMENTS)',
         '',
         '',
         '',
         '',
         '',
-        `+${formatPKR(accountsReport.kpis.totalMoneyIn)}`,
-        `-${formatPKR(accountsReport.kpis.totalMoneyOut)}`,
+        `+${formatPKR(accountsReport.kpis.totalDebits ?? accountsReport.kpis.totalMoneyIn)}`,
+        `-${formatPKR(accountsReport.kpis.totalCredits ?? accountsReport.kpis.totalMoneyOut)}`,
         formatPKR(accountsReport.kpis.totalClosingBalance),
       ],
     });
@@ -315,14 +322,14 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
       ]);
       return { fileName: 'debit-credit-cash-transactions', headers, rows };
     } else {
-      const headers = ['#', 'Date', 'Custodian', 'Branch', 'Status', 'Opening Float', 'Debits (In)', 'Credits (Out)', 'Expected Cash', 'Counted Cash', 'Variance'];
+      const headers = ['#', 'Date', 'Custodian', 'Branch', 'Status', 'Opening Balance', 'Debits (In)', 'Credits (Out)', 'Expected Cash', 'Counted Cash', 'Variance'];
       const rows = (drawerReport.rows || []).map((r, i) => [
         i + 1,
         r.date,
         r.custodianName,
         r.branchName,
         r.status,
-        r.openingFloat.toFixed(2),
+        (r.openingBalance ?? 0).toFixed(2),
         drawerDebits(r).toFixed(2),
         r.totalCashOut.toFixed(2),
         r.expectedCash.toFixed(2),
@@ -335,12 +342,12 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
 
   const handleExportCashCsv = () => {
     const data = getCashExportData();
-    if (data) downloadReportCsv(data.fileName, [], [data]);
+    if (data) downloadReportCsv(data.fileName, [['Basis', 'Opening is before-period carry-forward; debits/credits are in-period; expected cash is period-end. Historical counts unavailable after later counts are blank.'], ...collectionExportMeta(drawerReport?.collections)], [data]);
   };
 
   const handleExportCashExcel = () => {
     const data = getCashExportData();
-    if (data) downloadReportExcel(data.fileName, [], [data]);
+    if (data) downloadReportExcel(data.fileName, [['Basis', 'Opening is before-period carry-forward; debits/credits are in-period; expected cash is period-end. Historical counts unavailable after later counts are blank.'], ...collectionExportMeta(drawerReport?.collections)], [data]);
   };
 
   const handlePrintCash = () => {
@@ -349,6 +356,8 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
     printReportWindow({
       title: cashSubView === 'TRANSACTIONS' ? 'Cash Transactions — Debit / Credit' : 'Cash Shift Reconciliation',
       meta: [
+        ...collectionExportMeta(drawerReport?.collections),
+        ['Basis', 'Opening is carry-forward; transactions are in-period. Balances include all movements; filters select details only.'],
         ['Branch', selectedBranch === 'ALL' ? 'All Branches' : allBranches.find((branch) => branch.id === selectedBranch)?.name || selectedBranch],
         ['From', drawerReport?.meta.from || fromDate || 'All dates'],
         ['To', drawerReport?.meta.to || toDate || 'All dates'],
@@ -360,6 +369,9 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
 
   return (
     <div className="w-full max-w-full space-y-6 text-slate-800 font-sans">
+      <p className="text-xs text-slate-600">Balances include all movements; filters select detail rows only. Opening is before-period carry-forward. Cash movements include tax, tips and transfers and are not revenue.</p>
+      {activeTab === 'PAYMENT_ACCOUNTS' && accountsReport?.collections && <p className="text-xs text-slate-600">Account customer receipts: net revenue PKR {formatPKR(accountsReport.collections.collectedRevenue)}, tax PKR {formatPKR(accountsReport.collections.taxCollected)}, tips PKR {formatPKR(accountsReport.collections.tipsCollected)}. Receipt business dates can differ from ledger posting dates.</p>}
+      {activeTab === 'CASH_DRAWER' && drawerReport?.collections && <p className="text-xs text-slate-600">Customer receipts: net revenue PKR {formatPKR(drawerReport.collections.collectedRevenue)}, tax PKR {formatPKR(drawerReport.collections.taxCollected)}, tips PKR {formatPKR(drawerReport.collections.tipsCollected)}. Drawer balances include custody transfers and other movements.</p>}
       {/* 1. Top Header Banner */}
       <div className="relative overflow-hidden rounded-[24px] border border-white/90 bg-white/75 p-6 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)]">
         <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-gradient-to-br from-[#B82E69]/10 via-[#D94883]/5 to-transparent blur-3xl" />
@@ -639,7 +651,7 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
                 <span>Debit (Money In)</span>
               </span>
               <span className="text-lg font-extrabold text-emerald-700 font-mono tabular-nums block mt-1.5">
-                +PKR {formatPKR(accountsReport.kpis.totalMoneyIn)}
+                +PKR {formatPKR(accountsReport.kpis.totalDebits ?? accountsReport.kpis.totalMoneyIn)}
               </span>
               <span className="text-[11px] text-emerald-600/80 mt-1 block">Client Collections & Transfers</span>
             </div>
@@ -650,7 +662,7 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
                 <span>Credit (Money Out)</span>
               </span>
               <span className="text-lg font-extrabold text-rose-700 font-mono tabular-nums block mt-1.5">
-                -PKR {formatPKR(accountsReport.kpis.totalMoneyOut)}
+                -PKR {formatPKR(accountsReport.kpis.totalCredits ?? accountsReport.kpis.totalMoneyOut)}
               </span>
               <span className="text-[11px] text-rose-600/80 mt-1 block">Expenses & Supplier Payouts</span>
             </div>
@@ -759,10 +771,10 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
                           {row.description || '—'}
                         </td>
                         <td className="py-3.5 px-3.5 text-right font-mono font-bold text-emerald-700 tabular-nums">
-                          {row.moneyIn > 0 ? `+${formatPKR(row.moneyIn)}` : '—'}
+                          {row.direction === 'IN' ? `+${formatPKR(row.amount)}` : '—'}
                         </td>
                         <td className="py-3.5 px-3.5 text-right font-mono font-bold text-rose-700 tabular-nums">
-                          {row.moneyOut > 0 ? `-${formatPKR(row.moneyOut)}` : '—'}
+                          {row.direction === 'OUT' ? `-${formatPKR(row.amount)}` : '—'}
                         </td>
                         <td className="py-3.5 px-3.5 text-right font-mono font-extrabold text-slate-900 tabular-nums">
                           PKR {formatPKR(row.runningBalance)}
@@ -787,11 +799,11 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
           {/* KPI Summary Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3.5">
             <div className="rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] p-3.5 transition-all duration-200 hover:-translate-y-0.5">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Opening Float</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Opening Balance</span>
               <span className="text-sm font-extrabold text-slate-800 font-mono tabular-nums block mt-1">
-                PKR {formatPKR(drawerReport.kpis.totalOpeningFloat)}
+                PKR {formatPKR(drawerReport.kpis.totalOpeningBalance ?? 0)}
               </span>
-              <span className="text-[10px] text-slate-400 mt-0.5 block">Carry forward float</span>
+              <span className="text-[10px] text-slate-400 mt-0.5 block">Balance before selected period</span>
             </div>
 
             <div className="rounded-[20px] border border-emerald-200/80 bg-emerald-50/25 backdrop-blur-xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] p-3.5 transition-all duration-200 hover:-translate-y-0.5">
@@ -975,7 +987,7 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
                       <th className="py-3.5 px-3.5">Custodian</th>
                       <th className="py-3.5 px-3.5">Branch</th>
                       <th className="py-3.5 px-3.5 text-center">Status</th>
-                      <th className="py-3.5 px-3.5 text-right">Opening Float</th>
+                      <th className="py-3.5 px-3.5 text-right">Opening Balance</th>
                       <th className="py-3.5 px-3.5 text-right text-emerald-800">Debits (+In)</th>
                       <th className="py-3.5 px-3.5 text-right text-rose-800">Credits (−Out)</th>
                       <th className="py-3.5 px-3.5 text-right font-bold text-[#B82E69]">Expected Cash</th>
@@ -1005,7 +1017,7 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
                                 {row.status}
                               </span>
                             </td>
-                            <td className="py-3.5 px-3.5 text-right font-mono tabular-nums">{formatPKR(row.openingFloat)}</td>
+                            <td className="py-3.5 px-3.5 text-right font-mono tabular-nums">{formatPKR(row.openingBalance ?? 0)}</td>
                             <td className="py-3.5 px-3.5 text-right font-mono font-bold text-emerald-700 tabular-nums">{drawerMoney(drawerDebits(row), true)}</td>
                             <td className="py-3.5 px-3.5 text-right font-mono font-bold text-rose-700 tabular-nums">{drawerMoney(-row.totalCashOut, true)}</td>
                             <td className="py-3.5 px-3.5 text-right font-mono font-extrabold text-[#B82E69] tabular-nums">PKR {formatPKR(row.expectedCash)}</td>
