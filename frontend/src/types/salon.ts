@@ -2262,10 +2262,18 @@ export interface IncomeExpenseReportRow {
   branchId: string;
   branchName: string;
   userOrPayee: string;
+  customerName?: string;
+  invoiceNumber?: string;
   description: string;
   income: number;
   recognizedIncome?: number;
+  serviceAmount?: number;
+  tax?: number;
   collectedTax?: number;
+  totalBill?: number;
+  totalReceived?: number;
+  remainingDues?: number;
+  collectedService?: number;
   expense: number;
   paid?: number;
   discount?: number;
@@ -2279,6 +2287,7 @@ export interface IncomeExpenseReportKPIs {
   totalCollectedIncome?: number;
   totalRecognizedIncome: number;
   totalCollectedTax?: number;
+  totalOutstandingDues?: number;
   cogs?: number;
   grossContribution?: number;
   directExpenses: number;
@@ -2328,6 +2337,9 @@ export interface IncomeExpenseReport {
     collectedIncome?: number;
     recognizedIncome?: number;
     collectedTax?: number;
+    tax?: number;
+    totalBill?: number;
+    totalOutstandingDues?: number;
     expense: number;
     paid?: number;
     discount?: number;

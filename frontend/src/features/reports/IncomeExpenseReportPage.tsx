@@ -199,38 +199,45 @@ export const IncomeExpenseReportPage: React.FC = () => {
 
     const headers = [
       '#',
+      'Invoice / Reference',
+      'Customer / Payee',
       'Type',
-      'Source',
-      'User',
       'Branch',
-      'Title',
-      'Status',
-      'Amount',
-      'Paid',
-      'Discount',
-      'Remaining',
+      'Service Amount (Excl. Tax)',
+      'Tax Amount',
+      'Total Bill (Incl. Tax)',
+      'Total Received',
+      'Remaining Dues',
+      'Payment Status',
       'Date',
-      'Method',
+      'Payment Method',
     ];
 
     const rows = reportData.rows.map((r, i) => {
       const isIncome = r.income > 0 || r.type === 'INCOME';
+      const isSettlement = r.type === 'SETTLEMENT';
+      const isRefund = r.type === 'INCOME' && r.source === 'Sales Refund';
       const isAccruedComm = r.type === 'COMMISSION_EXPENSE' && (r.status === 'ACCRUED' || !r.paid);
-      const paidVal = isAccruedComm ? 0 : isIncome ? (r.paid ?? r.income) : (r.paid ?? r.expense);
-      const remainingVal = isAccruedComm ? (r.remaining || r.expense) : (r.remaining || 0);
+
+      const serviceAmountVal = isSettlement ? 0 : isIncome ? (r.serviceAmount ?? r.recognizedIncome ?? r.income) : r.expense;
+      const taxVal = isSettlement || !isIncome ? 0 : (r.tax ?? r.collectedTax ?? 0);
+      const totalBillVal = isSettlement ? 0 : isIncome ? (r.totalBill ?? (serviceAmountVal + taxVal)) : r.expense;
+      const remainingVal = isAccruedComm ? (r.remaining || r.expense) : (r.remainingDues ?? r.remaining ?? 0);
+
+      const customerOrPayee = r.customerName || (r.description?.includes('-') ? r.description.split('-')[1]?.trim() : (r.userOrPayee || r.description || '—'));
 
       return [
         i + 1,
-        r.type === 'SETTLEMENT' ? 'Settlement' : isIncome ? 'Income' : 'Expense',
-        r.source || '—',
-        r.userOrPayee || '—',
+        r.reference || r.invoiceNumber || r.source || '—',
+        customerOrPayee,
+        r.type === 'SETTLEMENT' ? 'Settlement' : isRefund ? 'Refund' : isIncome ? 'Income' : 'Expense',
         r.branchName || '—',
-        r.description || r.reference || '—',
-        r.status || 'PAID',
-        (isIncome ? r.income : r.expense) === 0 ? '0.00' : isIncome ? `+${r.income.toFixed(2)}` : `-${r.expense.toFixed(2)}`,
+        isSettlement ? '0.00' : isRefund ? `-${Math.abs(serviceAmountVal).toFixed(2)}` : isIncome ? `+${serviceAmountVal.toFixed(2)}` : `-${serviceAmountVal.toFixed(2)}`,
+        isSettlement || !isIncome ? '0.00' : isRefund ? `-${Math.abs(taxVal).toFixed(2)}` : taxVal.toFixed(2),
+        isSettlement ? '0.00' : isRefund ? `-${Math.abs(totalBillVal).toFixed(2)}` : totalBillVal.toFixed(2),
         incomeExpenseCashText(r),
-        (r.discount || 0).toFixed(2),
         remainingVal.toFixed(2),
+        r.status || 'PAID',
         formatDateDisplay(r.date),
         formatMethod(r.paymentMethod),
       ];
@@ -243,12 +250,12 @@ export const IncomeExpenseReportPage: React.FC = () => {
       '',
       '',
       '',
-      '',
-      '',
-      reportData.totals.net >= 0 ? `+${reportData.totals.net.toFixed(2)}` : `-${Math.abs(reportData.totals.net).toFixed(2)}`,
+      `+${(reportData.totals.income || 0).toFixed(2)}`,
+      `+${(reportData.totals.collectedTax ?? reportData.kpis?.totalCollectedTax ?? 0).toFixed(2)}`,
+      `+${totalBillSum.toFixed(2)}`,
       signedPaidFormatted,
-      (reportData.totals.discount || 0).toFixed(2),
       (reportData.totals.remaining || 0).toFixed(2),
+      '',
       '',
       '',
     ];
@@ -268,38 +275,45 @@ export const IncomeExpenseReportPage: React.FC = () => {
 
     const headers = [
       '#',
+      'Invoice / Reference',
+      'Customer / Payee',
       'Type',
-      'Source',
-      'User',
       'Branch',
-      'Title',
-      'Status',
-      'Amount',
-      'Paid',
-      'Discount',
-      'Remaining',
+      'Service Amount (Excl. Tax)',
+      'Tax Amount',
+      'Total Bill (Incl. Tax)',
+      'Total Received',
+      'Remaining Dues',
+      'Payment Status',
       'Date',
-      'Method',
+      'Payment Method',
     ];
 
     const rows = reportData.rows.map((r, i) => {
       const isIncome = r.income > 0 || r.type === 'INCOME';
+      const isSettlement = r.type === 'SETTLEMENT';
+      const isRefund = r.type === 'INCOME' && r.source === 'Sales Refund';
       const isAccruedComm = r.type === 'COMMISSION_EXPENSE' && (r.status === 'ACCRUED' || !r.paid);
-      const paidVal = isAccruedComm ? 0 : isIncome ? (r.paid ?? r.income) : (r.paid ?? r.expense);
-      const remainingVal = isAccruedComm ? (r.remaining || r.expense) : (r.remaining || 0);
+
+      const serviceAmountVal = isSettlement ? 0 : isIncome ? (r.serviceAmount ?? r.recognizedIncome ?? r.income) : r.expense;
+      const taxVal = isSettlement || !isIncome ? 0 : (r.tax ?? r.collectedTax ?? 0);
+      const totalBillVal = isSettlement ? 0 : isIncome ? (r.totalBill ?? (serviceAmountVal + taxVal)) : r.expense;
+      const remainingVal = isAccruedComm ? (r.remaining || r.expense) : (r.remainingDues ?? r.remaining ?? 0);
+
+      const customerOrPayee = r.customerName || (r.description?.includes('-') ? r.description.split('-')[1]?.trim() : (r.userOrPayee || r.description || '—'));
 
       return [
         i + 1,
-        r.type === 'SETTLEMENT' ? 'Settlement' : isIncome ? 'Income' : 'Expense',
-        r.source || '—',
-        r.userOrPayee || '—',
+        r.reference || r.invoiceNumber || r.source || '—',
+        customerOrPayee,
+        r.type === 'SETTLEMENT' ? 'Settlement' : isRefund ? 'Refund' : isIncome ? 'Income' : 'Expense',
         r.branchName || '—',
-        r.description || r.reference || '—',
-        r.status || 'PAID',
-        (isIncome ? r.income : r.expense) === 0 ? '0.00' : isIncome ? `+${r.income.toFixed(2)}` : `-${r.expense.toFixed(2)}`,
+        isSettlement ? '0.00' : isRefund ? `-${Math.abs(serviceAmountVal).toFixed(2)}` : isIncome ? `+${serviceAmountVal.toFixed(2)}` : `-${serviceAmountVal.toFixed(2)}`,
+        isSettlement || !isIncome ? '0.00' : isRefund ? `-${Math.abs(taxVal).toFixed(2)}` : taxVal.toFixed(2),
+        isSettlement ? '0.00' : isRefund ? `-${Math.abs(totalBillVal).toFixed(2)}` : totalBillVal.toFixed(2),
         incomeExpenseCashText(r),
-        (r.discount || 0).toFixed(2),
         remainingVal.toFixed(2),
+        r.status || 'PAID',
         formatDateDisplay(r.date),
         formatMethod(r.paymentMethod),
       ];
@@ -312,12 +326,12 @@ export const IncomeExpenseReportPage: React.FC = () => {
       '',
       '',
       '',
-      '',
-      '',
-      reportData.totals.net >= 0 ? `+${reportData.totals.net.toFixed(2)}` : `-${Math.abs(reportData.totals.net).toFixed(2)}`,
+      `+${(reportData.totals.income || 0).toFixed(2)}`,
+      `+${(reportData.totals.collectedTax ?? reportData.kpis?.totalCollectedTax ?? 0).toFixed(2)}`,
+      `+${totalBillSum.toFixed(2)}`,
       signedPaidFormatted,
-      (reportData.totals.discount || 0).toFixed(2),
       (reportData.totals.remaining || 0).toFixed(2),
+      '',
       '',
       '',
     ];
@@ -335,30 +349,53 @@ export const IncomeExpenseReportPage: React.FC = () => {
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
-      ['Total Income', `PKR ${formatPKR(reportData.totals.income)}`],
-      ['Total Expense', `PKR ${formatPKR(reportData.totals.expense)}`],
-      ['Net Settled (Paid)', `PKR ${signedPaidFormatted}`],
-      ['Net Position', `PKR ${reportData.totals.net >= 0 ? '+' : '-'}${formatPKR(Math.abs(reportData.totals.net))}`],
+      ['Revenue Collected (Excl. Tax)', `PKR ${formatPKR(reportData.totals.income)}`],
+      ['Tax Collected', `PKR ${formatPKR(reportData.totals.collectedTax ?? reportData.kpis?.totalCollectedTax ?? 0)}`],
+      ['Total Collections (Incl. Tax)', `PKR ${formatPKR(reportData.totals.collections ?? signedPaid)}`],
+      ['Operating Expenses', `PKR ${formatPKR(reportData.totals.expense)}`],
+      ['Net Profit / Loss', `PKR ${reportData.totals.net >= 0 ? '+' : '-'}${formatPKR(Math.abs(reportData.totals.net))}`],
+      ['Outstanding Dues', `PKR ${formatPKR(reportData.totals.remaining || 0)}`],
     ];
-    const headers = ['#', 'Type', 'Source', 'User', 'Branch', 'Title', 'Status', 'Amount', 'Paid', 'Discount', 'Remaining', 'Date', 'Method'];
+    const headers = [
+      '#',
+      'Invoice / Reference',
+      'Customer / Payee',
+      'Type',
+      'Branch',
+      'Service Amount (Excl. Tax)',
+      'Tax Amount',
+      'Total Bill (Incl. Tax)',
+      'Total Received',
+      'Remaining Dues',
+      'Status',
+      'Date',
+      'Method',
+    ];
     const rows = reportData.rows.map((r, i) => {
       const isIncome = r.income > 0 || r.type === 'INCOME';
+      const isSettlement = r.type === 'SETTLEMENT';
+      const isRefund = r.type === 'INCOME' && r.source === 'Sales Refund';
       const isAccruedComm = r.type === 'COMMISSION_EXPENSE' && (r.status === 'ACCRUED' || !r.paid);
-      const paidVal = isAccruedComm ? 0 : isIncome ? (r.paid ?? r.income) : (r.paid ?? r.expense);
-      const remainingVal = isAccruedComm ? (r.remaining || r.expense) : (r.remaining || 0);
+
+      const serviceAmountVal = isSettlement ? 0 : isIncome ? (r.serviceAmount ?? r.recognizedIncome ?? r.income) : r.expense;
+      const taxVal = isSettlement || !isIncome ? 0 : (r.tax ?? r.collectedTax ?? 0);
+      const totalBillVal = isSettlement ? 0 : isIncome ? (r.totalBill ?? (serviceAmountVal + taxVal)) : r.expense;
+      const remainingVal = isAccruedComm ? (r.remaining || r.expense) : (r.remainingDues ?? r.remaining ?? 0);
+
+      const customerOrPayee = r.customerName || (r.description?.includes('-') ? r.description.split('-')[1]?.trim() : (r.userOrPayee || r.description || '—'));
 
       return [
         i + 1,
-        r.type === 'SETTLEMENT' ? 'Settlement' : isIncome ? 'Income' : 'Expense',
-        r.source || '—',
-        r.userOrPayee || '—',
+        r.reference || r.invoiceNumber || r.source || '—',
+        customerOrPayee,
+        r.type === 'SETTLEMENT' ? 'Settlement' : isRefund ? 'Refund' : isIncome ? 'Income' : 'Expense',
         r.branchName || '—',
-        r.description || r.reference || '—',
-        r.status || 'PAID',
-        (isIncome ? r.income : r.expense) === 0 ? '0.00' : isIncome ? `+${formatPKR(r.income)}` : `-${formatPKR(r.expense)}`,
-        r.cashFlow !== undefined ? `${r.cashFlow >= 0 ? '+' : '-'}${formatPKR(Math.abs(r.cashFlow))}` : isAccruedComm || paidVal === 0 ? '0.00' : isIncome ? `+${formatPKR(paidVal)}` : `-${formatPKR(paidVal)}`,
-        formatPKR(r.discount || 0),
+        isSettlement ? '0.00' : isRefund ? `-${formatPKR(Math.abs(serviceAmountVal))}` : isIncome ? `+${formatPKR(serviceAmountVal)}` : `-${formatPKR(serviceAmountVal)}`,
+        isSettlement || !isIncome ? '0.00' : isRefund ? `-${formatPKR(Math.abs(taxVal))}` : formatPKR(taxVal),
+        isSettlement ? '0.00' : isRefund ? `-${formatPKR(Math.abs(totalBillVal))}` : formatPKR(totalBillVal),
+        r.cashFlow !== undefined ? `${r.cashFlow >= 0 ? '+' : '-'}${formatPKR(Math.abs(r.cashFlow))}` : isAccruedComm || !r.paid ? '0.00' : isIncome ? `+${formatPKR(r.paid)}` : `-${formatPKR(r.paid)}`,
         formatPKR(remainingVal),
+        r.status || 'PAID',
         formatDateDisplay(r.date),
         formatMethod(r.paymentMethod),
       ];
@@ -376,12 +413,12 @@ export const IncomeExpenseReportPage: React.FC = () => {
         '',
         '',
         '',
-        '',
-        '',
-        reportData.totals.net >= 0 ? `+${formatPKR(reportData.totals.net)}` : `-${formatPKR(Math.abs(reportData.totals.net))}`,
+        `+${formatPKR(reportData.totals.income)}`,
+        `+${formatPKR(reportData.totals.collectedTax ?? reportData.kpis?.totalCollectedTax ?? 0)}`,
+        `+${formatPKR(totalBillSum)}`,
         signedPaidFormatted,
-        `+${formatPKR(reportData.totals.discount || 0)}`,
         `+${formatPKR(reportData.totals.remaining || 0)}`,
+        '',
         '',
         '',
       ],
@@ -397,6 +434,20 @@ export const IncomeExpenseReportPage: React.FC = () => {
   const totalCashCollected = totals.income;
   const totalExpensesRecognized = totals.expense;
   const netRealizedPosition = totals.net ?? ((totals.income || 0) - (totals.expense || 0));
+
+  const totalBillSum = useMemo(() => {
+    if (!reportData?.rows) return 0;
+    return reportData.rows.reduce((acc, r) => {
+      const isIncome = r.income > 0 || r.type === 'INCOME';
+      const isSettlement = r.type === 'SETTLEMENT';
+      if (isSettlement) return acc;
+      if (isIncome) {
+        const b = r.totalBill ?? ((r.serviceAmount ?? r.recognizedIncome ?? r.income) + (r.tax ?? r.collectedTax ?? 0));
+        return acc + (b || 0);
+      }
+      return acc;
+    }, 0);
+  }, [reportData]);
 
   return (
     <div className="w-full max-w-full space-y-6 text-slate-800 font-sans">
@@ -554,9 +605,9 @@ export const IncomeExpenseReportPage: React.FC = () => {
 
       {/* ── 3. ROW 3 PURE WHITE FROSTED BLUR FINANCIAL KPI CARDS (when filtered) ── */}
       {hasFiltered && reportData && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {/* Card 1: Recognized Revenue */}
-          <div className="p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+          {/* Card 1: Revenue Collected (Excluding Tax) */}
+          <div className="p-4 sm:p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
             <div className="flex items-center justify-between relative z-10">
               <div className="w-8 h-8 rounded-xl bg-white/90 shadow-2xs border border-white/80 flex items-center justify-center text-emerald-600">
                 <TrendingUp className="w-4 h-4" />
@@ -566,11 +617,11 @@ export const IncomeExpenseReportPage: React.FC = () => {
               </span>
             </div>
             <div className="mt-3 relative z-10">
-              <span className="text-2xl sm:text-3xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
+              <span className="text-xl sm:text-2xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
                 PKR {formatPKR(totals.income)}
               </span>
-              <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Collected revenue (excl. tax)
+              <span className="text-[11px] text-[#78616C] font-medium mt-1 block leading-tight">
+                Revenue Collected (excl. tax)
                 {reportData?.totals?.recognizedIncome && reportData.totals.recognizedIncome !== totals.income ? (
                   <span className="block text-[10px] text-slate-400 mt-0.5">
                     Accrual sales: PKR {formatPKR(reportData.totals.recognizedIncome)}
@@ -580,48 +631,28 @@ export const IncomeExpenseReportPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Card 2: Operating Expenses */}
-          <div className="p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
+          {/* Card 2: Tax Collected (Dedicated KPI Card) */}
+          <div className="p-4 sm:p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
             <div className="flex items-center justify-between relative z-10">
-              <div className="w-8 h-8 rounded-xl bg-white/90 shadow-2xs border border-white/80 flex items-center justify-center text-rose-600">
-                <Receipt className="w-4 h-4" />
+              <div className="w-8 h-8 rounded-xl bg-white/90 shadow-2xs border border-white/80 flex items-center justify-center text-indigo-600">
+                <Coins className="w-4 h-4" />
               </div>
-              <span className="bg-rose-50 text-rose-700 shadow-2xs border border-white/60 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                Expenses
+              <span className="bg-indigo-50 text-indigo-700 shadow-2xs border border-white/60 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                Tax Collected
               </span>
             </div>
             <div className="mt-3 relative z-10">
-              <span className="text-2xl sm:text-3xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
-                PKR {formatPKR(totalExpensesRecognized)}
+              <span className="text-xl sm:text-2xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
+                PKR {formatPKR(reportData?.totals?.collectedTax ?? reportData?.kpis?.totalCollectedTax ?? 0)}
               </span>
-              <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Vouchers, salaries & commissions
+              <span className="text-[11px] text-[#78616C] font-medium mt-1 block leading-tight">
+                Statutory tax collected
               </span>
             </div>
           </div>
 
-          {/* Card 3: Net Operating Profit */}
-          <div className="p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
-            <div className="flex items-center justify-between relative z-10">
-              <div className="w-8 h-8 rounded-xl bg-white/90 shadow-2xs border border-white/80 flex items-center justify-center text-[#B82E69]">
-                <Landmark className="w-4 h-4" />
-              </div>
-              <span className={`shadow-2xs border border-white/60 text-[10px] font-bold px-2.5 py-0.5 rounded-full ${netRealizedPosition >= 0 ? 'bg-[#FDF2F5] text-[#B82E69]' : 'bg-rose-50 text-rose-700'}`}>
-                {netRealizedPosition >= 0 ? 'Net Profit' : 'Net Loss'}
-              </span>
-            </div>
-            <div className="mt-3 relative z-10">
-              <span className={`text-2xl sm:text-3xl font-extrabold font-mono tabular-nums tracking-tight block ${netRealizedPosition >= 0 ? 'text-[#18191B]' : 'text-rose-600'}`}>
-                {netRealizedPosition >= 0 ? `PKR ${formatPKR(netRealizedPosition)}` : `-PKR ${formatPKR(Math.abs(netRealizedPosition))}`}
-              </span>
-              <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Operating bottomline position
-              </span>
-            </div>
-          </div>
-
-          {/* Card 4: Net Cash Collected / Paid */}
-          <div className="p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
+          {/* Card 3: Total Collections (Including Tax) */}
+          <div className="p-4 sm:p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
             <div className="flex items-center justify-between relative z-10">
               <div className="w-8 h-8 rounded-xl bg-white/90 shadow-2xs border border-white/80 flex items-center justify-center text-blue-600">
                 <Wallet className="w-4 h-4" />
@@ -631,22 +662,57 @@ export const IncomeExpenseReportPage: React.FC = () => {
               </span>
             </div>
             <div className="mt-3 relative z-10">
-              <span className="text-2xl sm:text-3xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
+              <span className="text-xl sm:text-2xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
                 PKR {formatPKR(reportData?.totals?.collections ?? signedPaid)}
               </span>
-              <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Net cash & bank payments
-                {reportData?.totals?.collectedTax && reportData.totals.collectedTax > 0 ? (
-                  <span className="block text-[10px] text-blue-500 mt-0.5">
-                    Tax portion: PKR {formatPKR(reportData.totals.collectedTax)}
-                  </span>
-                ) : null}
+              <span className="text-[11px] text-[#78616C] font-medium mt-1 block leading-tight">
+                Total Collections (incl. tax)
               </span>
             </div>
           </div>
 
-          {/* Card 5: Outstanding Balance */}
-          <div className="p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
+          {/* Card 4: Operating Expenses */}
+          <div className="p-4 sm:p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
+            <div className="flex items-center justify-between relative z-10">
+              <div className="w-8 h-8 rounded-xl bg-white/90 shadow-2xs border border-white/80 flex items-center justify-center text-rose-600">
+                <Receipt className="w-4 h-4" />
+              </div>
+              <span className="bg-rose-50 text-rose-700 shadow-2xs border border-white/60 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                Expenses
+              </span>
+            </div>
+            <div className="mt-3 relative z-10">
+              <span className="text-xl sm:text-2xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
+                PKR {formatPKR(totalExpensesRecognized)}
+              </span>
+              <span className="text-[11px] text-[#78616C] font-medium mt-1 block leading-tight">
+                Operating Expenses
+              </span>
+            </div>
+          </div>
+
+          {/* Card 5: Net Profit */}
+          <div className="p-4 sm:p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
+            <div className="flex items-center justify-between relative z-10">
+              <div className="w-8 h-8 rounded-xl bg-white/90 shadow-2xs border border-white/80 flex items-center justify-center text-[#B82E69]">
+                <Landmark className="w-4 h-4" />
+              </div>
+              <span className={`shadow-2xs border border-white/60 text-[10px] font-bold px-2.5 py-0.5 rounded-full ${netRealizedPosition >= 0 ? 'bg-[#FDF2F5] text-[#B82E69]' : 'bg-rose-50 text-rose-700'}`}>
+                {netRealizedPosition >= 0 ? 'Net Profit' : 'Net Loss'}
+              </span>
+            </div>
+            <div className="mt-3 relative z-10">
+              <span className={`text-xl sm:text-2xl font-extrabold font-mono tabular-nums tracking-tight block ${netRealizedPosition >= 0 ? 'text-[#18191B]' : 'text-rose-600'}`}>
+                {netRealizedPosition >= 0 ? `PKR ${formatPKR(netRealizedPosition)}` : `-PKR ${formatPKR(Math.abs(netRealizedPosition))}`}
+              </span>
+              <span className="text-[11px] text-[#78616C] font-medium mt-1 block leading-tight">
+                Operating bottomline position
+              </span>
+            </div>
+          </div>
+
+          {/* Card 6: Outstanding Dues */}
+          <div className="p-4 sm:p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
             <div className="flex items-center justify-between relative z-10">
               <div className="w-8 h-8 rounded-xl bg-white/90 shadow-2xs border border-white/80 flex items-center justify-center text-amber-600">
                 <Coins className="w-4 h-4" />
@@ -656,11 +722,11 @@ export const IncomeExpenseReportPage: React.FC = () => {
               </span>
             </div>
             <div className="mt-3 relative z-10">
-              <span className="text-2xl sm:text-3xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
+              <span className="text-xl sm:text-2xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
                 PKR {formatPKR(totals.remaining || 0)}
               </span>
-              <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Receivables & accrued payables
+              <span className="text-[11px] text-[#78616C] font-medium mt-1 block leading-tight">
+                Outstanding Dues
               </span>
             </div>
           </div>
@@ -759,147 +825,227 @@ export const IncomeExpenseReportPage: React.FC = () => {
 
           {/* Table Container */}
           <div className="overflow-x-auto w-full">
-            <table className="report-records w-full min-w-[1300px] text-left border-collapse text-xs">
+            <table className="report-records w-full min-w-[1000px] text-left border-collapse text-xs">
               <thead className="bg-[#FAF8F9]/80 text-slate-700 font-semibold border-b border-slate-100 uppercase tracking-wider text-[11px]">
                 <tr>
-                  <th className="py-3 px-4 text-center w-12 text-slate-500">#</th>
-                  <th className="py-3 px-4 w-24">Type</th>
-                  <th className="py-3 px-4 whitespace-nowrap">Source</th>
-                  <th className="py-3 px-4 whitespace-nowrap">User</th>
-                  <th className="py-3 px-4 whitespace-nowrap">Branch</th>
-                  <th className="py-3 px-4 min-w-[220px]">Title</th>
-                  <th className="py-3 px-4 text-center w-24">Status</th>
-                  <th className="py-3 px-4 text-right whitespace-nowrap">Amount</th>
-                  <th className="py-3 px-4 text-right whitespace-nowrap">Total Paid / Collection</th>
-                  <th className="py-3 px-4 text-right whitespace-nowrap">Discount</th>
-                  <th className="py-3 px-4 text-right whitespace-nowrap">Remaining</th>
-                  <th className="py-3 px-4 whitespace-nowrap">Date</th>
-                  <th className="py-3 px-4 whitespace-nowrap">Method</th>
+                  <th className="py-3 px-4 min-w-[200px]">Invoice / Customer</th>
+                  <th className="py-3 px-4 text-right whitespace-nowrap">Service Amount (Excl. Tax)</th>
+                  <th className="py-3 px-4 text-right whitespace-nowrap">Tax Amount</th>
+                  <th className="py-3 px-4 text-right whitespace-nowrap">Total Bill (Incl. Tax)</th>
+                  <th className="py-3 px-4 text-right whitespace-nowrap">Total Received</th>
+                  <th className="py-3 px-4 text-right whitespace-nowrap">Remaining Dues</th>
+                  <th className="py-3 px-4 text-center w-28 whitespace-nowrap">Payment Status</th>
+                  <th className="py-3 px-4 whitespace-nowrap">Date / Payment Method</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {reportData && reportData.rows.length > 0 ? (
                   reportData.rows.map((row: IncomeExpenseReportRow, idx: number) => {
                     const isIncome = row.income > 0 || row.type === 'INCOME';
-                    const amountValue = isIncome ? row.income : row.expense;
+                    const isSettlement = row.type === 'SETTLEMENT';
+                    const isRefund = row.type === 'INCOME' && row.source === 'Sales Refund';
                     const isAccruedComm = row.type === 'COMMISSION_EXPENSE' && (row.status === 'ACCRUED' || !row.paid);
-                    const paidValue = isAccruedComm ? 0 : isIncome ? (row.paid ?? row.income) : (row.paid ?? row.expense);
-                    const discountValue = row.discount || 0;
-                    const remainingValue = isAccruedComm ? (row.remaining || row.expense) : (row.remaining || 0);
+
+                    const serviceAmountVal = isSettlement
+                      ? 0
+                      : isIncome
+                      ? (row.serviceAmount ?? row.recognizedIncome ?? row.income)
+                      : row.expense;
+
+                    const collectedServiceVal = isSettlement
+                      ? 0
+                      : isIncome
+                      ? (row.collectedService ?? row.income)
+                      : 0;
+
+                    const taxVal = isSettlement
+                      ? 0
+                      : isIncome
+                      ? (row.tax ?? row.collectedTax ?? 0)
+                      : 0;
+
+                    const collectedTaxVal = row.collectedTax ?? 0;
+
+                    const totalBillVal = isSettlement
+                      ? 0
+                      : isIncome
+                      ? (row.totalBill ?? (serviceAmountVal + taxVal))
+                      : row.expense;
+
+                    const totalReceivedVal = isSettlement
+                      ? (row.cashFlow || 0)
+                      : isAccruedComm
+                      ? 0
+                      : isIncome
+                      ? (row.totalReceived ?? row.collectionAmount ?? row.paid ?? row.income)
+                      : (row.paid ? -row.paid : 0);
+
+                    const remainingDuesVal = isAccruedComm
+                      ? (row.remaining || row.expense)
+                      : (row.remainingDues ?? row.remaining ?? 0);
+
+                    const isPartial = row.status === 'PARTIAL' || row.status === 'PARTIALLY_PAID' || (remainingDuesVal > 0 && totalReceivedVal > 0);
                     const dateParts = formatDateParts(row.date);
 
                     return (
                       <tr key={row.id || idx} className="hover:bg-[#FDF2F5]/30 transition-colors">
-                        {/* 1. # */}
-                        <td className="py-3.5 px-4 text-center font-medium text-slate-400 font-mono">
-                          {idx + 1}
+                        {/* 1. Invoice / Customer */}
+                        <td className="py-3.5 px-4">
+                          <div className="leading-tight">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-[#18191B]">{row.reference || row.invoiceNumber || row.source}</span>
+                              {row.type === 'SETTLEMENT' ? (
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-[#FDF2F5] text-[#B82E69]">Settlement</span>
+                              ) : isRefund ? (
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-50 text-rose-700">Refund</span>
+                              ) : row.source === 'POS Dues Collection' ? (
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-50 text-amber-700">Dues</span>
+                              ) : row.type === 'SALARY_EXPENSE' ? (
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-100 text-slate-700">Salary</span>
+                              ) : row.type === 'COMMISSION_EXPENSE' ? (
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-50 text-amber-700">Commission</span>
+                              ) : !isIncome ? (
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-50 text-rose-700">Expense</span>
+                              ) : null}
+                              {row.branchName && (
+                                <span className="text-[10px] text-slate-400 font-normal">({row.branchName})</span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-[#78616C] font-medium mt-0.5 truncate max-w-[260px]" title={row.customerName || row.userOrPayee || row.description}>
+                              {row.customerName || (row.description?.includes('-') ? row.description.split('-')[1]?.trim() : (row.userOrPayee || row.description || 'Walk-in'))}
+                            </div>
+                          </div>
                         </td>
 
-                        {/* 2. Type */}
-                        <td className="py-3.5 px-4 whitespace-nowrap">
-                          {row.type === 'SETTLEMENT' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FDF2F5] text-[#B82E69]">
-                              Settlement
-                            </span>
-                          ) : isIncome ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700">
-                              Income
+                        {/* 2. Service Amount (Excl. Tax) */}
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono tabular-nums">
+                          {isSettlement ? (
+                            <span className="text-slate-400">—</span>
+                          ) : (
+                            <div>
+                              <span className={`font-semibold ${isIncome ? (isRefund ? 'text-rose-700' : 'text-emerald-700') : 'text-rose-700'}`}>
+                                {isRefund
+                                  ? `-${formatPKR(Math.abs(serviceAmountVal))}`
+                                  : isIncome
+                                  ? `+${formatPKR(serviceAmountVal)}`
+                                  : `-${formatPKR(serviceAmountVal)}`}
+                              </span>
+                              {isIncome && !isRefund && isPartial && collectedServiceVal !== serviceAmountVal && (
+                                <div className="text-[10px] text-emerald-600 font-medium">
+                                  Coll: PKR {formatPKR(collectedServiceVal)}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* 3. Tax Amount */}
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono tabular-nums text-slate-700">
+                          {isSettlement || !isIncome ? (
+                            <span className="text-slate-400">—</span>
+                          ) : isRefund ? (
+                            <span className="text-rose-600">
+                              {taxVal !== 0 ? `-${formatPKR(Math.abs(taxVal))}` : '0.00'}
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700">
-                              Expense
+                            <div>
+                              <span>{formatPKR(taxVal)}</span>
+                              {isPartial && collectedTaxVal !== taxVal && (
+                                <div className="text-[10px] text-indigo-600 font-medium">
+                                  Coll: PKR {formatPKR(collectedTaxVal)}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* 4. Total Bill (Incl. Tax) */}
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono tabular-nums font-semibold text-[#18191B]">
+                          {isSettlement ? (
+                            <span className="text-slate-400">—</span>
+                          ) : isRefund ? (
+                            <span className="text-rose-700">
+                              -{formatPKR(Math.abs(totalBillVal))}
+                            </span>
+                          ) : (
+                            <span>{formatPKR(totalBillVal)}</span>
+                          )}
+                        </td>
+
+                        {/* 5. Total Received */}
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono tabular-nums font-semibold">
+                          {isSettlement ? (
+                            <span className={totalReceivedVal >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                              {totalReceivedVal >= 0 ? `+${formatPKR(totalReceivedVal)}` : `-${formatPKR(Math.abs(totalReceivedVal))}`}
+                            </span>
+                          ) : isIncome ? (
+                            <span className={isRefund ? 'text-rose-700' : 'text-emerald-700'}>
+                              {totalReceivedVal === 0 ? '0.00' : isRefund ? `-${formatPKR(Math.abs(totalReceivedVal))}` : `+${formatPKR(totalReceivedVal)}`}
+                            </span>
+                          ) : (
+                            <span className="text-rose-700">
+                              {totalReceivedVal === 0 ? '0.00' : `-${formatPKR(Math.abs(totalReceivedVal))}`}
                             </span>
                           )}
                         </td>
 
-                        {/* 3. Source */}
-                        <td className="py-3.5 px-4 whitespace-nowrap text-[#475569] font-medium">
-                          {row.paymentEventType ? row.paymentEventType.replaceAll('_', ' ') : row.source || (isIncome ? 'Fee Collection' : 'Expense')}
+                        {/* 6. Remaining Dues */}
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono tabular-nums">
+                          {remainingDuesVal > 0 ? (
+                            <span className="text-amber-700 font-bold">
+                              {formatPKR(remainingDuesVal)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">0.00</span>
+                          )}
                         </td>
 
-                        {/* 4. User */}
-                        <td className="py-3.5 px-4 whitespace-nowrap text-[#334155] font-medium">
-                          {row.userOrPayee || 'Staff'}
-                        </td>
-
-                        {/* 5. Branch */}
-                        <td className="py-3.5 px-4 whitespace-nowrap text-[#475569]">
-                          {row.branchName || 'Main Branch'}
-                        </td>
-
-                        {/* 6. Title */}
-                        <td className="py-3.5 px-4 text-[#18191B] font-medium max-w-[240px] truncate" title={row.description || row.reference}>
-                          {row.description || row.reference || '—'}
-                        </td>
-
-                        {/* 7. Status */}
+                        {/* 7. Payment Status */}
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
                           {row.status === 'PAID' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/50">
                               Paid
                             </span>
+                          ) : row.status === 'PARTIAL' || row.status === 'PARTIALLY_PAID' || isPartial ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200/50">
+                              Partial
+                            </span>
+                          ) : row.status === 'REFUNDED' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200/50">
+                              Refunded
+                            </span>
                           ) : row.status === 'FINALIZED' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200/50">
                               Finalized
                             </span>
                           ) : row.status === 'ACCRUED' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200/50">
                               Accrued
                             </span>
-                          ) : row.status === 'PARTIAL' || row.status === 'PARTIALLY_PAID' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">
-                              Partial
+                          ) : row.status === 'POSTED' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200/50">
+                              Posted
                             </span>
                           ) : (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200/50">
                               {row.status || 'Unpaid'}
                             </span>
                           )}
                         </td>
 
-                        {/* 8. Amount (Recognized) */}
-                        <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono tabular-nums font-semibold">
-                          <span className={isIncome ? 'text-emerald-700' : 'text-rose-700'}>
-                            {amountValue === 0 ? '0.00' : formatPKR(amountValue * (isIncome ? 1 : -1), true)}
-                          </span>
-                        </td>
-
-                        {/* 9. Paid (Cash Flow) */}
-                        <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono tabular-nums font-semibold">
-                          <span className={incomeExpenseCashFlow(row) < 0 ? 'text-rose-700' : incomeExpenseCashFlow(row) > 0 ? 'text-emerald-700' : 'text-slate-400'}>
-                            {incomeExpenseCashFlow(row) === 0 ? '0.00' : formatPKR(incomeExpenseCashFlow(row), true)}
-                          </span>
-                        </td>
-
-                        {/* 10. Discount */}
-                        <td className="py-3.5 px-4 text-right font-mono tabular-nums text-slate-600 whitespace-nowrap">
-                          {formatPKR(discountValue)}
-                        </td>
-
-                        {/* 11. Remaining (Receivable / Payable) */}
-                        <td className={`py-3.5 px-4 text-right font-mono tabular-nums whitespace-nowrap ${isAccruedComm ? 'text-amber-700 font-semibold' : remainingValue > 0 ? 'text-rose-700 font-semibold' : 'text-slate-600'}`}>
-                          <span>{formatPKR(remainingValue)}</span>
-                          {isAccruedComm && <span className="ml-1 text-[10px] text-amber-600 font-normal">(Payable)</span>}
-                        </td>
-
-                        {/* 12. Date */}
+                        {/* 8. Date / Payment Method */}
                         <td className="py-3.5 px-4 whitespace-nowrap text-slate-600">
                           <div className="leading-tight">
-                            <div className="font-medium text-[#18191B]">{dateParts.dayMonth}</div>
-                            {dateParts.year && <div className="text-[11px] text-slate-400">{dateParts.year}</div>}
+                            <div className="font-medium text-[#18191B]">{dateParts.dayMonth} {dateParts.year}</div>
+                            <div className="text-[11px] text-slate-500 font-normal mt-0.5">{formatMethod(row.paymentMethod)}</div>
                           </div>
-                        </td>
-
-                        {/* 13. Method */}
-                        <td className="py-3.5 px-4 whitespace-nowrap text-slate-600 font-medium">
-                          {formatMethod(row.paymentMethod)}
                         </td>
                       </tr>
                     );
                   })
                 ) : (
                   <tr>
-                    <td colSpan={13} className="py-16 text-center text-slate-400 font-medium">
+                    <td colSpan={8} className="py-16 text-center text-slate-400 font-medium">
                       No records found for the selected branch, dates, and filters.
                     </td>
                   </tr>
@@ -910,43 +1056,47 @@ export const IncomeExpenseReportPage: React.FC = () => {
               <tfoot className="bg-[#FAF8F9]/90 border-t-2 border-slate-200 text-xs">
                 {reportData?.totals.collections !== undefined && (
                   <tr className="border-b border-slate-200/70">
-                    <td colSpan={7} className="py-3 px-4 text-right font-semibold text-slate-700">Total Collections (Net Client Payments)</td>
-                    <td colSpan={4} className="py-3 px-4 text-right font-bold font-mono tabular-nums text-emerald-700">{formatPKR(reportData.totals.collections, true)}</td>
-                    <td colSpan={2} />
+                    <td colSpan={4} className="py-3 px-4 text-right font-semibold text-slate-700">Total Collections (Net Client Payments)</td>
+                    <td className="py-3 px-4 text-right font-bold font-mono tabular-nums text-emerald-700">+{formatPKR(reportData.totals.collections ?? signedPaid)}</td>
+                    <td colSpan={3} />
                   </tr>
                 )}
                 {/* Row 1: TOTALS (PKR) */}
                 <tr className="border-b border-slate-200/70 font-bold">
-                  <td colSpan={7} className="py-3.5 px-4 text-right text-slate-900 tracking-wide uppercase text-[11px]">
+                  <td className="py-3.5 px-4 text-left text-slate-900 tracking-wide uppercase text-[11px]">
                     TOTALS (PKR)
                   </td>
-                  {/* Col 8: Amount (Net recognized position) */}
-                  <td className={`py-3.5 px-4 text-right font-mono tabular-nums text-sm ${totals.net >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                    {totals.net >= 0 ? `+${formatPKR(totals.net)}` : `-${formatPKR(Math.abs(totals.net))}`}
+                  {/* Col 2: Service Amount (Collected Income excl tax) */}
+                  <td className="py-3.5 px-4 text-right font-mono tabular-nums text-sm text-emerald-700">
+                    +{formatPKR(totals.income)}
                   </td>
-                  {/* Col 9: Paid */}
+                  {/* Col 3: Tax Amount */}
+                  <td className="py-3.5 px-4 text-right font-mono tabular-nums text-sm text-slate-700">
+                    +{formatPKR(reportData?.totals?.collectedTax ?? reportData?.kpis?.totalCollectedTax ?? 0)}
+                  </td>
+                  {/* Col 4: Total Bill */}
+                  <td className="py-3.5 px-4 text-right font-mono tabular-nums text-sm text-[#18191B]">
+                    +{formatPKR(totalBillSum)}
+                  </td>
+                  {/* Col 5: Total Received */}
                   <td className={`py-3.5 px-4 text-right font-mono tabular-nums text-sm ${signedPaid >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                     {signedPaid >= 0 ? `+${formatPKR(signedPaid)}` : `-${formatPKR(Math.abs(signedPaid))}`}
                   </td>
-                  {/* Col 10: Discount */}
-                  <td className="py-3.5 px-4 text-right font-mono tabular-nums text-slate-600">
-                    +{formatPKR(totals.discount || 0)}
-                  </td>
-                  {/* Col 11: Remaining */}
-                  <td className="py-3.5 px-4 text-right font-mono tabular-nums text-amber-700">
+                  {/* Col 6: Remaining Dues */}
+                  <td className="py-3.5 px-4 text-right font-mono tabular-nums text-sm text-amber-700">
                     +{formatPKR(totals.remaining || 0)}
                   </td>
-                  {/* Col 12 & 13: Date & Method */}
+                  {/* Col 7 & 8 */}
                   <td colSpan={2} className="py-3.5 px-4"></td>
                 </tr>
 
                 {/* Row 2: Recognized Business Revenue */}
                 <tr className="border-b border-slate-200/70">
-                  <td colSpan={7} className="py-3 px-4 text-right font-medium text-slate-700">
+                  <td colSpan={4} className="py-3 px-4 text-right font-medium text-slate-700">
                     Recognized Business Revenue (Accrual Net Sales)
                   </td>
-                  <td colSpan={4} className="py-3 px-4 text-right font-bold font-mono tabular-nums text-emerald-700">
-                    +{formatPKR(totals.income)}
+                  <td colSpan={2} className="py-3 px-4 text-right font-bold font-mono tabular-nums text-emerald-700">
+                    +{formatPKR(reportData?.totals?.recognizedIncome ?? totals.income)}
                   </td>
                   <td colSpan={2} className="py-3 px-4"></td>
                 </tr>
@@ -954,10 +1104,10 @@ export const IncomeExpenseReportPage: React.FC = () => {
                 {/* Row 3: Cost of Goods Sold (COGS & Consumables) */}
                 {reportData?.kpis?.cogs !== undefined && (
                   <tr className="border-b border-slate-200/70">
-                    <td colSpan={7} className="py-3 px-4 text-right font-medium text-slate-700">
+                    <td colSpan={4} className="py-3 px-4 text-right font-medium text-slate-700">
                       Cost of Goods Sold (Retail COGS & Consumable Usage)
                     </td>
-                    <td colSpan={4} className="py-3 px-4 text-right font-bold font-mono tabular-nums text-amber-600">
+                    <td colSpan={2} className="py-3 px-4 text-right font-bold font-mono tabular-nums text-amber-600">
                       -{formatPKR(reportData.kpis.cogs || 0)}
                     </td>
                     <td colSpan={2} className="py-3 px-4"></td>
@@ -966,10 +1116,10 @@ export const IncomeExpenseReportPage: React.FC = () => {
 
                 {/* Row 4: Operating Overheads */}
                 <tr className="border-b border-slate-200/70">
-                  <td colSpan={7} className="py-3 px-4 text-right font-medium text-slate-700">
+                  <td colSpan={4} className="py-3 px-4 text-right font-medium text-slate-700">
                     Operating Expenses (Vouchers, Finalized Salaries & Commission Earned)
                   </td>
-                  <td colSpan={4} className="py-3 px-4 text-right font-bold font-mono tabular-nums text-rose-700">
+                  <td colSpan={2} className="py-3 px-4 text-right font-bold font-mono tabular-nums text-rose-700">
                     -{formatPKR(totalExpensesRecognized)}
                   </td>
                   <td colSpan={2} className="py-3 px-4"></td>
@@ -977,10 +1127,10 @@ export const IncomeExpenseReportPage: React.FC = () => {
 
                 {/* Row 5: Operating Profit (Revenue - COGS - Expenses) */}
                 <tr>
-                  <td colSpan={7} className="py-3 px-4 text-right font-bold text-slate-900">
+                  <td colSpan={4} className="py-3 px-4 text-right font-bold text-slate-900">
                     Net Operating Profit (Revenue − COGS − Operating Expenses)
                   </td>
-                  <td colSpan={4} className={`py-3 px-4 text-right font-bold font-mono tabular-nums text-sm ${netRealizedPosition >= 0 ? 'text-[#B82E69]' : 'text-rose-700'}`}>
+                  <td colSpan={2} className={`py-3 px-4 text-right font-bold font-mono tabular-nums text-sm ${netRealizedPosition >= 0 ? 'text-[#B82E69]' : 'text-rose-700'}`}>
                     {netRealizedPosition >= 0 ? `+${formatPKR(netRealizedPosition)}` : `-${formatPKR(Math.abs(netRealizedPosition))}`}
                   </td>
                   <td colSpan={2} className="py-3 px-4"></td>
