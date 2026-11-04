@@ -35,6 +35,22 @@ export interface PaymentAllocationResult {
 
 const round2 = (val: number): number => Math.round(val * 100) / 100;
 
+export const extractCommissionRate = (rateVal: any, fallbackVal: any = 0): number => {
+  if (rateVal !== undefined && rateVal !== null && rateVal !== '') {
+    const n = Number(rateVal);
+    if (!isNaN(n) && n > 0) {
+      return n <= 1 ? round2(n * 100) : round2(n);
+    }
+  }
+  if (fallbackVal !== undefined && fallbackVal !== null && fallbackVal !== '') {
+    const n = Number(fallbackVal);
+    if (!isNaN(n) && n > 0) {
+      return n <= 1 ? round2(n * 100) : round2(n);
+    }
+  }
+  return 0;
+};
+
 export function allocatePaymentToInvoice({
   invoice,
   paymentAmount,
@@ -152,12 +168,7 @@ export function allocatePaymentToInvoice({
             const staffCumNetCurr = netLineCurr === lNet ? round2(stAlloc) : round2((stAlloc * netLineCurr) / lNet);
             const deltaStaffNet = round2(staffCumNetCurr - staffCumNetPrev);
 
-            const rawRate = typeof st.staffCommissionRate === 'number'
-              ? st.staffCommissionRate
-              : typeof st.commissionRate === 'number'
-              ? st.commissionRate
-              : Number(line.staffCommissionRate || 0);
-            const ratePercent = rawRate > 0 && rawRate <= 1 ? round2(rawRate * 100) : round2(rawRate);
+            const ratePercent = extractCommissionRate(st.staffCommissionRate, st.commissionRate || line.staffCommissionRate);
 
             if (ratePercent > 0 && deltaStaffNet > 0) {
               const fullStaffComm = round2((stAlloc * ratePercent) / 100);
@@ -197,12 +208,7 @@ export function allocatePaymentToInvoice({
           const compCumNetCurr = netLineCurr === lNet ? round2(compAlloc) : round2((compAlloc * netLineCurr) / lNet);
           const deltaCompNet = round2(compCumNetCurr - compCumNetPrev);
 
-          const rawRate = typeof comp.staffCommissionRate === 'number'
-            ? comp.staffCommissionRate
-            : typeof comp.commissionRate === 'number'
-            ? comp.commissionRate
-            : 0;
-          const ratePercent = rawRate > 0 && rawRate <= 1 ? round2(rawRate * 100) : round2(rawRate);
+          const ratePercent = extractCommissionRate(comp.staffCommissionRate, comp.commissionRate || line.staffCommissionRate);
 
           if (ratePercent > 0 && deltaCompNet > 0) {
             const fullCompComm = round2((compAlloc * ratePercent) / 100);
@@ -227,8 +233,7 @@ export function allocatePaymentToInvoice({
           }
         }
       } else if (line.staffId && line.staffId !== 'house' && line.staffId !== 'unassigned') {
-        const rawRate = Number(line.staffCommissionRate || 0);
-        const ratePercent = rawRate > 0 && rawRate <= 1 ? round2(rawRate * 100) : round2(rawRate);
+        const ratePercent = extractCommissionRate(line.staffCommissionRate, line.commissionRate || (line.staff ? line.staff.commissionRate : 0));
 
         if (ratePercent > 0 && deltaLineNet > 0) {
           const fullLineComm = round2((lNet * ratePercent) / 100);

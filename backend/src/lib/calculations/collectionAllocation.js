@@ -17,6 +17,22 @@ export const toDec = (v) => {
 
 export const round2 = (v) => toDec(v).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
 
+export const extractCommissionRate = (rateVal, fallbackVal = 0) => {
+  if (rateVal !== undefined && rateVal !== null && rateVal !== '') {
+    const d = toDec(rateVal);
+    if (!d.isNaN() && d.greaterThan(0)) {
+      return d.lessThanOrEqualTo(1) ? round2(d.times(100)) : round2(d);
+    }
+  }
+  if (fallbackVal !== undefined && fallbackVal !== null && fallbackVal !== '') {
+    const d = toDec(fallbackVal);
+    if (!d.isNaN() && d.greaterThan(0)) {
+      return d.lessThanOrEqualTo(1) ? round2(d.times(100)) : round2(d);
+    }
+  }
+  return toDec(0);
+};
+
 /**
  * Deterministically allocate a customer payment (or dues payment) to an invoice's lines.
  *
@@ -153,14 +169,7 @@ export function allocatePaymentToInvoice({ invoice, paymentAmount, previousBillP
               : round2(stAlloc.times(netLineCurr).dividedBy(lNet));
             const deltaStaffNet = round2(staffCumNetCurr.minus(staffCumNetPrev));
 
-            const rawRate = typeof st.staffCommissionRate === 'number'
-              ? toDec(st.staffCommissionRate)
-              : typeof st.commissionRate === 'number'
-              ? toDec(st.commissionRate)
-              : toDec(line.staffCommissionRate || 0);
-            const ratePercent = rawRate.greaterThan(0) && rawRate.lessThanOrEqualTo(1)
-              ? round2(rawRate.times(100))
-              : round2(rawRate);
+            const ratePercent = extractCommissionRate(st.staffCommissionRate, st.commissionRate || line.staffCommissionRate);
 
             if (ratePercent.greaterThan(0) && deltaStaffNet.greaterThan(0)) {
               // Target full commission for this staff on this line
@@ -221,14 +230,7 @@ export function allocatePaymentToInvoice({ invoice, paymentAmount, previousBillP
             : round2(compAlloc.times(netLineCurr).dividedBy(lNet));
           const deltaCompNet = round2(compCumNetCurr.minus(compCumNetPrev));
 
-          const rawRate = typeof comp.staffCommissionRate === 'number'
-            ? toDec(comp.staffCommissionRate)
-            : typeof comp.commissionRate === 'number'
-            ? toDec(comp.commissionRate)
-            : toDec(0);
-          const ratePercent = rawRate.greaterThan(0) && rawRate.lessThanOrEqualTo(1)
-            ? round2(rawRate.times(100))
-            : round2(rawRate);
+          const ratePercent = extractCommissionRate(comp.staffCommissionRate, comp.commissionRate || line.staffCommissionRate);
 
           if (ratePercent.greaterThan(0) && deltaCompNet.greaterThan(0)) {
             const fullCompComm = round2(compAlloc.times(ratePercent).dividedBy(100));
@@ -267,12 +269,7 @@ export function allocatePaymentToInvoice({ invoice, paymentAmount, previousBillP
         }
       } else if (line.staffId && line.staffId !== 'house' && line.staffId !== 'unassigned') {
         // Single staff assigned to service line
-        const rawRate = typeof line.staffCommissionRate === 'number' || line.staffCommissionRate instanceof Decimal
-          ? toDec(line.staffCommissionRate)
-          : toDec(0);
-        const ratePercent = rawRate.greaterThan(0) && rawRate.lessThanOrEqualTo(1)
-          ? round2(rawRate.times(100))
-          : round2(rawRate);
+        const ratePercent = extractCommissionRate(line.staffCommissionRate, line.commissionRate || (line.staff ? line.staff.commissionRate : 0));
 
         if (ratePercent.greaterThan(0)) {
           const fullLineComm = round2(lNet.times(ratePercent).dividedBy(100));

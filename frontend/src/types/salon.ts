@@ -2495,6 +2495,23 @@ export interface OperatingProfitKPIs {
   priorOperatingProfit: number;
   revenueGrowthPercent: number | null;
   profitGrowthPercent: number | null;
+  outstandingDues?: number;
+
+  // Collection-based specific fields
+  totalCollectedRevenue?: number;
+  collectedServiceSales?: number;
+  collectedPackageSales?: number;
+  collectedProductSales?: number;
+  totalCollectedTax?: number;
+  totalCollections?: number;
+  collectionGrossContribution?: number;
+  totalPaidOperatingExpenses?: number;
+  paidDirectExpenses?: number;
+  paidSalaryExpenses?: number;
+  paidCommissionExpenses?: number;
+  collectionCashSurplus?: number;
+  collectionEarnedCommission?: number;
+  unpaidCommissionLiability?: number;
 }
 
 export interface OperatingProfitReportQuery {
@@ -2504,6 +2521,26 @@ export interface OperatingProfitReportQuery {
   endDate?: string;
   from?: string;
   to?: string;
+  viewMode?: 'ACCRUAL' | 'COLLECTION' | 'ALL';
+}
+
+export interface OperatingProfitReportViewData {
+  kpis: OperatingProfitKPIs;
+  statementRows: OperatingProfitStatementRow[];
+  rows: OperatingProfitDetailRow[];
+  totals: {
+    revenue: number;
+    costOfSales: number;
+    grossMargin: number;
+    operatingExpenses: number;
+    netProfit: number;
+    collectedTax?: number;
+    collections?: number;
+    cashSurplus?: number;
+    outstandingDues?: number;
+    earnedCommission?: number;
+    paidCommission?: number;
+  };
 }
 
 export interface OperatingProfitReport {
@@ -2529,7 +2566,15 @@ export interface OperatingProfitReport {
     grossMargin: number;
     operatingExpenses: number;
     netProfit: number;
+    collectedTax?: number;
+    collections?: number;
+    cashSurplus?: number;
+    outstandingDues?: number;
+    earnedCommission?: number;
+    paidCommission?: number;
   };
+  accrual?: OperatingProfitReportViewData;
+  collection?: OperatingProfitReportViewData;
 }
 
 export interface PaymentAccountSummaryItem {

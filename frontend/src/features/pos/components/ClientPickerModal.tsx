@@ -105,7 +105,7 @@ export const ClientPickerModal: React.FC<ClientPickerModalProps> = ({
                   Select Existing Client
                 </DialogTitle>
                 <DialogDescription className="text-xs text-slate-500 font-medium">
-                  Link bill to customer profile, manage Khata, and track ledger balance.
+                  Link bill to customer profile and track ledger balance.
                 </DialogDescription>
               </div>
             </div>

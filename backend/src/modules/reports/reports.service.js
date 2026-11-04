@@ -1442,7 +1442,7 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
   const dateRange = { gte: dateOnly(fromStr), lte: dateOnly(toStr) };
   const utcRange = { gte: fromDate, lte: toDate };
 
-  const [invoices, refunds, movements, expenses, payrollRuns, commissionEvents] = await Promise.all([
+  const [invoices, duesPayments, refunds, movements, expenses, payrollRuns, commissionEvents, standaloneCommPayments] = await Promise.all([
     prisma.invoice.findMany({
       where: {
         date: dateRange,
@@ -1451,16 +1451,74 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
       },
       select: {
         id: true,
+        invoiceNumber: true,
+        date: true,
         subtotal: true,
         discount: true,
         netSales: true,
+        tax: true,
+        total: true,
+        amountPaid: true,
+        amountDue: true,
+        advanceAdjusted: true,
         lines: {
           select: {
+            id: true,
             type: true,
             unitPrice: true,
             quantity: true,
             discountAllocated: true,
             netSales: true,
+            tax: true,
+            staffId: true,
+            staffName: true,
+            staffCommissionRate: true,
+            components: true,
+          },
+        },
+        payments: {
+          where: { reversedAt: null },
+          select: { id: true, kind: true, billAmountAllocated: true, createdAt: true },
+        },
+      },
+    }),
+    prisma.invoicePayment.findMany({
+      where: {
+        kind: 'DUES_COLLECTION',
+        reversedAt: null,
+        date: dateRange,
+        invoice: branchFilter,
+      },
+      include: {
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            date: true,
+            branchId: true,
+            subtotal: true,
+            discount: true,
+            netSales: true,
+            tax: true,
+            total: true,
+            advanceAdjusted: true,
+            lines: {
+              select: {
+                id: true,
+                type: true,
+                netSales: true,
+                tax: true,
+                staffId: true,
+                staffName: true,
+                staffCommissionRate: true,
+                components: true,
+              },
+            },
+            payments: {
+              where: { reversedAt: null },
+              orderBy: { createdAt: 'asc' },
+              select: { id: true, billAmountAllocated: true, createdAt: true },
+            },
           },
         },
       },
@@ -1472,6 +1530,8 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
       },
       select: {
         netReversed: true,
+        taxReversed: true,
+        cashOut: true,
       },
     }),
     prisma.stockMovement.findMany({
@@ -1499,19 +1559,23 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
     prisma.expense.findMany({
       where: {
         expenseDate: dateRange,
-        status: 'POSTED',
+        status: { not: 'DRAFT' },
         ...branchFilter,
       },
       select: {
         category: true,
         amount: true,
+        status: true,
         isReversalRecord: true,
       },
     }),
     prisma.payrollRun.findMany({
       where: {
-        status: 'FINALIZED',
-        finalizedAt: utcRange,
+        status: { in: ['FINALIZED', 'PARTIALLY_PAID', 'PAID'] },
+        OR: [
+          { finalizedAt: utcRange },
+          { generatedAt: utcRange },
+        ],
         ...branchFilter,
       },
       include: {
@@ -1519,6 +1583,10 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
           select: {
             netPayable: true,
             grossPayable: true,
+            payments: {
+              where: { status: { not: 'REVERSED' } },
+              select: { amount: true, paidAt: true },
+            },
           },
         },
       },
@@ -1533,14 +1601,38 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
         amount: true,
       },
     }),
+    prisma.commissionPayment?.findMany
+      ? prisma.commissionPayment.findMany({
+          where: {
+            status: 'COMPLETED',
+            reversedAt: null,
+            payrollPaymentId: null,
+            paidAt: utcRange,
+            ...branchFilter,
+          },
+          select: { amount: true },
+        })
+      : Promise.resolve([]),
   ]);
 
-  // 1. Turnover by streams
+  // 1. Accrual Invoiced Turnover by streams
   let serviceSales = toDec(0);
   let packageSales = toDec(0);
   let productSales = toDec(0);
+  let outstandingDues = toDec(0);
+
+  // 1b. Collection-Based Turnover by streams
+  let collectedServiceSales = toDec(0);
+  let collectedPackageSales = toDec(0);
+  let collectedProductSales = toDec(0);
+  let totalCollectedTax = toDec(0);
+  let totalEarnedCommissionOnCollections = toDec(0);
+  let totalPOSCollections = toDec(0);
 
   for (const inv of invoices) {
+    outstandingDues = outstandingDues.plus(toDec(inv.amountDue || 0));
+
+    // Accrual line breakdown
     for (const l of inv.lines) {
       const lineNet = toDec(l.netSales);
       if (l.type === 'SERVICE' || l.type === 'CUSTOM_SERVICE') serviceSales = serviceSales.plus(lineNet);
@@ -1548,15 +1640,66 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
       else if (l.type === 'PRODUCT') productSales = productSales.plus(lineNet);
       else serviceSales = serviceSales.plus(lineNet);
     }
+
+    // Collection line allocation
+    const posPayments = (inv.payments || []).filter((p) => p.kind === 'POS');
+    const posBillCollected = round2(posPayments.reduce((sum, p) => sum.plus(toDec(p.billAmountAllocated)), toDec(inv.advanceAdjusted || 0)));
+    const alloc = allocatePaymentToInvoice({ invoice: inv, paymentAmount: posBillCollected, previousBillPaid: 0 });
+
+    for (const la of alloc.lineAllocations) {
+      const lNet = la.collectedNet;
+      if (la.line.type === 'SERVICE' || la.line.type === 'CUSTOM_SERVICE') collectedServiceSales = collectedServiceSales.plus(lNet);
+      else if (la.line.type === 'PACKAGE') collectedPackageSales = collectedPackageSales.plus(lNet);
+      else if (la.line.type === 'PRODUCT') collectedProductSales = collectedProductSales.plus(lNet);
+      else collectedServiceSales = collectedServiceSales.plus(lNet);
+    }
+    totalCollectedTax = totalCollectedTax.plus(alloc.totalCollectedTax);
+    totalEarnedCommissionOnCollections = totalEarnedCommissionOnCollections.plus(alloc.totalEarnedCommission);
+    totalPOSCollections = totalPOSCollections.plus(posBillCollected);
   }
 
+  // Dues Collections allocation into streams
+  let duesCollectionsNet = toDec(0);
+  let totalDuesCollections = toDec(0);
+
+  for (const dp of duesPayments) {
+    if (!dp.invoice) continue;
+    const earlierPayments = (dp.invoice.payments || []).filter((p) => p.createdAt < dp.createdAt && p.id !== dp.id);
+    const prevPaid = earlierPayments.reduce((s, p) => s.plus(toDec(p.billAmountAllocated)), toDec(dp.invoice.advanceAdjusted || 0));
+    const alloc = allocatePaymentToInvoice({ invoice: dp.invoice, paymentAmount: toDec(dp.billAmountAllocated), previousBillPaid: prevPaid });
+
+    duesCollectionsNet = duesCollectionsNet.plus(alloc.totalCollectedNet);
+    for (const la of alloc.lineAllocations) {
+      const lNet = la.collectedNet;
+      if (la.line.type === 'SERVICE' || la.line.type === 'CUSTOM_SERVICE') collectedServiceSales = collectedServiceSales.plus(lNet);
+      else if (la.line.type === 'PACKAGE') collectedPackageSales = collectedPackageSales.plus(lNet);
+      else if (la.line.type === 'PRODUCT') collectedProductSales = collectedProductSales.plus(lNet);
+      else collectedServiceSales = collectedServiceSales.plus(lNet);
+    }
+    totalCollectedTax = totalCollectedTax.plus(alloc.totalCollectedTax);
+    totalEarnedCommissionOnCollections = totalEarnedCommissionOnCollections.plus(alloc.totalEarnedCommission);
+    totalDuesCollections = totalDuesCollections.plus(toDec(dp.billAmountAllocated));
+  }
+
+  // Refunds calculations
   let totalRefunds = toDec(0);
+  let totalRefundsTax = toDec(0);
+  let totalRefundsCashOut = toDec(0);
   for (const r of refunds) {
-    totalRefunds = totalRefunds.plus(r.netReversed);
+    totalRefunds = totalRefunds.plus(toDec(r.netReversed));
+    totalRefundsTax = totalRefundsTax.plus(toDec(r.taxReversed || 0));
+    totalRefundsCashOut = totalRefundsCashOut.plus(toDec(r.cashOut || 0));
   }
 
+  // Accrual net revenue
   const grossSales = serviceSales.plus(packageSales).plus(productSales);
   const totalNetSales = max0(grossSales.minus(totalRefunds));
+
+  // Collection net revenue
+  const totalGrossCollections = max0(totalPOSCollections.plus(totalDuesCollections).minus(totalRefundsCashOut));
+  const finalCollectedTax = max0(totalCollectedTax.minus(totalRefundsTax));
+  const collectedGrossSales = collectedServiceSales.plus(collectedPackageSales).plus(collectedProductSales);
+  const totalCollectedRevenue = max0(collectedGrossSales.minus(totalRefunds));
 
   // 2. Direct Material Costs (COGS & Consumables)
   let productCogs = toDec(0);
@@ -1584,14 +1727,24 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
   inventoryLoss = max0(inventoryLoss);
 
   const totalCostOfSales = productCogs.plus(materialConsumption);
+
+  // Accrual Gross Contribution
   const grossContribution = totalNetSales.minus(totalCostOfSales);
   const grossMarginPercent = totalNetSales.greaterThan(0)
     ? round2(grossContribution.dividedBy(totalNetSales).times(100)).toNumber()
     : 0;
 
+  // Collection Gross Contribution
+  const collectionGrossContribution = totalCollectedRevenue.minus(totalCostOfSales);
+  const collectionGrossMarginPercent = totalCollectedRevenue.greaterThan(0)
+    ? round2(collectionGrossContribution.dividedBy(totalCollectedRevenue).times(100)).toNumber()
+    : 0;
+
   // 3. Operating Overheads
   let directExpenses = toDec(0);
+  let paidDirectExpenses = toDec(0);
   const expensesByCategory = new Map();
+  const paidExpensesByCategory = new Map();
 
   for (const e of expenses) {
     const amt = toDec(e.amount);
@@ -1601,13 +1754,28 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
     const cat = e.category || 'General Operational';
     const curr = expensesByCategory.get(cat) || toDec(0);
     expensesByCategory.set(cat, curr.plus(signed));
+
+    if (e.status !== 'PENDING' && e.status !== 'ACCRUED') {
+      paidDirectExpenses = paidDirectExpenses.plus(signed);
+      const paidCurr = paidExpensesByCategory.get(cat) || toDec(0);
+      paidExpensesByCategory.set(cat, paidCurr.plus(signed));
+    }
   }
 
   let salaryExpenses = toDec(0);
+  let paidSalaryExpenses = toDec(0);
   for (const run of payrollRuns) {
     for (const p of run.payslips) {
-      // Use the stored salary, never the combined payroll DTO or payout amounts.
-      salaryExpenses = salaryExpenses.plus(p.netPayable ?? p.grossPayable ?? 0);
+      const salAmt = toDec(p.netPayable ?? p.grossPayable ?? 0);
+      salaryExpenses = salaryExpenses.plus(salAmt);
+
+      const activePayments = (p.payments || []).filter((pay) => pay.paidAt >= fromDate && pay.paidAt <= toDate);
+      if (activePayments.length > 0) {
+        const paidInPeriod = activePayments.reduce((acc, pay) => acc.plus(toDec(pay.amount)), toDec(0));
+        paidSalaryExpenses = paidSalaryExpenses.plus(paidInPeriod);
+      } else if (run.status === 'PAID') {
+        paidSalaryExpenses = paidSalaryExpenses.plus(salAmt);
+      }
     }
   }
 
@@ -1618,6 +1786,12 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
   }
   commissionExpenses = max0(commissionExpenses);
 
+  let paidCommissionExpenses = toDec(0);
+  for (const cp of (standaloneCommPayments || [])) {
+    paidCommissionExpenses = paidCommissionExpenses.plus(toDec(cp.amount));
+  }
+
+  // Accrual Operating Overheads
   const totalOperatingExpenses = directExpenses
     .plus(salaryExpenses)
     .plus(commissionExpenses)
@@ -1628,7 +1802,21 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
     ? round2(netOperatingProfit.dividedBy(totalNetSales).times(100)).toNumber()
     : 0;
 
+  // Collection Operating Overheads & Cash Surplus
+  const totalPaidOperatingExpenses = paidDirectExpenses
+    .plus(paidSalaryExpenses)
+    .plus(paidCommissionExpenses)
+    .plus(inventoryLoss);
+
+  const collectionCashSurplus = collectionGrossContribution.minus(totalPaidOperatingExpenses);
+  const collectionMarginPercent = totalCollectedRevenue.greaterThan(0)
+    ? round2(collectionCashSurplus.dividedBy(totalCollectedRevenue).times(100)).toNumber()
+    : 0;
+
+  const unpaidCommissionLiability = max0(totalEarnedCommissionOnCollections.minus(paidCommissionExpenses));
+
   return {
+    // Accrual Metrics
     serviceSales: n(serviceSales),
     packageSales: n(packageSales),
     productSales: n(productSales),
@@ -1646,8 +1834,31 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
     totalOperatingExpenses: n(totalOperatingExpenses),
     netOperatingProfit: n(netOperatingProfit),
     operatingMarginPercent,
+    outstandingDues: n(outstandingDues),
     expensesByCategory: Object.fromEntries(
       [...expensesByCategory.entries()].map(([k, v]) => [k, n(v)])
+    ),
+
+    // Collection Metrics
+    collectedServiceSales: n(collectedServiceSales),
+    collectedPackageSales: n(collectedPackageSales),
+    collectedProductSales: n(collectedProductSales),
+    duesCollectionsNet: n(duesCollectionsNet),
+    totalCollectedTax: n(finalCollectedTax),
+    totalGrossCollections: n(totalGrossCollections),
+    totalCollectedRevenue: n(totalCollectedRevenue),
+    collectionGrossContribution: n(collectionGrossContribution),
+    collectionGrossMarginPercent,
+    paidDirectExpenses: n(paidDirectExpenses),
+    paidSalaryExpenses: n(paidSalaryExpenses),
+    paidCommissionExpenses: n(paidCommissionExpenses),
+    totalPaidOperatingExpenses: n(totalPaidOperatingExpenses),
+    collectionCashSurplus: n(collectionCashSurplus),
+    collectionMarginPercent,
+    collectionEarnedCommission: n(totalEarnedCommissionOnCollections),
+    unpaidCommissionLiability: n(unpaidCommissionLiability),
+    paidExpensesByCategory: Object.fromEntries(
+      [...paidExpensesByCategory.entries()].map(([k, v]) => [k, n(v)])
     ),
   };
 };
@@ -1852,25 +2063,304 @@ export const operatingProfitReport = async (actor, query = {}) => {
     profitGrowthPercent: calcGrowth(currentMetrics.netOperatingProfit, priorMetrics.netOperatingProfit),
   };
 
-  const totals = {
+  const accrualTotals = {
     revenue: currentMetrics.totalNetSales,
     costOfSales: currentMetrics.totalCostOfSales,
     grossMargin: currentMetrics.grossContribution,
     operatingExpenses: currentMetrics.totalOperatingExpenses,
     netProfit: currentMetrics.netOperatingProfit,
+    outstandingDues: currentMetrics.outstandingDues,
   };
+
+  const accrualViewData = {
+    kpis,
+    statementRows,
+    rows: detailedRows,
+    totals: accrualTotals,
+  };
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // VIEW 2: COLLECTION-BASED PERFORMANCE
+  // ══════════════════════════════════════════════════════════════════════════════
+  const colRev = currentMetrics.totalCollectedRevenue;
+  const calcColPct = (amt) => (colRev > 0 ? round2(toDec(amt).dividedBy(colRev).times(100)).toNumber() : 0);
+  const calcColGrowth = (cur, pri) => {
+    if (!pri || pri === 0) return null;
+    return round2(toDec(cur - pri).dividedBy(Math.abs(pri)).times(100)).toNumber();
+  };
+
+  const collectionKpis = {
+    totalCollectedRevenue: currentMetrics.totalCollectedRevenue,
+    collectedServiceSales: currentMetrics.collectedServiceSales,
+    collectedPackageSales: currentMetrics.collectedPackageSales,
+    collectedProductSales: currentMetrics.collectedProductSales,
+    duesCollectionsNet: currentMetrics.duesCollectionsNet,
+    totalCollectedTax: currentMetrics.totalCollectedTax,
+    totalGrossCollections: currentMetrics.totalGrossCollections,
+    totalCostOfSales: currentMetrics.totalCostOfSales,
+    productCogs: currentMetrics.productCogs,
+    materialConsumption: currentMetrics.materialConsumption,
+    collectionGrossContribution: currentMetrics.collectionGrossContribution,
+    collectionGrossMarginPercent: currentMetrics.collectionGrossMarginPercent,
+    totalPaidOperatingExpenses: currentMetrics.totalPaidOperatingExpenses,
+    paidDirectExpenses: currentMetrics.paidDirectExpenses,
+    paidSalaryExpenses: currentMetrics.paidSalaryExpenses,
+    paidCommissionExpenses: currentMetrics.paidCommissionExpenses,
+    inventoryLoss: currentMetrics.inventoryLoss,
+    collectionCashSurplus: currentMetrics.collectionCashSurplus,
+    collectionMarginPercent: currentMetrics.collectionMarginPercent,
+    collectionEarnedCommission: currentMetrics.collectionEarnedCommission,
+    unpaidCommissionLiability: currentMetrics.unpaidCommissionLiability,
+    outstandingDues: currentMetrics.outstandingDues,
+    // Comparisons
+    priorCollectedRevenue: priorMetrics.totalCollectedRevenue,
+    priorGrossContribution: priorMetrics.collectionGrossContribution,
+    priorCashSurplus: priorMetrics.collectionCashSurplus,
+    revenueGrowthPercent: calcColGrowth(currentMetrics.totalCollectedRevenue, priorMetrics.totalCollectedRevenue),
+    profitGrowthPercent: calcColGrowth(currentMetrics.collectionCashSurplus, priorMetrics.collectionCashSurplus),
+  };
+
+  const collectionStatementRows = [
+    // ── SECTION 1: COLLECTION-BASED OPERATING TURNOVER (EXCL. TAX) ──
+    { id: 'col-sec-rev', name: '1. COLLECTION-BASED OPERATING TURNOVER (EXCL. TAX)', section: 'REVENUE', isHeader: true, currentAmount: 0, percentOfRevenue: 0, priorAmount: 0, growthPercent: null },
+    { id: 'col-rev-service', name: 'Collected Service Sales (Excl. Tax)', section: 'REVENUE', isSubItem: true, currentAmount: currentMetrics.collectedServiceSales, percentOfRevenue: calcColPct(currentMetrics.collectedServiceSales), priorAmount: priorMetrics.collectedServiceSales, growthPercent: calcColGrowth(currentMetrics.collectedServiceSales, priorMetrics.collectedServiceSales) },
+    { id: 'col-rev-package', name: 'Collected Package Sales (Excl. Tax)', section: 'REVENUE', isSubItem: true, currentAmount: currentMetrics.collectedPackageSales, percentOfRevenue: calcColPct(currentMetrics.collectedPackageSales), priorAmount: priorMetrics.collectedPackageSales, growthPercent: calcColGrowth(currentMetrics.collectedPackageSales, priorMetrics.collectedPackageSales) },
+    { id: 'col-rev-product', name: 'Collected Retail Product Sales (Excl. Tax)', section: 'REVENUE', isSubItem: true, currentAmount: currentMetrics.collectedProductSales, percentOfRevenue: calcColPct(currentMetrics.collectedProductSales), priorAmount: priorMetrics.collectedProductSales, growthPercent: calcColGrowth(currentMetrics.collectedProductSales, priorMetrics.collectedProductSales) },
+    { id: 'col-rev-dues', name: 'Subsequent Dues Collections (Excl. Tax)', section: 'REVENUE', isSubItem: true, currentAmount: currentMetrics.duesCollectionsNet, percentOfRevenue: calcColPct(currentMetrics.duesCollectionsNet), priorAmount: priorMetrics.duesCollectionsNet, growthPercent: calcColGrowth(currentMetrics.duesCollectionsNet, priorMetrics.duesCollectionsNet) },
+    { id: 'col-tot-rev', name: 'TOTAL COLLECTED OPERATING REVENUE (EXCL. TAX)', section: 'REVENUE', isTotal: true, currentAmount: currentMetrics.totalCollectedRevenue, percentOfRevenue: 100, priorAmount: priorMetrics.totalCollectedRevenue, growthPercent: calcColGrowth(currentMetrics.totalCollectedRevenue, priorMetrics.totalCollectedRevenue) },
+
+    // ── SECTION 2: STATUTORY TAX COLLECTED (SEPARATE LIABILITY) ──
+    { id: 'col-sec-tax', name: '2. STATUTORY TAX COLLECTED (SEPARATE LIABILITY)', section: 'STATUTORY_TAX', isHeader: true, currentAmount: 0, percentOfRevenue: 0, priorAmount: 0, growthPercent: null },
+    { id: 'col-tax-coll', name: 'Sales Tax Collected on Receipts (Not Salon Income)', section: 'STATUTORY_TAX', isSubItem: true, currentAmount: currentMetrics.totalCollectedTax, percentOfRevenue: calcColPct(currentMetrics.totalCollectedTax), priorAmount: priorMetrics.totalCollectedTax, growthPercent: calcColGrowth(currentMetrics.totalCollectedTax, priorMetrics.totalCollectedTax) },
+    { id: 'col-tot-gross', name: 'TOTAL GROSS INFLOW (REVENUE + TAX)', section: 'STATUTORY_TAX', isTotal: true, currentAmount: currentMetrics.totalGrossCollections, percentOfRevenue: calcColPct(currentMetrics.totalGrossCollections), priorAmount: priorMetrics.totalGrossCollections, growthPercent: calcColGrowth(currentMetrics.totalGrossCollections, priorMetrics.totalGrossCollections) },
+
+    // ── SECTION 3: COST OF SALES ──
+    { id: 'col-sec-cos', name: '3. COST OF SALES (DIRECT MATERIAL COSTS)', section: 'COGS', isHeader: true, currentAmount: 0, percentOfRevenue: 0, priorAmount: 0, growthPercent: null },
+    { id: 'col-cos-cogs', name: 'Retail Products COGS (FIFO/FEFO Landed)', section: 'COGS', isSubItem: true, currentAmount: currentMetrics.productCogs, percentOfRevenue: calcColPct(currentMetrics.productCogs), priorAmount: priorMetrics.productCogs, growthPercent: calcColGrowth(currentMetrics.productCogs, priorMetrics.productCogs) },
+    { id: 'col-cos-cons', name: 'Salon Consumable Material Consumption', section: 'COGS', isSubItem: true, currentAmount: currentMetrics.materialConsumption, percentOfRevenue: calcColPct(currentMetrics.materialConsumption), priorAmount: priorMetrics.materialConsumption, growthPercent: calcColGrowth(currentMetrics.materialConsumption, priorMetrics.materialConsumption) },
+    { id: 'col-tot-cos', name: 'TOTAL COST OF SALES', section: 'COGS', isTotal: true, currentAmount: currentMetrics.totalCostOfSales, percentOfRevenue: calcColPct(currentMetrics.totalCostOfSales), priorAmount: priorMetrics.totalCostOfSales, growthPercent: calcColGrowth(currentMetrics.totalCostOfSales, priorMetrics.totalCostOfSales) },
+
+    // ── SECTION 4: COLLECTION GROSS CONTRIBUTION ──
+    { id: 'col-sec-gc', name: '4. COLLECTION GROSS CONTRIBUTION', section: 'GROSS_PROFIT', isMajorTotal: true, currentAmount: currentMetrics.collectionGrossContribution, percentOfRevenue: currentMetrics.collectionGrossMarginPercent, priorAmount: priorMetrics.collectionGrossContribution, growthPercent: calcColGrowth(currentMetrics.collectionGrossContribution, priorMetrics.collectionGrossContribution) },
+
+    // ── SECTION 5: ACTUAL OPERATING CASH OUTFLOWS ──
+    { id: 'col-sec-opex', name: '5. ACTUAL OPERATING CASH EXPENSES & OUTFLOWS', section: 'EXPENSE', isHeader: true, currentAmount: 0, percentOfRevenue: 0, priorAmount: 0, growthPercent: null },
+    { id: 'col-exp-salary', name: 'Disbursed Salaries & Wages (Paid Outflows)', section: 'EXPENSE', isSubItem: true, currentAmount: currentMetrics.paidSalaryExpenses, percentOfRevenue: calcColPct(currentMetrics.paidSalaryExpenses), priorAmount: priorMetrics.paidSalaryExpenses, growthPercent: calcColGrowth(currentMetrics.paidSalaryExpenses, priorMetrics.paidSalaryExpenses) },
+    { id: 'col-exp-comm', name: 'Disbursed Staff Commissions (Actual Paid)', section: 'EXPENSE', isSubItem: true, currentAmount: currentMetrics.paidCommissionExpenses, percentOfRevenue: calcColPct(currentMetrics.paidCommissionExpenses), priorAmount: priorMetrics.paidCommissionExpenses, growthPercent: calcColGrowth(currentMetrics.paidCommissionExpenses, priorMetrics.paidCommissionExpenses) },
+    { id: 'col-exp-direct', name: 'Paid Direct Operating Expenses (Vouchers / Cash Out)', section: 'EXPENSE', isSubItem: true, currentAmount: currentMetrics.paidDirectExpenses, percentOfRevenue: calcColPct(currentMetrics.paidDirectExpenses), priorAmount: priorMetrics.paidDirectExpenses, growthPercent: calcColGrowth(currentMetrics.paidDirectExpenses, priorMetrics.paidDirectExpenses) },
+    { id: 'col-exp-loss', name: 'Inventory Shrinkage & Write-offs (Damage/Loss)', section: 'EXPENSE', isSubItem: true, currentAmount: currentMetrics.inventoryLoss, percentOfRevenue: calcColPct(currentMetrics.inventoryLoss), priorAmount: priorMetrics.inventoryLoss, growthPercent: calcColGrowth(currentMetrics.inventoryLoss, priorMetrics.inventoryLoss) },
+    { id: 'col-tot-opex', name: 'TOTAL PAID OPERATING CASH OUTFLOWS', section: 'EXPENSE', isTotal: true, currentAmount: currentMetrics.totalPaidOperatingExpenses, percentOfRevenue: calcColPct(currentMetrics.totalPaidOperatingExpenses), priorAmount: priorMetrics.totalPaidOperatingExpenses, growthPercent: calcColGrowth(currentMetrics.totalPaidOperatingExpenses, priorMetrics.totalPaidOperatingExpenses) },
+
+    // ── SECTION 6: COLLECTION-BASED CASH SURPLUS ──
+    { id: 'col-sec-surplus', name: '6. COLLECTION-BASED CASH SURPLUS', section: 'NET_PROFIT', isFinalNet: true, currentAmount: currentMetrics.collectionCashSurplus, percentOfRevenue: currentMetrics.collectionMarginPercent, priorAmount: priorMetrics.collectionCashSurplus, growthPercent: calcColGrowth(currentMetrics.collectionCashSurplus, priorMetrics.collectionCashSurplus) },
+
+    // ── SECTION 7: PERFORMANCE MEMORANDUM ──
+    { id: 'col-sec-memo', name: '7. COMMISSION ACCRUAL & RECEIVABLES MEMORANDUM', section: 'MEMORANDUM', isHeader: true, currentAmount: 0, percentOfRevenue: 0, priorAmount: 0, growthPercent: null },
+    { id: 'col-memo-comm-earned', name: 'Staff Commission Earned on Eligible Collections', section: 'MEMORANDUM', isSubItem: true, currentAmount: currentMetrics.collectionEarnedCommission, percentOfRevenue: calcColPct(currentMetrics.collectionEarnedCommission), priorAmount: priorMetrics.collectionEarnedCommission, growthPercent: calcColGrowth(currentMetrics.collectionEarnedCommission, priorMetrics.collectionEarnedCommission) },
+    { id: 'col-memo-comm-unpaid', name: 'Unpaid Earned Commission Liability', section: 'MEMORANDUM', isSubItem: true, currentAmount: currentMetrics.unpaidCommissionLiability, percentOfRevenue: calcColPct(currentMetrics.unpaidCommissionLiability), priorAmount: priorMetrics.unpaidCommissionLiability, growthPercent: calcColGrowth(currentMetrics.unpaidCommissionLiability, priorMetrics.unpaidCommissionLiability) },
+    { id: 'col-memo-dues', name: 'Outstanding Customer Receivables (Uncollected)', section: 'MEMORANDUM', isSubItem: true, currentAmount: currentMetrics.outstandingDues, percentOfRevenue: calcColPct(currentMetrics.outstandingDues), priorAmount: priorMetrics.outstandingDues, growthPercent: calcColGrowth(currentMetrics.outstandingDues, priorMetrics.outstandingDues) },
+  ];
+
+  const collectionDetailedRows = [
+    {
+      id: 'col-d-1',
+      accountName: 'Service Collections (Excl. Tax)',
+      classification: 'REVENUE',
+      department: 'Salon Floor / Styling',
+      currentAmount: currentMetrics.collectedServiceSales,
+      percentOfRevenue: calcColPct(currentMetrics.collectedServiceSales),
+      priorAmount: priorMetrics.collectedServiceSales,
+      varianceAmount: currentMetrics.collectedServiceSales - priorMetrics.collectedServiceSales,
+      growthPercent: calcColGrowth(currentMetrics.collectedServiceSales, priorMetrics.collectedServiceSales),
+      notes: 'Actual collected service income excluding tax (deterministic line allocation)',
+    },
+    {
+      id: 'col-d-2',
+      accountName: 'Package Collections (Excl. Tax)',
+      classification: 'REVENUE',
+      department: 'Salon Floor / Packages',
+      currentAmount: currentMetrics.collectedPackageSales,
+      percentOfRevenue: calcColPct(currentMetrics.collectedPackageSales),
+      priorAmount: priorMetrics.collectedPackageSales,
+      varianceAmount: currentMetrics.collectedPackageSales - priorMetrics.collectedPackageSales,
+      growthPercent: calcColGrowth(currentMetrics.collectedPackageSales, priorMetrics.collectedPackageSales),
+      notes: 'Actual collected bundled package sales excluding tax',
+    },
+    {
+      id: 'col-d-3',
+      accountName: 'Retail Product Collections (Excl. Tax)',
+      classification: 'REVENUE',
+      department: 'Retail Counter',
+      currentAmount: currentMetrics.collectedProductSales,
+      percentOfRevenue: calcColPct(currentMetrics.collectedProductSales),
+      priorAmount: priorMetrics.collectedProductSales,
+      varianceAmount: currentMetrics.collectedProductSales - priorMetrics.collectedProductSales,
+      growthPercent: calcColGrowth(currentMetrics.collectedProductSales, priorMetrics.collectedProductSales),
+      notes: 'Actual collected retail product sales excluding tax',
+    },
+    {
+      id: 'col-d-4',
+      accountName: 'Subsequent Dues Collections (Excl. Tax)',
+      classification: 'REVENUE',
+      department: 'Billing & Front Desk',
+      currentAmount: currentMetrics.duesCollectionsNet,
+      percentOfRevenue: calcColPct(currentMetrics.duesCollectionsNet),
+      priorAmount: priorMetrics.duesCollectionsNet,
+      varianceAmount: currentMetrics.duesCollectionsNet - priorMetrics.duesCollectionsNet,
+      growthPercent: calcColGrowth(currentMetrics.duesCollectionsNet, priorMetrics.duesCollectionsNet),
+      notes: 'Dues received in current period allocated to net revenue portion',
+    },
+    {
+      id: 'col-d-tax',
+      accountName: 'Collected Statutory Sales Tax',
+      classification: 'STATUTORY_TAX',
+      department: 'Tax Authority / FBR / PRA',
+      currentAmount: currentMetrics.totalCollectedTax,
+      percentOfRevenue: calcColPct(currentMetrics.totalCollectedTax),
+      priorAmount: priorMetrics.totalCollectedTax,
+      varianceAmount: currentMetrics.totalCollectedTax - priorMetrics.totalCollectedTax,
+      growthPercent: calcColGrowth(currentMetrics.totalCollectedTax, priorMetrics.totalCollectedTax),
+      notes: 'Sales tax collected on payments; held as statutory liability, not income',
+    },
+    {
+      id: 'col-d-5',
+      accountName: 'Retail Cost of Goods Sold (COGS)',
+      classification: 'COST_OF_SALES',
+      department: 'Inventory Asset Layer',
+      currentAmount: currentMetrics.productCogs,
+      percentOfRevenue: calcColPct(currentMetrics.productCogs),
+      priorAmount: priorMetrics.productCogs,
+      varianceAmount: currentMetrics.productCogs - priorMetrics.productCogs,
+      growthPercent: calcColGrowth(currentMetrics.productCogs, priorMetrics.productCogs),
+      notes: 'Historical landed cost from stock layers consumed on POS product sales',
+    },
+    {
+      id: 'col-d-6',
+      accountName: 'Salon Consumable Material Consumption',
+      classification: 'COST_OF_SALES',
+      department: 'Backbar / Dispensary',
+      currentAmount: currentMetrics.materialConsumption,
+      percentOfRevenue: calcColPct(currentMetrics.materialConsumption),
+      priorAmount: priorMetrics.materialConsumption,
+      varianceAmount: currentMetrics.materialConsumption - priorMetrics.materialConsumption,
+      growthPercent: calcColGrowth(currentMetrics.materialConsumption, priorMetrics.materialConsumption),
+      notes: 'Internal stock consumption for salon treatments (colors, developers)',
+    },
+    {
+      id: 'col-d-7',
+      accountName: 'Disbursed Salaries & Wages (Paid Out)',
+      classification: 'OPERATING_EXPENSE',
+      department: 'Human Resources / Payroll',
+      currentAmount: currentMetrics.paidSalaryExpenses,
+      percentOfRevenue: calcColPct(currentMetrics.paidSalaryExpenses),
+      priorAmount: priorMetrics.paidSalaryExpenses,
+      varianceAmount: currentMetrics.paidSalaryExpenses - priorMetrics.paidSalaryExpenses,
+      growthPercent: calcColGrowth(currentMetrics.paidSalaryExpenses, priorMetrics.paidSalaryExpenses),
+      notes: 'Actual cash outflows disbursed for employee salaries in period',
+    },
+    {
+      id: 'col-d-8',
+      accountName: 'Disbursed Staff Commissions (Actual Paid)',
+      classification: 'OPERATING_EXPENSE',
+      department: 'Human Resources / Commission',
+      currentAmount: currentMetrics.paidCommissionExpenses,
+      percentOfRevenue: calcColPct(currentMetrics.paidCommissionExpenses),
+      priorAmount: priorMetrics.paidCommissionExpenses,
+      varianceAmount: currentMetrics.paidCommissionExpenses - priorMetrics.paidCommissionExpenses,
+      growthPercent: calcColGrowth(currentMetrics.paidCommissionExpenses, priorMetrics.paidCommissionExpenses),
+      notes: 'Actual commission payouts disbursed to staff in period',
+    },
+    ...Object.entries(currentMetrics.paidExpensesByCategory).map(([cat, amt], idx) => {
+      const priorAmt = priorMetrics.paidExpensesByCategory[cat] || 0;
+      return {
+        id: `col-d-exp-${idx}`,
+        accountName: `Paid Expense: ${cat}`,
+        classification: 'OPERATING_EXPENSE',
+        department: 'Operations & Facilities',
+        currentAmount: amt,
+        percentOfRevenue: calcColPct(amt),
+        priorAmount: priorAmt,
+        varianceAmount: amt - priorAmt,
+        growthPercent: calcColGrowth(amt, priorAmt),
+        notes: `Actual cash and bank payments disbursed for ${cat}`,
+      };
+    }),
+    {
+      id: 'col-d-loss',
+      accountName: 'Inventory Losses & Expiry Write-Offs',
+      classification: 'OPERATING_EXPENSE',
+      department: 'Stock Custody',
+      currentAmount: currentMetrics.inventoryLoss,
+      percentOfRevenue: calcColPct(currentMetrics.inventoryLoss),
+      priorAmount: priorMetrics.inventoryLoss,
+      varianceAmount: currentMetrics.inventoryLoss - priorMetrics.inventoryLoss,
+      growthPercent: calcColGrowth(currentMetrics.inventoryLoss, priorMetrics.inventoryLoss),
+      notes: 'Stock damaged, expired or adjusted downward at landed cost',
+    },
+    {
+      id: 'col-d-memo-comm',
+      accountName: 'Earned Staff Commission Liability (Unpaid)',
+      classification: 'MEMORANDUM',
+      department: 'Commission Liability',
+      currentAmount: currentMetrics.unpaidCommissionLiability,
+      percentOfRevenue: calcColPct(currentMetrics.unpaidCommissionLiability),
+      priorAmount: priorMetrics.unpaidCommissionLiability,
+      varianceAmount: currentMetrics.unpaidCommissionLiability - priorMetrics.unpaidCommissionLiability,
+      growthPercent: calcColGrowth(currentMetrics.unpaidCommissionLiability, priorMetrics.unpaidCommissionLiability),
+      notes: 'Earned commission on collected sales not yet disbursed to staff',
+    },
+    {
+      id: 'col-d-memo-dues',
+      accountName: 'Outstanding Customer Receivables',
+      classification: 'MEMORANDUM',
+      department: 'Receivables Custody',
+      currentAmount: currentMetrics.outstandingDues,
+      percentOfRevenue: calcColPct(currentMetrics.outstandingDues),
+      priorAmount: priorMetrics.outstandingDues,
+      varianceAmount: currentMetrics.outstandingDues - priorMetrics.outstandingDues,
+      growthPercent: calcColGrowth(currentMetrics.outstandingDues, priorMetrics.outstandingDues),
+      notes: 'Total uncollected customer invoices requiring collection',
+    },
+  ];
+
+  const collectionTotals = {
+    revenue: currentMetrics.totalCollectedRevenue,
+    costOfSales: currentMetrics.totalCostOfSales,
+    grossMargin: currentMetrics.collectionGrossContribution,
+    operatingExpenses: currentMetrics.totalPaidOperatingExpenses,
+    netProfit: currentMetrics.collectionCashSurplus,
+    collectedTax: currentMetrics.totalCollectedTax,
+    totalCollections: currentMetrics.totalGrossCollections,
+    earnedCommission: currentMetrics.collectionEarnedCommission,
+    paidCommission: currentMetrics.paidCommissionExpenses,
+    unpaidCommission: currentMetrics.unpaidCommissionLiability,
+    outstandingDues: currentMetrics.outstandingDues,
+  };
+
+  const collectionViewData = {
+    kpis: collectionKpis,
+    statementRows: collectionStatementRows,
+    rows: collectionDetailedRows,
+    totals: collectionTotals,
+  };
+
+  const isCollectionRequested = query.viewMode === 'COLLECTION';
+  const defaultView = isCollectionRequested ? collectionViewData : accrualViewData;
 
   const metaWithPrior = {
     ...ctx.meta,
+    viewMode: isCollectionRequested ? 'COLLECTION' : 'ACCRUAL',
     priorFrom: prior.priorFromStr,
     priorTo: prior.priorToStr,
   };
 
   return formatReportResponse(metaWithPrior, {
-    kpis,
-    statementRows,
-    rows: detailedRows,
-    totals,
+    kpis: defaultView.kpis,
+    statementRows: defaultView.statementRows,
+    rows: defaultView.rows,
+    totals: defaultView.totals,
+    accrual: accrualViewData,
+    collection: collectionViewData,
   });
 };
 

@@ -115,13 +115,44 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
   const [cashDrawers, setCashDrawers] = useState<CashDrawer[]>([]);
   const [payrollPolicy, setPayrollPolicy] = useState<PayrollPolicyConfig | null>(null);
 
-  // Filters
-  const [selectedBranchId, setSelectedBranchId] = useState<string>(
+  const getStored = (key: string, fallback: string) => {
+    try {
+      return sessionStorage.getItem(key) || fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const initialStoredMonth = getStored('salonos_payroll_month', initialMonth);
+  const initialStoredYear = getStored('salonos_payroll_year', initialStoredMonth.slice(0, 4) || '2026');
+  const initialStoredMonthNum = getStored('salonos_payroll_month_num', initialStoredMonth.slice(5, 7) || '11');
+  const initialStoredBranch = getStored(
+    'salonos_payroll_branch',
     user.role === 'SUPER_ADMIN' ? (activeBranchId || user.branchId || allBranches[0]?.id || '') : (user.branchId || activeBranchId || '')
   );
-  const [selectedMonth, setSelectedMonth] = useState<string>(initialMonth);
-  const [selectedMonthNum, setSelectedMonthNum] = useState<string>(initialMonth.slice(5, 7) || '10');
-  const [selectedYear, setSelectedYear] = useState<string>(initialMonth.slice(0, 4) || '2026');
+
+  // Filters with session persistence across mode/page switches
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(initialStoredBranch);
+  const [selectedMonth, setSelectedMonth] = useState<string>(initialStoredMonth);
+  const [selectedMonthNum, setSelectedMonthNum] = useState<string>(initialStoredMonthNum);
+  const [selectedYear, setSelectedYear] = useState<string>(initialStoredYear);
+
+  const updateSelectedBranch = (branchId: string) => {
+    setSelectedBranchId(branchId);
+    try { sessionStorage.setItem('salonos_payroll_branch', branchId); } catch {}
+  };
+
+  const updateSelectedMonth = (year: string, monthNum: string) => {
+    const m = `${year}-${monthNum}`;
+    setSelectedYear(year);
+    setSelectedMonthNum(monthNum);
+    setSelectedMonth(m);
+    try {
+      sessionStorage.setItem('salonos_payroll_year', year);
+      sessionStorage.setItem('salonos_payroll_month_num', monthNum);
+      sessionStorage.setItem('salonos_payroll_month', m);
+    } catch {}
+  };
   const [salaryAdvances, setSalaryAdvances] = useState<SalaryAdvance[]>([]);
   const [hasFiltered, setHasFiltered] = useState<boolean>(false);
   const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
@@ -203,7 +234,7 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
     try {
       setLoading(true);
       const [runs, staff, accounts, drawers, policy, advances] = await Promise.all([
-        salonService.getPayrollRuns(effectiveBranchId, selectedMonth, user),
+        salonService.getPayrollRuns(effectiveBranchId, undefined, user),
         salonService.getStaff(effectiveBranchId),
         salonService.getOnlineAccounts(effectiveBranchId),
         salonService.getCashDrawers(effectiveBranchId),
@@ -324,16 +355,34 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
     return payrollRuns.filter((r) => r.status === 'DRAFT' && r.month === targetMonth);
   }, [payrollRuns, runType, selectedYear, selectedMonthNum, startDate]);
 
-  // Draft Payslip Rows for the main table view
+  // Draft Payslip Rows for the main table view - Strictly UNIQUE per employee and NEVER include already-finalized staff
   const draftPayslipRows = useMemo(() => {
     const list: { run: PayrollRun; payslip: PayslipRecord }[] = [];
-    draftRuns.forEach((r) => {
+    const seenStaffIds = new Set<string>();
+
+    // Sort draft runs newest first so the freshest calculation is used
+    const sortedDraftRuns = [...draftRuns].sort((a, b) => {
+      const tA = new Date(a.generatedAt || 0).getTime();
+      const tB = new Date(b.generatedAt || 0).getTime();
+      return tB - tA;
+    });
+
+    sortedDraftRuns.forEach((r) => {
       r.payslips.forEach((p) => {
+        // Exclude staff who are already finalized in this period
+        if (generatedStaffIdSet.has(p.staffId)) {
+          return;
+        }
+        // Deduplicate staff across multiple draft runs
+        if (seenStaffIds.has(p.staffId)) {
+          return;
+        }
+        seenStaffIds.add(p.staffId);
         list.push({ run: r, payslip: p });
       });
     });
     return list;
-  }, [draftRuns]);
+  }, [draftRuns, generatedStaffIdSet]);
 
   // Active advance map by staffId
   const staffLoanMap = useMemo(() => {
@@ -395,7 +444,8 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
   }, [generatedPayslipRows]);
 
   const handleSelectAll = () => {
-    setSelectedStaffIds(branchStaff.map((s) => s.id));
+    const unfinalized = branchStaff.filter((s) => !generatedStaffIdSet.has(s.id)).map((s) => s.id);
+    setSelectedStaffIds(unfinalized);
   };
 
   const handleSelectNone = () => {
@@ -403,6 +453,10 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
   };
 
   const toggleStaffSelection = (id: string) => {
+    if (generatedStaffIdSet.has(id)) {
+      toast.info('This staff member already has a finalized salary for the selected period.');
+      return;
+    }
     setSelectedStaffIds((prev) =>
       prev.includes(id) ? prev.filter((sid) => sid !== id) : [...prev, id]
     );
@@ -419,7 +473,7 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
         setSelectedMonthNum(startDate.slice(5, 7));
       }
       const [runs, staff, advances] = await Promise.all([
-        salonService.getPayrollRuns(effectiveBranchId, targetMonth, user),
+        salonService.getPayrollRuns(effectiveBranchId, undefined, user),
         salonService.getStaff(effectiveBranchId),
         salonService.getSalaryAdvances(effectiveBranchId),
       ]);
@@ -912,16 +966,39 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
             </div>
           </div>
         </div>
-        {mode === 'MANAGE' && (
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => navigate('/accounts/salary/generate')}
-            className="h-9 px-4 font-semibold gap-1.5 shadow-xs text-xs sm:text-sm bg-[#B82E69] hover:bg-[#A02358] text-white rounded-xl transition-all flex items-center cursor-pointer shrink-0"
+            className={`h-9 px-3.5 font-semibold gap-1.5 shadow-xs text-xs rounded-xl transition-all flex items-center cursor-pointer ${
+              mode === 'GENERATE'
+                ? 'bg-[#B82E69] text-white shadow-[#B82E69]/20 shadow-md'
+                : 'bg-white/80 hover:bg-white text-slate-700 border border-white/80'
+            }`}
           >
-            <Briefcase className="w-4 h-4" />
+            <Briefcase className="w-3.5 h-3.5" />
             <span>Generate Salary</span>
           </button>
-        )}
+          <button
+            type="button"
+            onClick={() => navigate('/accounts/salary/manage')}
+            className={`h-9 px-3.5 font-semibold gap-1.5 shadow-xs text-xs rounded-xl transition-all flex items-center cursor-pointer ${
+              mode === 'MANAGE'
+                ? 'bg-[#B82E69] text-white shadow-[#B82E69]/20 shadow-md'
+                : 'bg-white/80 hover:bg-white text-slate-700 border border-white/80'
+            }`}
+          >
+            <Banknote className="w-3.5 h-3.5" />
+            <span>Manage Salaries</span>
+            {generatedPayslipRows.length > 0 && (
+              <span className={`ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                mode === 'MANAGE' ? 'bg-white/20 text-white' : 'bg-[#FDF2F5] text-[#B82E69]'
+              }`}>
+                {generatedPayslipRows.length}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* GENERATE SALARY VIEW */}
@@ -948,7 +1025,7 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                   <select
                     value={effectiveBranchId}
                     onChange={(e) => {
-                      setSelectedBranchId(e.target.value);
+                      updateSelectedBranch(e.target.value);
                       setHasFiltered(false);
                     }}
                     disabled={user.role !== 'SUPER_ADMIN'}
@@ -1206,20 +1283,29 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                           <div
                             key={s.id}
                             onClick={() => toggleStaffSelection(s.id)}
-                            className="p-3.5 rounded-2xl border border-white/80 bg-white/70 hover:bg-white transition-all shadow-2xs flex items-center justify-between text-xs sm:text-sm cursor-pointer select-none"
+                            className={`p-3.5 rounded-2xl border transition-all shadow-2xs flex items-center justify-between text-xs sm:text-sm select-none ${
+                              isGenerated
+                                ? 'bg-emerald-50/50 border-emerald-200/80 cursor-default opacity-85'
+                                : isSelected
+                                ? 'border-[#B82E69]/40 bg-[#FDF2F5]/60 hover:bg-[#FDF2F5] cursor-pointer'
+                                : 'border-white/80 bg-white/70 hover:bg-white cursor-pointer'
+                            }`}
                           >
                             <div className="flex items-center gap-2.5 flex-wrap">
                               <input
                                 type="checkbox"
-                                checked={isSelected}
-                                onChange={() => {}} // row onClick handles toggle
-                                className="w-4 h-4 rounded text-[#B82E69] focus:ring-[#B82E69]/20 cursor-pointer pointer-events-none"
+                                checked={isSelected && !isGenerated}
+                                disabled={isGenerated}
+                                onChange={() => {}}
+                                className={`w-4 h-4 rounded text-[#B82E69] focus:ring-[#B82E69]/20 ${
+                                  isGenerated ? 'cursor-not-allowed opacity-40' : 'cursor-pointer pointer-events-none'
+                                }`}
                               />
                               <span className="text-slate-600 font-mono font-medium">
                                 {s.employeeCode || `EMP-${s.id.slice(-3).toUpperCase()}`}
                               </span>
                               <span className="text-slate-300">|</span>
-                              <span className="text-[#B82E69] font-bold">{s.name}</span>
+                              <span className={`font-bold ${isGenerated ? 'text-emerald-800' : 'text-[#B82E69]'}`}>{s.name}</span>
                               <span className="text-slate-300">|</span>
                               <span className="text-slate-600 capitalize">
                                 {s.designation || s.roleTitle || 'Staff'}
@@ -1233,8 +1319,8 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
 
                             <div className="pl-3">
                               {isGenerated ? (
-                                <span className="px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold rounded-full shadow-2xs">
-                                  Generated
+                                <span className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-100/80 text-emerald-800 border border-emerald-300/80 text-xs font-bold rounded-full shadow-2xs">
+                                  <span>✓ Already Finalized</span>
                                 </span>
                               ) : (
                                 <span className="px-3 py-1 bg-slate-100 text-slate-600 text-xs font-medium rounded-full">
@@ -1281,7 +1367,7 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                   <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Branch:</span>
                   <select
                     value={effectiveBranchId}
-                    onChange={(e) => setSelectedBranchId(e.target.value)}
+                    onChange={(e) => updateSelectedBranch(e.target.value)}
                     className="text-xs rounded-xl border border-white/80 bg-white/80 hover:bg-white px-3 py-1.5 text-slate-800 shadow-2xs font-medium transition-all cursor-pointer"
                   >
                     {allBranches.map((b) => (
@@ -1298,8 +1384,7 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                 <select
                   value={selectedMonthNum}
                   onChange={(e) => {
-                    setSelectedMonthNum(e.target.value);
-                    setSelectedMonth(`${selectedYear}-${e.target.value}`);
+                    updateSelectedMonth(selectedYear, e.target.value);
                   }}
                   className="text-xs rounded-xl border border-white/80 bg-white/80 hover:bg-white px-3 py-1.5 text-slate-800 shadow-2xs font-medium transition-all cursor-pointer"
                 >
@@ -1312,8 +1397,7 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                 <select
                   value={selectedYear}
                   onChange={(e) => {
-                    setSelectedYear(e.target.value);
-                    setSelectedMonth(`${e.target.value}-${selectedMonthNum}`);
+                    updateSelectedMonth(e.target.value, selectedMonthNum);
                   }}
                   className="text-xs rounded-xl border border-white/80 bg-white/80 hover:bg-white px-3 py-1.5 text-slate-800 shadow-2xs font-medium transition-all cursor-pointer"
                 >

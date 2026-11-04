@@ -188,6 +188,17 @@ const evaluateBranchMonth = async (tx, actor, branchId, month, staffId, options 
     }
 
     const staffFinalizedDates = alreadyFinalizedByStaff.get(s.id) || new Set();
+
+    // If generating for all staff (no explicit staffIds targeted), skip staff who are already 100% finalized for this period
+    if (!staffIds || !staffIds.length) {
+      const employedDates = getDatesInRange(startDate, endDate)
+        .filter((d) => (!dto.joiningDate || dto.joiningDate <= d) && (!dto.exitDate || dto.exitDate >= d));
+      const allFinalized = employedDates.length > 0 && employedDates.every((d) => staffFinalizedDates.has(d));
+      if (allFinalized) {
+        continue;
+      }
+    }
+
     const evalResult = evaluateEmployeePayroll(
       terms,
       month,
@@ -272,15 +283,26 @@ export const generatePreview = async (actor, { branchId: requested, month: reqMo
     if (!results.length) throw badRequest('NO_ELIGIBLE_STAFF', 'No employees match this payroll period and compensation type.');
 
     // Salary does not include commission; commission is managed separately via Commission page.
-    // Replace only an equivalent draft; preserve drafts for other employees, types and periods.
-    await tx.payrollRun.deleteMany({ where: { branchId, month, status: 'DRAFT', AND: [
-      { policySnapshot: { path: ['startDate'], equals: effStartDate } },
-      { policySnapshot: { path: ['endDate'], equals: effEndDate } },
-      { policySnapshot: { path: ['runType'], equals: effRunType } },
-      { policySnapshot: { path: ['compensationTypeFilter'], equals: compensationType || 'ALL' } },
-      { policySnapshot: { path: ['staffIdFilter'], equals: staffId || null } },
-      { policySnapshot: { path: ['staffIdsFilter'], equals: staffIds || null } },
-    ] } });
+    // Clean up any existing draft payslips for these specific staff members in this branch & month
+    // so no staff member is ever duplicated across multiple draft runs.
+    const targetStaffIds = results.map((r) => r.staff.id);
+    const existingDraftRuns = await tx.payrollRun.findMany({
+      where: { branchId, month, status: 'DRAFT' },
+      include: { payslips: true },
+    });
+
+    for (const dr of existingDraftRuns) {
+      await tx.payslip.deleteMany({
+        where: {
+          runId: dr.id,
+          staffId: { in: targetStaffIds },
+        },
+      });
+      const remainingCount = await tx.payslip.count({ where: { runId: dr.id } });
+      if (remainingCount === 0) {
+        await tx.payrollRun.delete({ where: { id: dr.id } });
+      }
+    }
     const run = await tx.payrollRun.create({
       data: {
         branchId, month, status: 'DRAFT',
@@ -414,6 +436,19 @@ export const finalizeRun = async (actor, runId, options = {}) => {
         }
 
         await lockPayrollExtras(tx, newFinalizedRun.id, draft.month, r.payslip);
+
+        // Remove this finalized staff member from any other pending draft runs for this branch & month
+        const otherDrafts = await tx.payrollRun.findMany({
+          where: { branchId: draft.branchId, month: draft.month, status: 'DRAFT' },
+        });
+        for (const od of otherDrafts) {
+          await tx.payslip.deleteMany({ where: { runId: od.id, staffId: targetStaffId } });
+          const remainingCount = await tx.payslip.count({ where: { runId: od.id } });
+          if (remainingCount === 0) {
+            await tx.payrollRun.delete({ where: { id: od.id } });
+          }
+        }
+
         await auditLog(tx, {
           userId: actor.id,
           userName: actor.name,
@@ -450,6 +485,19 @@ export const finalizeRun = async (actor, runId, options = {}) => {
         }
 
         await lockPayrollExtras(tx, runId, draft.month, r.payslip);
+
+        // Remove this finalized staff member from any other pending draft runs for this branch & month
+        const otherDrafts2 = await tx.payrollRun.findMany({
+          where: { branchId: draft.branchId, month: draft.month, status: 'DRAFT', id: { not: runId } },
+        });
+        for (const od of otherDrafts2) {
+          await tx.payslip.deleteMany({ where: { runId: od.id, staffId: targetStaffId } });
+          const remainingCount = await tx.payslip.count({ where: { runId: od.id } });
+          if (remainingCount === 0) {
+            await tx.payrollRun.delete({ where: { id: od.id } });
+          }
+        }
+
         await tx.payrollRun.update({
           where: { id: runId },
           data: {
@@ -553,6 +601,20 @@ export const finalizeRun = async (actor, runId, options = {}) => {
         finalizedByName: actor.name,
       },
     });
+
+    // Remove all finalized staff from any other pending draft runs for this branch & month
+    const finalizedStaffIds = results.map((r) => r.staff.id);
+    const otherDraftsBulk = await tx.payrollRun.findMany({
+      where: { branchId: draft.branchId, month: draft.month, status: 'DRAFT', id: { not: runId } },
+    });
+    for (const od of otherDraftsBulk) {
+      await tx.payslip.deleteMany({ where: { runId: od.id, staffId: { in: finalizedStaffIds } } });
+      const remainingCount = await tx.payslip.count({ where: { runId: od.id } });
+      if (remainingCount === 0) {
+        await tx.payrollRun.delete({ where: { id: od.id } });
+      }
+    }
+
     await auditLog(tx, { userId: actor.id, userName: actor.name, action: 'PAYROLL_FINALIZED', entity: 'PayrollRun', entityId: runId, branchId: draft.branchId, after: { month: draft.month } });
     return runDTO(tx, runId);
   });
