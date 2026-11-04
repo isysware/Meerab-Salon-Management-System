@@ -3008,8 +3008,24 @@ class MockSalonService implements SalonServiceContract {
     return mockStorage.getSystemDate();
   }
 
+  async getSystemDateInfo(): Promise<{ date: string; realDate: string; isOverridden: boolean; time: string }> {
+    const today = new Date().toLocaleDateString('en-CA');
+    const d = mockStorage.getSystemDate();
+    return {
+      date: d,
+      realDate: today,
+      isOverridden: d !== today,
+      time: new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Karachi', hour: '2-digit', minute: '2-digit', hour12: true }),
+    };
+  }
+
   async setSystemDate(date: string, actor?: User): Promise<void> {
     mockStorage.setSystemDate(date);
+  }
+
+  async resetSystemDate(actor?: User): Promise<void> {
+    const today = new Date().toLocaleDateString('en-CA');
+    mockStorage.setSystemDate(today);
   }
 
   // --- PHASE 3A: POS BILLING & COLLECTIONS ---
@@ -6075,7 +6091,8 @@ class MockSalonService implements SalonServiceContract {
     const inMin = parseTimeToMinutes(input.checkIn);
     if (input.checkOut) {
       const outMin = parseTimeToMinutes(input.checkOut);
-      if (!isOvernight && outMin < inMin) {
+      const isMidnightCrossing = inMin >= 11 * 60 && outMin <= 7 * 60;
+      if (!isOvernight && !isMidnightCrossing && outMin < inMin) {
         throw new Error('Check-out time cannot be earlier than check-in time unless marked as an overnight shift.');
       }
     }
@@ -6178,7 +6195,8 @@ class MockSalonService implements SalonServiceContract {
     const inMin = parseTimeToMinutes(input.checkIn);
     if (input.checkOut) {
       const outMin = parseTimeToMinutes(input.checkOut);
-      if (!isOvernight && outMin < inMin) {
+      const isMidnightCrossing = inMin >= 11 * 60 && outMin <= 7 * 60;
+      if (!isOvernight && !isMidnightCrossing && outMin < inMin) {
         throw new Error('Check-out time cannot be earlier than check-in time unless marked as an overnight shift.');
       }
     }

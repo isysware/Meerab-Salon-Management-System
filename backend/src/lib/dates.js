@@ -70,13 +70,44 @@ export const BUSINESS_DATE_KEY = 'businessDate';
 
 export const getBusinessDate = async (tx = prisma) => {
   const row = await tx.systemSetting.findUnique({ where: { key: BUSINESS_DATE_KEY } });
-  return row?.value || toDateString();
+  const realToday = toDateString();
+
+  if (row?.value) {
+    const wasUpdatedToday = row.updatedAt ? toDateString(new Date(row.updatedAt)) === realToday : false;
+    // Auto-clear stale override if it was set on a previous day and is in the past.
+    // If the user deliberately changed the date today, it remains active until reset.
+    if (!wasUpdatedToday && row.value < realToday && process.env.NODE_ENV !== 'test') {
+      try {
+        await tx.systemSetting.deleteMany({ where: { key: { in: [BUSINESS_DATE_KEY, 'BUSINESS_DATE'] } } });
+      } catch (_) {
+        // ignore race or read-only
+      }
+      return realToday;
+    }
+    return row.value;
+  }
+  return realToday;
 };
 
 export const setBusinessDate = async (dateStr, tx = prisma) => {
+  if (!dateStr || dateStr === toDateString()) {
+    await clearBusinessDate(tx);
+    return;
+  }
   await tx.systemSetting.upsert({
     where:  { key: BUSINESS_DATE_KEY },
     update: { value: dateStr },
     create: { key: BUSINESS_DATE_KEY, value: dateStr },
   });
+};
+
+export const clearBusinessDate = async (tx = prisma) => {
+  await tx.systemSetting.deleteMany({ where: { key: { in: [BUSINESS_DATE_KEY, 'BUSINESS_DATE'] } } });
+  return toDateString();
+};
+
+export const isBusinessDateOverridden = async (tx = prisma) => {
+  const row = await tx.systemSetting.findUnique({ where: { key: BUSINESS_DATE_KEY } });
+  const realToday = toDateString();
+  return Boolean(row?.value && row.value !== realToday);
 };

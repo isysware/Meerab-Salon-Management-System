@@ -62,6 +62,7 @@ attendancePolicyRoutes.put('/', c.updateAttendancePolicy);
 export const systemRoutes = Router();
 systemRoutes.use(authenticate);
 systemRoutes.get('/date', c.getSystemDate);
-systemRoutes.put('/date', authorize('SUPER_ADMIN'), validate(v.systemDateSchema), c.setSystemDate);
+systemRoutes.put('/date', authorize(...ADMINS), validate(v.systemDateSchema), c.setSystemDate);
+systemRoutes.delete('/date', authorize(...ADMINS), c.clearSystemDate);
 systemRoutes.post('/reset-test-data', authorize(...ADMINS), validate(v.resetTestDataSchema), c.resetTestData);
 

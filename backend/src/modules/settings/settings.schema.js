@@ -84,7 +84,7 @@ export const updatePayrollPolicySchema = z.object({
 
 // ── System (business) date ───────────────────────────────────────────────────
 export const systemDateSchema = z.object({
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format'),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format').nullable().optional(),
 });
 
 // ── Test Data Reset ──────────────────────────────────────────────────────────

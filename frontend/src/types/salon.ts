@@ -2155,7 +2155,27 @@ export interface DetailedIncomePayment {
   kind?: string;
 }
 
+export interface ReportRefundHistory {
+  id: string;
+  reference?: string;
+  date: string;
+  amount: number;
+  cashOut: number;
+  net: number;
+  tax: number;
+  tip: number;
+  method?: string;
+  reason?: string;
+}
+
 export interface DetailedIncomeRow {
+  lineId?: string;
+  originalInvoiceDate?: string;
+  originalNetAmount?: number;
+  originalBillAmount?: number;
+  outstanding?: number;
+  refundAmount?: number;
+  refundHistory?: ReportRefundHistory[];
   id: string;
   invoiceId: string;
   invoiceNumber: string;
@@ -2244,6 +2264,7 @@ export interface DetailedIncomeReportQuery {
 }
 
 export interface DetailedIncomeReport {
+  displayRows?: DetailedIncomeRow[];
   meta: {
     branchId: string;
     branchName: string;
@@ -2276,6 +2297,11 @@ export type IncomeExpenseItemType =
   | 'INVENTORY_WRITEOFF';
 
 export interface IncomeExpenseReportRow {
+  originalInvoiceDate?: string;
+  refundAmount?: number;
+  refundCashOut?: number;
+  refundHistory?: ReportRefundHistory[];
+  reportEvents?: Array<{ id: string; reference?: string; date: string; type: string; amount: number; net: number; tax: number; tip: number; method?: string }>;
   invoiceId?: string;
   invoiceBillTotal?: number;
   tipAmount?: number;
@@ -2349,6 +2375,7 @@ export interface IncomeExpenseReportQuery {
 }
 
 export interface IncomeExpenseReport {
+  displayRows?: IncomeExpenseReportRow[];
   meta: {
     branchId: string;
     branchName: string;

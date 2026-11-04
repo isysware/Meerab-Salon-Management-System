@@ -22,6 +22,7 @@ import {
   PanelLeft,
   Calendar,
   RotateCcw,
+  Clock,
   Bell,
   X,
 } from 'lucide-react';
@@ -40,8 +41,23 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenMobileDrawer,
   breadcrumbs,
 }) => {
-  const { user, activeBranchId, allBranches, logout, demoDate, setDemoDate } = useAuth();
+  const { user, activeBranchId, allBranches, logout, demoDate, setDemoDate, isDateOverridden, resetDemoDate } = useAuth();
   const { navigate } = useRouter();
+
+  const canManageDate = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
+
+  const [liveTime, setLiveTime] = useState<string>(() =>
+    new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Karachi', hour: '2-digit', minute: '2-digit', hour12: true })
+  );
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setLiveTime(
+        new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Karachi', hour: '2-digit', minute: '2-digit', hour12: true })
+      );
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const [notifications, setNotifications] = useState<Array<{
     id: string;
@@ -198,23 +214,51 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* RIGHT ZONE: Branch Selector + Demo Date + User Profile Menu */}
       <div className="flex flex-wrap sm:flex-nowrap w-full sm:w-auto shrink-0 items-center justify-between gap-2 sm:gap-2.5">
-        {/* SHARED DEMO DATE SELECTOR (SHADCN MORPHISM PILL) */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border-0 bg-white/80 backdrop-blur-xl shadow-2xs hover:bg-white transition-all text-xs group cursor-pointer">
+        {/* SHARED OPERATIONAL DATE & LIVE CLOCK (SHADCN MORPHISM PILL) */}
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border-0 bg-white/80 backdrop-blur-xl shadow-2xs hover:bg-white transition-all text-xs group">
           <div className="w-6 h-6 rounded-lg bg-[#FDF2F5] text-[#B82E69] flex items-center justify-center border-0 shadow-2xs shrink-0 group-hover:bg-[#B82E69] group-hover:text-white transition-colors">
             <Calendar className="w-3.5 h-3.5" />
           </div>
           <span className="text-[11px] font-bold text-[#78616C]">Date:</span>
-          <input
-            type="date"
-            value={demoDate}
-            onChange={(e) => {
-              if (e.target.value) {
-                setDemoDate(e.target.value);
-              }
-            }}
-            className="text-xs font-mono font-bold text-[#18191B] bg-transparent border-none p-0 focus:outline-none focus:ring-0 cursor-pointer w-[115px]"
-            title="Operational System Date (changes trigger immediate dashboard and financial reconciliation)"
-          />
+          {canManageDate ? (
+            <input
+              type="date"
+              value={demoDate}
+              onChange={(e) => {
+                if (e.target.value) {
+                  setDemoDate(e.target.value);
+                }
+              }}
+              className="text-xs font-mono font-bold text-[#18191B] bg-transparent border-none p-0 focus:outline-none focus:ring-0 cursor-pointer w-[115px]"
+              title="Operational System Date (changes trigger immediate dashboard and financial reconciliation)"
+            />
+          ) : (
+            <span className="text-xs font-mono font-bold text-[#18191B]">{demoDate}</span>
+          )}
+
+          {/* Live Karachi Time Clock */}
+          <div className="flex items-center gap-1 pl-2 border-l border-slate-200/80 text-[11px] font-mono font-semibold text-slate-600" title="Live Karachi Time">
+            <Clock className="w-3 h-3 text-[#B82E69]" />
+            <span>{liveTime}</span>
+          </div>
+
+          {/* Simulated / Date Overridden Indicator & Reset to Today Button */}
+          {isDateOverridden && (
+            <div className="flex items-center gap-1.5 pl-1.5 border-l border-amber-200/80">
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 animate-pulse border border-amber-300">
+                Simulated
+              </span>
+              <button
+                type="button"
+                onClick={() => resetDemoDate()}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition cursor-pointer"
+                title="Reset operational system date to actual today"
+              >
+                <RotateCcw className="w-2.5 h-2.5" />
+                Reset
+              </button>
+            </div>
+          )}
         </div>
 
         {/* QUICK RESET DATA BUTTON (VISIBLE IN FRONT FOR TESTING) */}

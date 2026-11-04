@@ -1844,8 +1844,8 @@ export const POSBillingPage: React.FC = () => {
       const isDueRemaining = (calculations.fullInvoiceTotal - retainedTotal) > 0.01;
 
       if (isDueRemaining) {
-        const cleanName = (clientName || '').trim();
-        const cleanPhone = (clientPhone || '').replace(/\D/g, '');
+        const cleanName = (clientName || selectedClient?.name || '').trim();
+        const cleanPhone = (clientPhone || selectedClient?.phone || '').replace(/\D/g, '');
         const isAnonymous = !cleanName || cleanName.toLowerCase() === 'walk-in customer' || cleanName.toLowerCase() === 'walk-in' || cleanName.toLowerCase() === 'n/a';
         if (isAnonymous) {
           throw new Error('A specific customer name is required for Partial or Unpaid invoices so dues are tracked in their Client Ledger.');
@@ -1907,7 +1907,7 @@ export const POSBillingPage: React.FC = () => {
         bookingUpdate: loadedBooking && hasBookingChanges ? cartToBookingUpdate(loadedBooking, cart, discountType, discountValue, bookingChangeReason.trim() || 'POS billing checkout adjustments') : undefined,
         branchId: currentBranch.id,
         appointmentId: loadedAppointment?.id,
-        clientId: selectedClientId,
+        clientId: selectedClientId || selectedClient?.id,
         clientName: clientName?.trim() || selectedClient?.name || 'Walk-in Customer',
         clientPhone: clientPhone?.trim() || selectedClient?.phone || 'N/A',
         customerSource,

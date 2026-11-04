@@ -6,6 +6,7 @@
 
 import { accruedCommissionForPeriod } from './fullCommissionAccrual.js';
 import { recognizedSalaryExpense } from './salaryRecognition.js';
+import { loadInvoicePresentation, groupLedgerInvoices } from './invoicePresentation.js';
 import { loadStaffLoanMovements, currentStaffLoanReceivable, STAFF_LOAN_CATEGORY } from './staffLoanMovements.js';
 import prisma from '../../config/prisma.js';
 import { forbidden, notFound } from '../../lib/AppError.js';
@@ -628,6 +629,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     const bId = ref.invoice?.branchId || '';
     rawRows.push({
       id: `ref-${ref.id}`,
+      invoiceId: ref.invoice?.id,
       date: ymd(ref.refundDate),
       type: 'INCOME',
       category: 'Sales Refund / Reversal',
@@ -1119,9 +1121,14 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     refundsPaid: n(totalRefundsPaid),
   };
 
-  return formatReportResponse(ctx.meta, {
+  const invoiceContext = await loadInvoicePresentation({ ...branchFilter,
+    ...(actor.role === 'ACCOUNTANT' ? { processedByUserId: actor.id } : {}) },
+    [...new Set(filteredRows.filter(r => r.type === 'INCOME').map(r => r.invoiceId).filter(Boolean))], ctx.toStr);
+  const displayRows = groupLedgerInvoices(filteredRows, invoiceContext);
+  return formatReportResponse({ ...ctx.meta, displayBasis: 'One invoice per display row. Amounts are selected-period events; original dates and bills are reference information. Outstanding and refund status are as of period end.' }, {
     kpis,
     rows: filteredRows,
+    displayRows,
     totals,
     categories: allCategories,
   });

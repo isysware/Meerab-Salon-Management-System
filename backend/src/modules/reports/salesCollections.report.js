@@ -4,6 +4,7 @@ import { dateOnly, ymd } from '../../lib/dates.js';
 import { toDec, round2 } from '../../lib/money.js';
 import { resolveReportContext, formatReportResponse } from '../../lib/reportRange.js';
 import { invoiceBalanceAsOf, collectionTotals, collectionReceipts } from './collectionEvents.js';
+import { invoicePresentation } from './invoicePresentation.js';
 
 const n = v => round2(v ?? 0).toNumber();
 const sum = (rows, key) => rows.reduce((s, r) => s.plus(r[key] ?? 0), toDec(0));
@@ -15,7 +16,6 @@ export const salesInvoicesReport = async (actor, q = {}) => {
   const scope = { ...(ctx.branchId ? { branchId: ctx.branchId } : {}),
     ...(seller && seller !== 'ALL' ? { processedByUserId: seller } : {}),
     ...(q.clientId ? { clientId: q.clientId } : {}),
-    ...(q.lifecycle && q.lifecycle !== 'ALL' ? { lifecycle: q.lifecycle } : {}),
     ...(q.staffId && q.staffId !== 'ALL' ? { OR: [{ staffId: q.staffId },
       { lines: { some: { OR: [{ staffId: q.staffId }, { components: { some: { staffId: q.staffId } } }] } } }] } : {}),
   };
@@ -34,6 +34,8 @@ export const salesInvoicesReport = async (actor, q = {}) => {
   for (const inv of invoices) {
     if (search && ![inv.invoiceNumber, inv.clientName, inv.clientPhone].some(v => v?.toLowerCase().includes(search))) continue;
     const balance = invoiceBalanceAsOf(inv, ctx.toStr);
+    const presentation = invoicePresentation(inv, ctx.toStr);
+    if (q.lifecycle && q.lifecycle !== 'ALL' && q.lifecycle !== presentation.lifecycle) continue;
     const status = balance.outstanding.isZero() ? 'PAID' : balance.retainedBill.gt(0) ? 'PARTIAL' : 'UNPAID';
     if (q.paymentStatus && q.paymentStatus !== 'ALL' && q.paymentStatus !== status) continue;
     const receipts = balance.events.filter(e => inPeriod(e.date)
@@ -53,7 +55,7 @@ export const salesInvoicesReport = async (actor, q = {}) => {
       soldByUserId: inv.processedByUserId, soldByName: inv.processedByName,
       staffSummary: [...new Set(inv.lines.flatMap(l => [l.staffName, ...(l.components || []).map(c => c.staffName)]).filter(Boolean))].join(', ') || 'Unassigned',
       linesSummary: inv.lines.map(l => `${l.name} (${l.quantity})`).join(', '),
-      paymentMethod: inv.paymentMethod, paymentStatus: status, lifecycle: inv.lifecycle,
+      paymentMethod: inv.paymentMethod, paymentStatus: status, lifecycle: presentation.lifecycle,
       gross: n(inv.subtotal), discount: n(inv.discount), netSales: n(inv.netSales), tax: n(inv.tax), tip: n(inv.tip), total: n(inv.total),
       taxCharged: n(postedTax), taxReversed: n(refundTax), netTaxLiability: n(postedTax.minus(refundTax)),
       paid: collection.actualCollections, cashPaid: cash, onlinePaid: n(toDec(collection.actualCollections).minus(cash)),

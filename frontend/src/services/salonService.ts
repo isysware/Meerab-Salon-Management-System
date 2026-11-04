@@ -394,7 +394,9 @@ export interface SalonServiceContract {
   deletePaymentAccount(id: string, actor?: User): Promise<{ id: string; deleted?: boolean; archived?: boolean; message: string }>;
 
   getSystemDate(): Promise<string>;
+  getSystemDateInfo?(): Promise<{ date: string; realDate: string; isOverridden: boolean; time: string }>;
   setSystemDate(date: string, actor?: User): Promise<void>;
+  resetSystemDate?(actor?: User): Promise<void>;
 
   // Phase 3A: POS Billing, Customer Lookup and Collections
   getInvoices(branchId: string | 'ALL', filter?: { status?: InvoiceStatus; date?: string; startDate?: string; endDate?: string }): Promise<Invoice[]>;

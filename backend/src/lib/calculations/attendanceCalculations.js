@@ -60,7 +60,7 @@ function evaluateEarlyExit(checkOutTimeStr, scheduledEndTimeStr, earlyGraceMinut
   }
   let checkOutMin = parseTimeToMinutes(checkOutTimeStr);
   let endMin = parseTimeToMinutes(scheduledEndTimeStr);
-  if (isOvernightShift) {
+  if (isOvernightShift || endMin <= 6 * 60 || (checkOutMin <= 6 * 60 && endMin <= 12 * 60)) {
     if (checkOutMin < 12 * 60) checkOutMin += 24 * 60;
     if (endMin < 12 * 60) endMin += 24 * 60;
   }

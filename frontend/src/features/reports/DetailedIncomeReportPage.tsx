@@ -148,12 +148,13 @@ export const DetailedIncomeReportPage: React.FC = () => {
 
   const filteredRows = useMemo(() => {
     if (!reportData) return [];
-    return reportData.rows;
+    return reportData.displayRows ?? reportData.rows;
   }, [reportData]);
 
   const handleExportCsv = () => {
     if (!reportData || !reportData.rows.length) return;
     const meta: [string, string][] = [
+      ['Display Basis', 'One row per original invoice/service line. Net amounts use selected payment/refund dates; original bills are reference values.'],
       ['Gross Customer Collection (Incl. Tax/Tips)', formatPKR(reportData.kpis.totalPaid)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -184,12 +185,12 @@ export const DetailedIncomeReportPage: React.FC = () => {
       'Created By',
     ];
 
-    const rows = reportData.rows.map((r, i) => [
+    const rows = (reportData.displayRows ?? reportData.rows).map((r, i) => [
       i + 1,
       r.invoiceNumber,
       formatDateDisplay(r.date),
       r.incomeSource,
-      r.itemName,
+      r.itemName + ' | Original net: ' + formatPKR(r.originalNetAmount ?? r.netSales) + '; Original line bill (incl. tax): ' + formatPKR(r.originalBillAmount ?? r.total) + '; Period refund credit (incl. tax): ' + formatPKR(r.refundAmount ?? 0) + '; Outstanding at period end: ' + formatPKR(r.outstanding ?? 0) + '; Dated events: ' + r.payments.map(p => p.date + ' ' + (p.receiptNumber || p.id) + ' ' + formatPKR(p.amount)).join('; '),
       r.clientName,
       r.staffName,
       r.branchName,
@@ -200,7 +201,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
       r.recognizedNet.toFixed(2),
       r.tax.toFixed(2),
       r.total.toFixed(2),
-      r.paymentStatus,
+      r.lifecycle === 'REFUNDED' || r.lifecycle === 'PARTIALLY_REFUNDED' ? r.lifecycle : r.paymentStatus,
       r.lifecycle,
       r.createdByName,
     ]);
@@ -214,6 +215,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
       return;
     }
     const meta: [string, string][] = [
+      ['Display Basis', 'One row per original invoice/service line. Net amounts use selected payment/refund dates; original bills are reference values.'],
       ['Gross Customer Collection (Incl. Tax/Tips)', formatPKR(reportData.kpis.totalPaid)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -236,18 +238,18 @@ export const DetailedIncomeReportPage: React.FC = () => {
       'Status',
     ];
 
-    const rows = reportData.rows.map((r, i) => [
+    const rows = (reportData.displayRows ?? reportData.rows).map((r, i) => [
       i + 1,
       r.invoiceNumber,
       formatDateDisplay(r.date),
       r.incomeSource,
-      r.itemName,
+      r.itemName + ' | Original net: ' + formatPKR(r.originalNetAmount ?? r.netSales) + '; Original line bill (incl. tax): ' + formatPKR(r.originalBillAmount ?? r.total) + '; Period refund credit (incl. tax): ' + formatPKR(r.refundAmount ?? 0) + '; Outstanding at period end: ' + formatPKR(r.outstanding ?? 0) + '; Dated events: ' + r.payments.map(p => p.date + ' ' + (p.receiptNumber || p.id) + ' ' + formatPKR(p.amount)).join('; '),
       r.clientName,
       r.staffName,
       formatPKR(r.recognizedNet),
       formatPKR(r.tax),
       formatPKR(r.total),
-      r.paymentStatus,
+      r.lifecycle === 'REFUNDED' || r.lifecycle === 'PARTIALLY_REFUNDED' ? r.lifecycle : r.paymentStatus,
     ]);
 
     printReportWindow({
@@ -604,6 +606,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
                             {/* Item Name */}
                             <td className="py-3.5 px-3 font-semibold text-slate-900">
                               <div>{row.itemName}</div>
+                              <div className="text-[10px] font-normal text-slate-500">Original net: PKR {formatPKR(row.originalNetAmount ?? row.netSales)}; original bill: PKR {formatPKR(row.originalBillAmount ?? row.total)}; period refund credit: PKR {formatPKR(row.refundAmount ?? 0)}; invoice outstanding: PKR {formatPKR(row.outstanding ?? 0)}</div>
                               {row.itemCode && row.itemCode !== '—' && (
                                 <div className="text-[11px] text-slate-400 font-normal">{row.itemCode}</div>
                               )}
@@ -656,7 +659,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
 
                             {/* Status */}
                             <td className="py-3.5 px-3 text-center whitespace-nowrap">
-                              {row.paymentStatus === 'PAID' ? (
+                              {row.lifecycle === 'REFUNDED' || row.lifecycle === 'PARTIALLY_REFUNDED' ? <span className="text-rose-700 font-semibold">{row.lifecycle === 'REFUNDED' ? 'Refunded' : 'Partially Refunded'}</span> : row.paymentStatus === 'PAID' ? (
                                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-[#10B981] text-white">
                                   Paid
                                 </span>
@@ -712,7 +715,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
                                     <div className="flex items-center justify-between mb-2">
                                       <span className="font-bold text-[#23151D]">Invoice Payment Audit (Cash / Bank Accounts):</span>
                                       <span className="text-[11px] text-slate-500 italic">
-                                        * Collections are shown on payment dates, net of tax and tips. Later refunds and reversals appear on their own dates.
+                                        * Collections are shown on payment dates, net of tax and tips. Dated payments and refunds are grouped under their original invoice/service line. Only selected-period events affect these totals.
                                       </span>
                                     </div>
                                     {row.payments && row.payments.length > 0 ? (

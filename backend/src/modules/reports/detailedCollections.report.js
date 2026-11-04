@@ -3,6 +3,7 @@ import { forbidden } from '../../lib/AppError.js';
 import { round2, toDec } from '../../lib/money.js';
 import { resolveReportContext, formatReportResponse } from '../../lib/reportRange.js';
 import { loadCollectionEvents } from './collectionEvents.js';
+import { invoicePresentation, groupIncomeLines } from './invoicePresentation.js';
 
 const n = value => round2(value ?? 0).toNumber();
 
@@ -19,10 +20,13 @@ export async function detailedIncomeReport(actor, query = {}) {
   const names = new Map(branches.map(b => [b.id, b.name]));
   const search = query.search?.trim().toLowerCase();
   const rows = [];
+  const contexts = new Map();
   for (const e of events) {
     const inv = e.invoice, line = e.line;
-    if (query.paymentStatus && query.paymentStatus !== 'ALL' && inv.status !== query.paymentStatus) continue;
-    if (query.lifecycle && query.lifecycle !== 'ALL' && inv.lifecycle !== query.lifecycle) continue;
+    if (!contexts.has(inv.id)) contexts.set(inv.id, invoicePresentation(inv, ctx.toStr));
+    const snapshot = contexts.get(inv.id);
+    if (query.paymentStatus && query.paymentStatus !== 'ALL' && snapshot.status !== query.paymentStatus) continue;
+    if (query.lifecycle && query.lifecycle !== 'ALL' && snapshot.lifecycle !== query.lifecycle) continue;
     if (query.paymentMethod && query.paymentMethod !== 'ALL' && e.record.method !== query.paymentMethod) continue;
     const source = line.type === 'CUSTOM_SERVICE' ? 'SERVICE' : line.type;
     if (query.sourceType && query.sourceType !== 'ALL' && source !== query.sourceType) continue;
@@ -40,6 +44,9 @@ export async function detailedIncomeReport(actor, query = {}) {
     const discount = round2(toDec(line.discountAllocated).times(fraction));
     rows.push({
       id: e.id, invoiceId: inv.id, invoiceNumber: inv.invoiceNumber, date: e.date, time: e.record.time || '',
+      lineId: line.id, originalInvoiceDate: snapshot.originalDate,
+      originalNetAmount: n(line.netSales), originalBillAmount: n(toDec(line.netSales).plus(line.tax || 0)),
+      refundHistory: snapshot.refundHistory,
       eventType: e.kind, branchId: inv.branchId, branchName: names.get(inv.branchId) || 'Branch',
       incomeSource: source, clientId: inv.clientId, clientName: inv.clientName || 'Walk-in Customer', clientPhone: inv.clientPhone,
       itemCode: line.code || '', itemName: line.name, staffId: query.staffId !== 'ALL' && query.staffId ? query.staffId : line.staffId,
@@ -48,8 +55,8 @@ export async function detailedIncomeReport(actor, query = {}) {
       quantity: Number(line.quantity || 1), unitPrice: n(line.unitPrice),
       gross: n(net.plus(discount)), discount: n(discount), netSales: n(net), refundedNet: net.lt(0) ? n(net.negated()) : 0,
       recognizedNet: n(net), collectedNet: n(net), taxRate: n(toDec(line.taxRate).times(100)),
-      tax: n(tax), netTax: n(tax), total: n(net.plus(tax)), tip: n(tip), outstanding: n(e.outstanding),
-      paymentStatus: inv.status, lifecycle: inv.lifecycle, createdByName: inv.processedByName,
+      tax: n(tax), netTax: n(tax), total: n(net.plus(tax)), tip: n(tip), outstanding: snapshot.outstanding,
+      paymentStatus: snapshot.status, lifecycle: snapshot.lifecycle, createdByName: inv.processedByName,
       payments: [{ id: e.id, receiptNumber: e.record.receiptNumber || e.record.refundNumber,
         amount: n(net.plus(tax).plus(tip)), method: e.record.method || 'CASH',
         paymentAccountId: e.record.paymentAccountId || e.record.accountId,
@@ -75,7 +82,7 @@ export async function detailedIncomeReport(actor, query = {}) {
     const countedLines = new Set();
     let unitCount = 0;
     for (const r of selected) {
-      const lineKey = `${r.invoiceId}:${r.itemCode || r.itemName}`;
+      const lineKey = `${r.invoiceId}:${r.lineId}`;
       if (!countedLines.has(lineKey)) {
         countedLines.add(lineKey);
         unitCount += Number(r.quantity || 1);
@@ -83,5 +90,5 @@ export async function detailedIncomeReport(actor, query = {}) {
     }
     kpis[`${type.toLowerCase()}Count`] = unitCount;
   }
-  return formatReportResponse(ctx.meta, { kpis, rows, totals });
+  return formatReportResponse(ctx.meta, { kpis, rows, displayRows: groupIncomeLines(rows), totals });
 }

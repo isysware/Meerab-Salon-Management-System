@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { db } = vi.hoisted(() => {
   const db = {};
-  for (const name of ['branch', 'staff', 'user', 'invoice', 'invoiceRefund', 'invoicePayment', 'stockMovement', 'expense', 'payrollRun', 'commissionEvent', 'drawerMovement', 'accountMovement', 'salaryAdvance', 'bookingHistory']) {
+  for (const name of ['branch', 'staff', 'user', 'invoice', 'invoiceRefund', 'invoicePayment', 'stockMovement', 'expense', 'payrollRun', 'commissionEvent', 'drawerMovement', 'accountMovement', 'salaryAdvance', 'bookingHistory', 'tipReceipt']) {
     db[name] = { findMany: vi.fn(), findUnique: vi.fn() };
   }
   db.payrollPayment = { findMany: vi.fn(() => { throw new Error('Payouts must not be recognized again'); }) };
@@ -70,9 +70,9 @@ describe('Operating Profit recognition', () => {
     for (const table of Object.values(db)) table.findMany.mockResolvedValue([]);
     db.invoice.findMany.mockResolvedValue([{
       id: 'partial', invoiceNumber: 'INV-0002', date: new Date('2026-10-01'),
-      branchId: actor.branchId, netSales: 1000, subtotal: 1000, discount: 0,
+      branchId: actor.branchId, netSales: 1000, tax: 0, subtotal: 1000, discount: 0,
       amountDue: 0, status: 'PARTIAL', paymentMethod: method,
-      payments: [{ kind: 'POS', billAmountAllocated: 400 }, { kind: 'DUES_COLLECTION', billAmountAllocated: 600 }],
+      payments: [{ id:'p1', date:new Date('2026-10-01'), kind: 'POS', billAmountAllocated: 400 }, { id:'p2', date:new Date('2026-10-15'), kind: 'DUES_COLLECTION', billAmountAllocated: 600 }],
     }]);
     db[model].findMany.mockResolvedValue([{
       id: 'collection', createdAt: new Date('2026-10-15'), branchId: actor.branchId,

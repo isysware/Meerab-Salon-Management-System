@@ -37,8 +37,15 @@ export const getAttendancePolicy    = send((req) => s.getAttendancePolicy(req.us
 export const updateAttendancePolicy = send((req) => s.updateAttendancePolicy(req.body, req.user));
 
 // System date
-export const getSystemDate = send(async () => ({ date: await s.getSystemDate() }));
-export const setSystemDate = send(async (req) => ({ date: await s.setSystemDate(req.body.date, req.user) }));
+export const getSystemDate   = send(async () => s.getSystemDateInfo());
+export const setSystemDate   = send(async (req) => {
+  await s.setSystemDate(req.body?.date, req.user);
+  return s.getSystemDateInfo();
+});
+export const clearSystemDate = send(async (req) => {
+  await s.clearSystemDate(req.user);
+  return s.getSystemDateInfo();
+});
 
 // Test data reset
 export const resetTestData = send((req) => s.resetTestData(req.body, req.user));

@@ -1,6 +1,14 @@
 import type { IncomeExpenseReportRow } from '../../types/salon';
 import Decimal from 'decimal.js';
 
+/** Exported inside the invoice row, preserving each selected event's original reference/date. */
+export function invoiceEventDetails(row: IncomeExpenseReportRow): string {
+  if (!row.reportEvents) return '';
+  const history = (row.refundHistory || []).map(r => `${r.reference || r.id} ${r.date}: refund ${r.amount.toFixed(2)}, cash ${r.cashOut.toFixed(2)}`).join('; ');
+  return `Original invoice: ${row.originalInvoiceDate || row.date}; Period refund: ${(row.refundAmount || 0).toFixed(2)}; Period net collection: ${(row.collectionAmount || 0).toFixed(2)}; Outstanding at period end: ${(row.remainingDues || 0).toFixed(2)}; Events: ` +
+    row.reportEvents.map(e => `${e.reference || e.id} ${e.date} ${e.type} ${e.amount.toFixed(2)} ${e.method || ''}`).join('; ') + (history ? `; Refund history: ${history}` : '');
+}
+
 export const isCustomerInvoiceEntry = (row: IncomeExpenseReportRow) =>
   row.type === 'INCOME' && ['POS Invoice', 'POS Dues Collection', 'Sales Refund'].includes(row.source);
 

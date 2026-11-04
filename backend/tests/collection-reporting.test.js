@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+const { transformSync } = createRequire(new URL('../../frontend/package.json', import.meta.url))('esbuild');
 
 const { db, state } = vi.hoisted(() => {
   const models = ['invoice', 'branch', 'expense', 'expenseCategory', 'payrollPayment', 'commissionPayment', 'payslip',
@@ -13,7 +16,7 @@ vi.mock('../src/lib/balances.js', async original => ({ ...await original(), acco
 vi.mock('../src/modules/cash/cash.service.js', async original => ({ ...await original(), drawerDTOs: vi.fn(async () => []) }));
 import { allocatePaymentToInvoice } from '../src/lib/calculations/collectionAllocation.js';
 import { invoiceCollectionEvents, collectionTotals, payoutEvents } from '../src/modules/reports/collectionEvents.js';
-import { detailedIncomeReport, detailedExpensesReport, staffPerformance } from '../src/modules/reports/reports.service.js';
+import { detailedIncomeReport, detailedExpensesReport, staffPerformance, salesInvoicesReport } from '../src/modules/reports/reports.service.js';
 import { staffCommissionReport } from '../src/modules/reports/staffPay.report.js';
 import { computeBranchMetrics } from '../src/modules/dashboard/dashboard.service.js';
 
@@ -60,6 +63,53 @@ beforeEach(() => {
 });
 
 describe('canonical collection formula', () => {
+  it('Sales & Invoices retains one row and filters historical lifecycle at period end', async () => {
+    state.invoices=[invoice({payments:[payment('p1',1100,'2026-01-10')],refunds:[refund(1000,100,1100,'2026-02-10')],lifecycle:'REFUNDED'})];
+    const jan=await salesInvoicesReport(actor,{from:'2026-01-01',to:'2026-01-31',lifecycle:'ACTIVE'});
+    expect(jan.rows).toHaveLength(1);expect(jan.rows[0].lifecycle).toBe('ACTIVE');
+    const feb=await salesInvoicesReport(actor,{...query,lifecycle:'REFUNDED'});
+    expect(feb.rows).toHaveLength(1);expect(feb.rows[0].paid).toBe(-1100);
+  });
+  it.each(['handleExportCsv','handlePrint'])('Detailed Income %s keeps the refund inside one original service row', async handler => {
+    state.invoices=[invoice({payments:[payment('p1',1100,'2026-02-01')],refunds:[refund(400,40,440,'2026-02-10')]})];
+    const reportData=await detailedIncomeReport(actor,query);
+    const source=readFileSync(new URL('../../frontend/src/features/reports/DetailedIncomeReportPage.tsx',import.meta.url),'utf8');
+    const start=source.indexOf('  const '+handler+' =');
+    const end=source.indexOf(handler==='handlePrint'?'\n  const totals':'\n  const handlePrint',start+1);
+    const captures=[];
+    const context={reportData,sourceType:'ALL',selectedBranch:'b1',fromDate:query.from,toDate:query.to,formatPKR:n=>Number(n).toFixed(2),formatDateDisplay:d=>d,
+      downloadReportCsv:(_name,meta,sections)=>captures.push({meta,...sections[0]}),printReportWindow:value=>captures.push(value)};
+    const code=transformSync(source.slice(start,end)+'\n'+handler+'();',{loader:'ts',target:'es2022'}).code;
+    new Function(...Object.keys(context),code)(...Object.values(context));
+    expect(captures[0].rows).toHaveLength(1);
+    expect(captures[0].rows[0][4]).toContain('2026-02-10 REF-1 -440.00');
+    expect(captures[0].rows[0]).toContain('PARTIALLY_REFUNDED');
+  });
+  it('groups repeated service codes by actual line ID and never repeats quantities for refunds', async () => {
+    state.invoices=[invoice({netSales:D(2000),tax:D(200),lines:[line(),line({id:'l2',quantity:D(2)})],
+      payments:[payment('p1',2200,'2026-02-01')],refunds:[refund(400,40,440,'2026-02-10')],lifecycle:'PARTIALLY_REFUNDED'})];
+    const report=await detailedIncomeReport(actor,query);
+    expect(report.displayRows).toHaveLength(2);
+    expect(report.kpis).toMatchObject({serviceCount:3,collectedRevenue:1600,totalPaid:1760});
+    expect(report.displayRows.find(r=>r.lineId==='l1')).toMatchObject({quantity:1,originalNetAmount:1000,collectedNet:600,refundAmount:440});
+    expect(report.displayRows.find(r=>r.lineId==='l1').payments.map(p=>p.amount)).toEqual([-440,1100]);
+  });
+  it('does not let a later refund alter earlier income status or revenue', async () => {
+    state.invoices=[invoice({payments:[payment('p1',1100,'2026-01-10')],refunds:[refund(1000,100,1100,'2026-02-10')],lifecycle:'REFUNDED'})];
+    const jan=await detailedIncomeReport(actor,{from:'2026-01-01',to:'2026-01-31',lifecycle:'ACTIVE'});
+    expect(jan.kpis.collectedRevenue).toBe(1000);
+    expect(jan.displayRows[0]).toMatchObject({lifecycle:'ACTIVE',refundHistory:[]});
+    const feb=await detailedIncomeReport(actor,query);
+    expect(feb.displayRows).toHaveLength(1);
+    expect(feb.displayRows[0]).toMatchObject({date:'2026-01-10',collectedNet:-1000,originalNetAmount:1000,lifecycle:'REFUNDED'});
+  });
+  it('tracks previously paid excess commission as a negative balance without changing cash payouts', async () => {
+    state.invoices=[1,2,3].map(id=>invoice({id:`i${id}`,payments:[payment(`p${id}`,1100,'2026-02-01')],
+      refunds:id===1?[refund(1000,100,1100,'2026-02-10')]:[]}));
+    state.commission=[payout('com',300,'2026-02-02')];
+    const report=await staffCommissionReport(actor,{startDate:query.from,endDate:query.to});
+    expect(report.totals).toMatchObject({earned:300,reversed:100,paid:300,outstanding:-100});
+  });
   it('uses 550 = 500 revenue + 50 tax; earns 50 commission; leaves 550 outstanding', () => {
     const rows = invoiceCollectionEvents(invoice({ payments: [payment('p1', 550, '2026-02-01')] }));
     expect(collectionTotals(rows)).toMatchObject({ collectedRevenue: 500, taxCollected: 50, actualCollections: 550 });

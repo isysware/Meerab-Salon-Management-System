@@ -9,7 +9,7 @@ import { incomeExpenseCashFlow, incomeExpenseCollectionSummary } from '../../fro
 import { allocatePaymentToInvoice } from '../src/lib/calculations/collectionAllocation.js';
 const actor = { id: 'admin', role: 'ADMIN', branchId: 'b1' };
 const query = { from: '2026-11-01', to: '2026-11-30' };
-const payment = { id: 'p1', kind: 'POS', billAmountAllocated: 550 };
+const payment = { id: 'p1', kind: 'POS', billAmountAllocated: 550, date: new Date('2026-11-02') };
 const invoice = { id: 'i1', invoiceNumber: 'INV-1', date: new Date('2026-11-02'), branchId: 'b1',
   subtotal: 1000, discount: 0, netSales: 1000, tax: 100, tip: 100, total: 1200, amountDue: 550,
   status: 'PARTIAL', payments: [payment],
@@ -39,7 +39,7 @@ describe('Income & Expense collected tips', () => {
     expect(report.totals.tipAmount).toBe(0);
   });
   it('combines split-tender tip receipts once without multiplying by service or staff rows', async () => {
-    db.invoice.findMany.mockResolvedValue([{ ...invoice, payments: [{ ...payment, billAmountAllocated: 300 }, { id: 'p2', kind: 'POS', billAmountAllocated: 250 }] }]);
+    db.invoice.findMany.mockResolvedValue([{ ...invoice, payments: [{ ...payment, billAmountAllocated: 300 }, { ...payment, id: 'p2', billAmountAllocated: 250 }] }]);
     db.tipReceipt.findMany.mockResolvedValue([{ paymentId: 'p1', collectedAmount: 40 }, { paymentId: 'p2', collectedAmount: 60 }]);
     expect((await incomeExpenseReport(actor, query)).rows[0]).toMatchObject({ tipAmount: 100, totalReceived: 650 });
   });

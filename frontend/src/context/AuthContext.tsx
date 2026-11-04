@@ -11,7 +11,9 @@ interface AuthContextType {
   allBranches: Branch[];
   currentBranch: Branch | null;
   demoDate: string;
+  isDateOverridden: boolean;
   setDemoDate: (date: string) => void;
+  resetDemoDate: () => Promise<void>;
   isLoading: boolean;
   login: (params: LoginParams) => Promise<Session>;
   logout: () => Promise<void>;
@@ -24,6 +26,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<Session | null>(() => authService.getCurrentSession());
   const [allBranches, setAllBranches] = useState<Branch[]>([]);
   const [demoDate, setDemoDateState] = useState<string>(() => (USE_MOCK ? mockStorage.getSystemDate() : new Date().toISOString().slice(0, 10)));
+  const [isDateOverridden, setIsDateOverridden] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Load branches (Super Admin receives all; branch managers/staff only their assigned branch)
@@ -47,11 +50,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Business (operating) date: from the API in live mode, from the demo store offline.
   const refreshBusinessDate = useCallback(async () => {
     try {
-      setDemoDateState(await salonService.getSystemDate());
+      if (salonService.getSystemDateInfo) {
+        const info = await salonService.getSystemDateInfo();
+        setDemoDateState(info.date);
+        setIsDateOverridden(Boolean(info.isOverridden));
+      } else {
+        const d = await salonService.getSystemDate();
+        setDemoDateState(d);
+        const today = new Date().toLocaleDateString('en-CA');
+        setIsDateOverridden(d !== today);
+      }
     } catch (err) {
       console.error('Failed to load the business date:', err);
     }
   }, []);
+
+  // Periodic 60s check to ensure midnight rollover occurs automatically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshBusinessDate();
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [refreshBusinessDate]);
 
   useEffect(() => {
     const init = async () => {
@@ -86,13 +106,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [refreshBranches, refreshBusinessDate]);
 
   const setDemoDate = (newDate: string) => {
-    // API mode: the business date lives in the database (only Super Admin may change it).
     const previous = demoDate;
     setDemoDateState(newDate);
-    salonService.setSystemDate(newDate).catch((err) => {
-      console.error('Failed to change the business date:', err);
-      setDemoDateState(previous);
-    });
+    const today = new Date().toLocaleDateString('en-CA');
+    setIsDateOverridden(newDate !== today);
+    salonService.setSystemDate(newDate)
+      .then(() => refreshBusinessDate())
+      .catch((err) => {
+        console.error('Failed to change the business date:', err);
+        setDemoDateState(previous);
+        setIsDateOverridden(previous !== today);
+      });
+  };
+
+  const resetDemoDate = async (): Promise<void> => {
+    try {
+      if (salonService.resetSystemDate) {
+        await salonService.resetSystemDate();
+      } else {
+        const today = new Date().toLocaleDateString('en-CA');
+        await salonService.setSystemDate(today);
+      }
+      await refreshBusinessDate();
+    } catch (err) {
+      console.error('Failed to reset the business date:', err);
+    }
   };
 
   const login = async (params: LoginParams): Promise<Session> => {
@@ -136,7 +174,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         allBranches,
         currentBranch,
         demoDate,
+        isDateOverridden,
         setDemoDate,
+        resetDemoDate,
         isLoading,
         login,
         logout,

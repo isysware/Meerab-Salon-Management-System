@@ -6,7 +6,7 @@ import { auditLog } from '../../lib/audit.js';
 import { badRequest, conflict, notFound, forbidden } from '../../lib/AppError.js';
 import { accountBalances } from '../../lib/balances.js';
 import { assertBranchAccess, resolveReadBranch, resolveWriteBranch } from '../../lib/scope.js';
-import { getBusinessDate, setBusinessDate } from '../../lib/dates.js';
+import { getBusinessDate, setBusinessDate, clearBusinessDate, isBusinessDateOverridden, toDateString, toTimeString } from '../../lib/dates.js';
 import * as branches from '../branches/branches.service.js';
 import {
   toTaxRuleDTO, toPaymentAccountDTO, toOnlineAccountDTO, toExpenseCategoryDTO, toPayrollPolicyDTO,
@@ -342,13 +342,40 @@ export const updatePayrollPolicy = async (input, actor) => {
 
 export const getSystemDate = () => getBusinessDate();
 
+export const getSystemDateInfo = async () => {
+  const date = await getBusinessDate();
+  const realDate = toDateString();
+  const isOverridden = await isBusinessDateOverridden();
+  return {
+    date,
+    realDate,
+    isOverridden,
+    time: toTimeString(),
+  };
+};
+
 export const setSystemDate = async (date, actor) => {
-  await prisma.$transaction(async (tx) => {
+  return await prisma.$transaction(async (tx) => {
     const before = await getBusinessDate(tx);
+    if (!date || date === toDateString()) {
+      await clearBusinessDate(tx);
+      const live = toDateString();
+      await audit(tx, actor, 'SYSTEM_DATE_RESET', 'SystemSetting', 'businessDate', null, { date: before }, { date: live, mode: 'LIVE' });
+      return live;
+    }
     await setBusinessDate(date, tx);
-    await audit(tx, actor, 'SYSTEM_DATE_SET', 'SystemSetting', 'businessDate', null, { date: before }, { date });
+    await audit(tx, actor, 'SYSTEM_DATE_SET', 'SystemSetting', 'businessDate', null, { date: before }, { date, mode: 'OVERRIDE' });
+    return date;
   });
-  return date;
+};
+
+export const clearSystemDate = async (actor) => {
+  return await prisma.$transaction(async (tx) => {
+    const before = await getBusinessDate(tx);
+    const live = await clearBusinessDate(tx);
+    await audit(tx, actor, 'SYSTEM_DATE_RESET', 'SystemSetting', 'businessDate', null, { date: before }, { date: live, mode: 'LIVE' });
+    return live;
+  });
 };
 
 // ═══ TEST DATA RESET ══════════════════════════════════════════════════════════

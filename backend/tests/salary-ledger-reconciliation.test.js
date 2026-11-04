@@ -16,7 +16,7 @@ import { recognizedSalaryExpense } from '../src/modules/reports/salaryRecognitio
 import { startOfDay, endOfDay } from '../src/lib/dates.js';
 import { evaluateEmployeePayroll, getDatesInRange } from '../src/lib/calculations/payrollCalculations.js';
 import { incomeExpenseCollectionSummary, incomeExpenseCashFlow, incomeExpenseCashText, incomeExpenseInvoiceTotal, isCustomerInvoiceEntry,
-  incomeExpenseEntryType } from '../../frontend/src/features/reports/incomeExpenseDisplay.ts';
+  incomeExpenseEntryType, invoiceEventDetails } from '../../frontend/src/features/reports/incomeExpenseDisplay.ts';
 
 const actor = { id: 'admin', name: 'Admin', role: 'ADMIN', branchId: 'b1' };
 const query = { from: '2026-11-01', to: '2026-11-30' };
@@ -45,6 +45,67 @@ beforeEach(() => {
 const metrics = async (q = query) => computePeriodMetrics('b1',q.from,q.to,startOfDay(q.from),endOfDay(q.to));
 
 describe('Targeted salary ledger reconciliation', () => {
+  const refundedSales = (refundDate = '2026-11-04', amount = 1000) => {
+    state.runs = [];
+    state.invoices = [1,2,3].map(id => ({...sale,id:`i${id}`,invoiceNumber:`INV-${id}`,tax:0,total:1000,
+      lines:[{...sale.lines[0],id:`l${id}`,tax:0,staffId:'s1',staffCommissionRate:10}],
+      payments:[{...sale.payments[0],id:`p${id}`,billAmountAllocated:1000,amount:1000}]}));
+    const refund = {id:'refund1',refundNumber:'REF-1',refundDate:day(refundDate),netReversed:amount,taxReversed:0,
+      tipReversed:0,cashOut:amount,type:'REFUND',method:'CASH',lines:[{lineId:'l1',net:amount,tax:0,quantity:amount/1000}]};
+    state.invoices[0].refunds=[refund];
+    db.invoiceRefund.findMany.mockImplementation(async ({where}) => inRange(refund.refundDate,where.refundDate)
+      ? [{...refund,invoice:state.invoices[0]}] : []);
+    db.commissionPayment.findMany.mockResolvedValue([pay('COM-1',300,'2026-11-03')]);
+  };
+  it('groups three sales and one refund into three invoices without changing paid commission cash', async () => {
+    refundedSales();
+    const report=await incomeExpenseReport(actor,query);
+    expect(report.rows.filter(r=>r.type==='INCOME')).toHaveLength(4);
+    expect(report.displayRows.filter(r=>r.type==='INCOME')).toHaveLength(3);
+    expect(report.totals).toMatchObject({customerInvoiceTotal:3000,customerCollections:2000,income:2000,expense:300,netCashMovement:1700});
+    expect(report.displayRows.find(r=>r.invoiceId==='i1')).toMatchObject({totalBill:1000,refundAmount:1000,collectionAmount:0,status:'REFUNDED'});
+    expect(incomeExpenseCollectionSummary(report.totals.income,report.rows).surplus).toBe(1700);
+  });
+  it('keeps later refunds in their actual month and keeps original dates as reference only', async () => {
+    refundedSales('2026-12-04');
+    const november=await incomeExpenseReport(actor,query);
+    expect(november.totals.customerCollections).toBe(3000);
+    expect(november.displayRows.find(r=>r.invoiceId==='i1')).toMatchObject({status:'PAID',refundHistory:[]});
+    db.commissionPayment.findMany.mockResolvedValue([]);
+    const december=await incomeExpenseReport(actor,{from:'2026-12-01',to:'2026-12-31'});
+    expect(december.totals.customerCollections).toBe(-1000);
+    expect(december.displayRows).toHaveLength(1);
+    expect(december.displayRows[0]).toMatchObject({date:'2026-11-02',totalBill:1000,collectionAmount:-1000,status:'REFUNDED'});
+    expect(invoiceEventDetails(december.displayRows[0])).toContain('2026-12-04');
+  });
+  it('keeps partial refunds inside the original invoice row', async () => {
+    refundedSales('2026-11-04',400);
+    const report=await incomeExpenseReport(actor,query);
+    expect(report.displayRows.find(r=>r.invoiceId==='i1')).toMatchObject({totalBill:1000,refundAmount:400,collectionAmount:600,status:'PARTIALLY_REFUNDED'});
+    expect(report.totals.customerCollections).toBe(2600);
+  });
+  it.each(['handleExportExcel','handleExportCsv','handleExportPdf'])('%s exports one invoice row with dated refunds and unchanged totals', async handler => {
+    refundedSales();
+    const reportData=await incomeExpenseReport(actor,query);
+    const source=readFileSync(new URL('../../frontend/src/features/reports/IncomeExpenseReportPage.tsx',import.meta.url),'utf8');
+    const start=source.indexOf('  const '+handler+' ='), end=source.indexOf('\n  const handle',start+1);
+    const captures=[];
+    const context={reportData,customerCollections:2000,totalBillSum:3000,signedPaid:1700,nonOperatingCashOutflows:0,
+      selectedBranch:'b1',fromDate:query.from,toDate:query.to,formatPKR:n=>Number(n).toFixed(2),formatDateDisplay:d=>d,formatMethod:m=>m,
+      incomeExpenseCollectionSummary,isCustomerInvoiceEntry,incomeExpenseEntryType,incomeExpenseCashText,invoiceEventDetails,
+      downloadReportExcel:(_name,meta,sections)=>captures.push({meta,...sections[0]}),
+      downloadReportCsv:(_name,meta,sections)=>captures.push({meta,...sections[0]}),printReportWindow:value=>captures.push(value)};
+    const code=transformSync(source.slice(start,end)+'\n'+handler+'();',{loader:'ts',target:'es2022'}).code;
+    new Function(...Object.keys(context),code)(...Object.values(context));
+    const exported=captures[0], invoices=exported.rows.filter(r=>String(r[1]).startsWith('INV-'));
+    expect(invoices).toHaveLength(3);
+    const refunded=invoices.find(r=>r[1]==='INV-1');
+    expect(refunded[2]).toContain('REF-1 2026-11-04');
+    expect(refunded[2]).toContain('Period net collection: 0.00');
+    expect(refunded[11]).toBe('REFUNDED');
+    const total=exported.totals||exported.rows.at(-1);
+    expect(Number(total[7])).toBe(3000);expect(Number(total[9])).toBe(2000);
+  });
   it('preserves the approved partial salary example across ledger, expenses, salary, P&L and cash drawer', async () => {
     const ledger = await incomeExpenseReport(actor,query);
     expect(ledger.totals).toMatchObject({ customerCollections:1100, customerInvoiceTotal:1100, income:1000, expense:1000,
@@ -142,7 +203,7 @@ describe('Targeted salary ledger reconciliation', () => {
     const context={ reportData, customerCollections:reportData.totals.customerCollections, totalBillSum:reportData.totals.customerInvoiceTotal,
       signedPaid:reportData.totals.netCashMovement, nonOperatingCashOutflows:0, selectedBranch:'b1', fromDate:query.from, toDate:query.to,
       formatPKR:n=>Number(n).toFixed(2), formatDateDisplay:d=>d,formatMethod:m=>m,
-      incomeExpenseCollectionSummary,isCustomerInvoiceEntry,incomeExpenseEntryType,incomeExpenseCashText,
+      incomeExpenseCollectionSummary,isCustomerInvoiceEntry,incomeExpenseEntryType,incomeExpenseCashText,invoiceEventDetails,
       downloadReportExcel:(_name,meta,sections)=>captures.push({meta,...sections[0]}),
       downloadReportCsv:(_name,meta,sections)=>captures.push({meta,...sections[0]}),
       printReportWindow:value=>captures.push(value),

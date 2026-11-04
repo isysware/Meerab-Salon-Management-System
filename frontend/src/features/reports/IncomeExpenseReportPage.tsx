@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { salonService } from '@/services';
-import { incomeExpenseCashFlow, incomeExpenseCashText, incomeExpenseCollectionSummary, isCustomerInvoiceEntry, incomeExpenseInvoiceTotal, incomeExpenseEntryType } from './incomeExpenseDisplay';
+import { incomeExpenseCashFlow, incomeExpenseCashText, incomeExpenseCollectionSummary, isCustomerInvoiceEntry, incomeExpenseInvoiceTotal, incomeExpenseEntryType, invoiceEventDetails } from './incomeExpenseDisplay';
 import { User } from '@/types/auth';
 import {
   IncomeExpenseReport,
@@ -205,6 +205,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       ['Customer Invoice Total (Unique Invoices)', formatPKR(totalBillSum)],
       ['Reported Expense Recognition (Accrual; Branch/Period)', formatPKR(reportData.totals.reportedExpenseRecognition ?? reportData.totals.expense)],
       ...(reportData.kpis.staffLoanReceivable !== undefined ? [['Staff Loan Receivable (Current Branch Balance)', formatPKR(reportData.kpis.staffLoanReceivable)]] as [string, string][] : []),
+      ['Display Basis', 'One invoice per row. Amounts use selected event dates; original invoice amounts are reference values.'],
       ['Report', 'Income & Expense Reports'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -229,7 +230,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       'Payment Method',
     ];
 
-    const rows = reportData.rows.map((r, i) => {
+    const rows = (reportData.displayRows ?? reportData.rows).map((r, i) => {
       const isInvoice = isCustomerInvoiceEntry(r);
       const isIncome = r.income > 0 || r.type === 'INCOME';
       const isSettlement = r.type === 'SETTLEMENT';
@@ -246,7 +247,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       return [
         i + 1,
         r.reference || r.invoiceNumber || r.source || '—',
-        customerOrPayee,
+        customerOrPayee + (r.reportEvents ? ' | ' + invoiceEventDetails(r) : ''),
         incomeExpenseEntryType(r),
         r.branchName || '—',
         !isInvoice ? '\u2014' : isRefund ? `-${Math.abs(serviceAmountVal).toFixed(2)}` : isIncome ? `+${serviceAmountVal.toFixed(2)}` : `-${serviceAmountVal.toFixed(2)}`,
@@ -296,6 +297,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       ['Customer Invoice Total (Unique Invoices)', formatPKR(totalBillSum)],
       ['Reported Expense Recognition (Accrual; Branch/Period)', formatPKR(reportData.totals.reportedExpenseRecognition ?? reportData.totals.expense)],
       ...(reportData.kpis.staffLoanReceivable !== undefined ? [['Staff Loan Receivable (Current Branch Balance)', formatPKR(reportData.kpis.staffLoanReceivable)]] as [string, string][] : []),
+      ['Display Basis', 'One invoice per row. Amounts use selected event dates; original invoice amounts are reference values.'],
       ['Report', 'Income & Expense Reports'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -320,7 +322,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       'Payment Method',
     ];
 
-    const rows = reportData.rows.map((r, i) => {
+    const rows = (reportData.displayRows ?? reportData.rows).map((r, i) => {
       const isInvoice = isCustomerInvoiceEntry(r);
       const isIncome = r.income > 0 || r.type === 'INCOME';
       const isSettlement = r.type === 'SETTLEMENT';
@@ -337,7 +339,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       return [
         i + 1,
         r.reference || r.invoiceNumber || r.source || '—',
-        customerOrPayee,
+        customerOrPayee + (r.reportEvents ? ' | ' + invoiceEventDetails(r) : ''),
         incomeExpenseEntryType(r),
         r.branchName || '—',
         !isInvoice ? '\u2014' : isRefund ? `-${Math.abs(serviceAmountVal).toFixed(2)}` : isIncome ? `+${serviceAmountVal.toFixed(2)}` : `-${serviceAmountVal.toFixed(2)}`,
@@ -380,6 +382,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
     }
     const customerCollectionsFormatted = formatPKR(customerCollections);
     const meta: [string, string][] = [
+      ['Display Basis', 'One invoice per row. Amounts use selected event dates; original invoice amounts are reference values.'],
       ['Collection-Based Operating Surplus', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).surplus)],
       ['Actual Paid Operating Expenses', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).paidOperatingExpenses)],
       ['Recognized Revenue (Accrual; Separate Information)', formatPKR(reportData.totals.recognizedIncome ?? 0)],
@@ -416,7 +419,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       'Date',
       'Method',
     ];
-    const rows = reportData.rows.map((r, i) => {
+    const rows = (reportData.displayRows ?? reportData.rows).map((r, i) => {
       const isInvoice = isCustomerInvoiceEntry(r);
       const isIncome = r.income > 0 || r.type === 'INCOME';
       const isSettlement = r.type === 'SETTLEMENT';
@@ -433,7 +436,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       return [
         i + 1,
         r.reference || r.invoiceNumber || r.source || '—',
-        customerOrPayee,
+        customerOrPayee + (r.reportEvents ? ' | ' + invoiceEventDetails(r) : ''),
         incomeExpenseEntryType(r),
         r.branchName || '—',
         !isInvoice ? '\u2014' : isRefund ? `-${formatPKR(Math.abs(serviceAmountVal))}` : isIncome ? `+${formatPKR(serviceAmountVal)}` : `-${formatPKR(serviceAmountVal)}`,
@@ -810,11 +813,11 @@ export const IncomeExpenseReportPage: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-bold text-[#18191B] tracking-tight">Income & Expense Ledger</h3>
                   <span className="bg-[#FDF2F5] text-[#B82E69] border border-white/80 shadow-2xs text-[11px] font-bold px-2 py-0.5 rounded-full font-mono">
-                    {reportData?.rows.length ?? 0} records
+                    {(reportData?.displayRows ?? reportData?.rows)?.length ?? 0} records
                   </span>
                 </div>
                 <p className="text-[11px] text-[#78616C] mt-0.5">
-                  Showing detailed operational vouchers, sales invoices and settlements
+                  One row per invoice. Original bills are reference amounts; net collections use the selected payment and refund dates.
                 </p>
               </div>
             </div>
@@ -878,7 +881,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {reportData && reportData.rows.length > 0 ? (
-                  reportData.rows.map((row: IncomeExpenseReportRow, idx: number) => {
+                  (reportData.displayRows ?? reportData.rows).map((row: IncomeExpenseReportRow, idx: number) => {
                     const isInvoice = isCustomerInvoiceEntry(row);
                     const isIncome = row.income > 0 || row.type === 'INCOME';
                     const isSettlement = row.type === 'SETTLEMENT';
@@ -947,6 +950,12 @@ export const IncomeExpenseReportPage: React.FC = () => {
                             <div className="text-[11px] text-[#78616C] font-medium mt-0.5 truncate max-w-[260px]" title={row.customerName || row.userOrPayee || row.description}>
                               {row.customerName || (row.description?.includes('-') ? row.description.split('-')[1]?.trim() : (row.userOrPayee || row.description || 'Walk-in'))}
                             </div>
+                            {row.reportEvents && (row.refundHistory?.length || 0) > 0 && (
+                              <details className="mt-1 text-[10px] text-slate-600 whitespace-normal max-w-[340px]">
+                                <summary className="cursor-pointer text-rose-700">Refunded in period: PKR {formatPKR(row.refundAmount || 0)}; net collection: PKR {formatPKR(row.collectionAmount || 0)}</summary>
+                                <p>{invoiceEventDetails(row)}</p>
+                              </details>
+                            )}
                           </div>
                         </td>
 
@@ -1024,7 +1033,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
 
                         {/* 7. Payment Status */}
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                          {row.status === 'PAID' ? (
+                          {row.status === 'PARTIALLY_REFUNDED' ? <span className="text-rose-700 font-semibold">Partially Refunded</span> : row.status === 'PAID' ? (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/50">
                               Paid
                             </span>

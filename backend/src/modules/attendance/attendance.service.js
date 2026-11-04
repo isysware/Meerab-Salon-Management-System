@@ -81,8 +81,11 @@ const resolveStaffFilter = (actor, staffId) => {
 
 /** Lateness, early exit, worked hours and deduction preview for one day. */
 const evaluateDay = (staffDTO, checkIn, checkOut, isOvernight, status, workDate) => {
-  if (checkOut && !isOvernight && checkIn && parseTimeToMinutes(checkOut) < parseTimeToMinutes(checkIn)) {
-    throw badRequest('INVALID_PUNCH', 'Check-out time cannot be earlier than check-in time unless marked as an overnight shift.');
+  const inM = checkIn ? parseTimeToMinutes(checkIn) : 0;
+  const outM = checkOut ? parseTimeToMinutes(checkOut) : 0;
+  const isMidnightCrossing = inM >= 11 * 60 && outM <= 7 * 60;
+  if (checkOut && !isOvernight && checkIn && outM < inM && !isMidnightCrossing) {
+    throw badRequest('INVALID_PUNCH', 'Check-out time cannot be earlier than check-in time.');
   }
   const { isLate, lateMinutes } = evaluateLateness(checkIn, staffDTO.startTime, staffDTO.lateGraceMinutes);
   const early = checkOut ? evaluateEarlyExit(checkOut, staffDTO.endTime, staffDTO.earlyGraceMinutes, isOvernight) : { isEarlyExit: false, earlyExitMinutes: 0 };

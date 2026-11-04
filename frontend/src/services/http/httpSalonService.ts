@@ -137,6 +137,14 @@ const liveMethods: SalonServiceContract = {
 
   // Business (operating) date lives in the database; only Super Admin may change it.
   getSystemDate: async () => (await api.get<{ date: string }>('/system/date'))?.date ?? new Date().toISOString().slice(0, 10),
+  getSystemDateInfo: async () => {
+    const res = await api.get<{ date: string; realDate: string; isOverridden: boolean; time: string }>('/system/date');
+    const realDate = new Date().toISOString().slice(0, 10);
+    return res ?? { date: realDate, realDate, isOverridden: false, time: '12:00' };
+  },
+  resetSystemDate: async () => {
+    await api.delete('/system/date');
+  },
   setSystemDate: async (date) => {
     await api.put('/system/date', { date });
   },
