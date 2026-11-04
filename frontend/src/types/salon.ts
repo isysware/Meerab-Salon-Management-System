@@ -1763,6 +1763,9 @@ export interface PayslipRecord {
   grossPayable: number;
   totalDeductions: number;
   netPayable: number;
+  monthlyEarnedSalary?: number;
+  previouslyPaidCustomSalary?: number;
+  remainingMonthlySalary?: number;
   salaryNetPayable?: number;
   salaryPaidAmount?: number;
   commissionPayable?: number;
@@ -2400,6 +2403,7 @@ export interface TaxReportServiceSummary {
 }
 
 export interface TaxReportKPIs {
+  uncollectedCustomerTax?: number;
   totalTaxCharged?: number;
   collectedRevenue?: number;
   totalInvoicesTaxed: number;

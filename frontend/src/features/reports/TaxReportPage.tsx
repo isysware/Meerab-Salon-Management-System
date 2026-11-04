@@ -185,9 +185,10 @@ export const TaxReportPage: React.FC = () => {
   const handleExportExcel = () => {
     if (!reportData) return;
     const meta: [string, string][] = [
+      ['Uncollected Customer Tax (As of Period End)', formatPKR(reportData.kpis.uncollectedCustomerTax ?? 0)],
       ['Basis', 'Statutory output tax uses invoice/credit dates. Collected tax uses actual receipt/refund/reversal dates; tax remittances and input credits are not calculated here.'],
-      ['Tax Charged', formatPKR(reportData.kpis.totalTaxCharged ?? 0)],
-      ['Net Tax Collected', formatPKR(reportData.kpis.totalTaxCollected)],
+      ['Invoice Tax', formatPKR(reportData.kpis.totalTaxCharged ?? 0)],
+      ['Tax Collected', formatPKR(reportData.kpis.totalTaxCollected)],
       ['Report', 'Tax Management & Summary Report'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -281,9 +282,10 @@ export const TaxReportPage: React.FC = () => {
   const handleExportCsv = () => {
     if (!reportData) return;
     const meta: [string, string][] = [
+      ['Uncollected Customer Tax (As of Period End)', formatPKR(reportData.kpis.uncollectedCustomerTax ?? 0)],
       ['Basis', 'Statutory output tax uses invoice/credit dates. Collected tax uses actual receipt/refund/reversal dates; tax remittances and input credits are not calculated here.'],
-      ['Tax Charged', formatPKR(reportData.kpis.totalTaxCharged ?? 0)],
-      ['Net Tax Collected', formatPKR(reportData.kpis.totalTaxCollected)],
+      ['Invoice Tax', formatPKR(reportData.kpis.totalTaxCharged ?? 0)],
+      ['Tax Collected', formatPKR(reportData.kpis.totalTaxCollected)],
       ['Report', 'Tax Management & Summary Report'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -362,14 +364,15 @@ export const TaxReportPage: React.FC = () => {
       return;
     }
     const meta: [string, string][] = [
+      ['Uncollected Customer Tax (As of Period End)', formatPKR(reportData.kpis.uncollectedCustomerTax ?? 0)],
       ['Basis', 'Statutory output tax uses invoice/credit dates. Collected tax uses actual receipt/refund/reversal dates; tax remittances and input credits are not calculated here.'],
-      ['Tax Charged', formatPKR(reportData.kpis.totalTaxCharged ?? 0)],
-      ['Net Tax Collected', formatPKR(reportData.kpis.totalTaxCollected)],
+      ['Invoice Tax', formatPKR(reportData.kpis.totalTaxCharged ?? 0)],
+      ['Tax Collected', formatPKR(reportData.kpis.totalTaxCollected)],
       ['Report', 'Tax Management & Summary Report'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['Period', `${formatDateDisplay(reportData.meta.from)} – ${formatDateDisplay(reportData.meta.to)}`],
       ['Total Taxable Sales', `PKR ${formatPKR(reportData.kpis.totalTaxableSales)}`],
-      ['Net Tax Collected', `PKR ${formatPKR(reportData.kpis.totalTaxCollected)}`],
+      ['Tax Collected', `PKR ${formatPKR(reportData.kpis.totalTaxCollected)}`],
       ['Tax Refunded', `PKR ${formatPKR(reportData.kpis.totalTaxRefunded)}`],
       ['Net Tax Liability', `PKR ${formatPKR(reportData.kpis.netTaxLiability)}`],
     ];
@@ -626,7 +629,7 @@ export const TaxReportPage: React.FC = () => {
                 PKR {formatPKR(reportData.kpis?.totalTaxCollected ?? 0)}
               </span>
               <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Net tax from actual customer receipts
+                Tax Collected from Actual Customer Receipts
               </span>
             </div>
           </div>
@@ -689,6 +692,8 @@ export const TaxReportPage: React.FC = () => {
               </span>
               <span className="text-xs text-[#78616C] font-medium mt-1 block">
                 Weighted effective rate
+                <span className="block mt-1">Invoice Tax: PKR {formatPKR(reportData.kpis.totalTaxCharged ?? 0)}</span>
+                <span className="block mt-1">Uncollected Customer Tax: PKR {formatPKR(reportData.kpis.uncollectedCustomerTax ?? 0)} (as of period end)</span>
               </span>
             </div>
           </div>
@@ -926,7 +931,7 @@ export const TaxReportPage: React.FC = () => {
 
                   <tr className="border-b border-slate-200/60">
                     <td colSpan={8} className="py-2.5 px-4 text-right font-semibold text-slate-700">
-                      Statutory Output Tax Charged (Gross)
+                      Invoice Tax (Statutory Output Tax Charged)
                     </td>
                     <td colSpan={4} className="py-2.5 px-4 text-right font-bold font-mono tabular-nums text-emerald-600">
                       +PKR {formatPKR(reportData?.kpis.totalTaxCharged ?? 0)}
@@ -950,6 +955,8 @@ export const TaxReportPage: React.FC = () => {
                       PKR {formatPKR(reportData?.kpis.netTaxLiability ?? reportData?.totals.netTax ?? 0)}
                     </td>
                   </tr>
+                  <tr className="border-t border-slate-200"><td colSpan={8} className="py-3 px-4 text-right">Tax Collected (Customer Payments; Separate from Statutory Liability)</td><td colSpan={4} className="py-3 px-4 text-right font-mono">PKR {formatPKR(reportData.kpis.totalTaxCollected)}</td></tr>
+                  <tr><td colSpan={8} className="py-3 px-4 text-right">Uncollected Customer Tax (As of Period End)</td><td colSpan={4} className="py-3 px-4 text-right font-mono">PKR {formatPKR(reportData.kpis.uncollectedCustomerTax ?? 0)}</td></tr>
                 </tfoot>
               </table>
             </div>

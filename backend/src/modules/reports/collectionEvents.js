@@ -92,7 +92,9 @@ export function invoiceCollectionEvents(invoice, { asOf, onBalance } = {}) {
     const allocated = allocatePaymentToInvoice({ invoice: effective, paymentAmount: held });
     const current = new Map(allocated.lineAllocations.map(a => [a.lineId, a]));
     const outstanding = max0(toDec(effective.netSales).plus(effective.tax).minus(held));
-    onBalance?.({ outstanding, retainedBill: held, credits: creditedNet.plus(creditedTax) });
+    onBalance?.({ outstanding, retainedBill: held, credits: creditedNet.plus(creditedTax),
+      uncollectedTaxByLine: effectiveLines.map(line => ({ lineId: line.id,
+        amount: max0(toDec(line.tax).minus(current.get(line.id)?.collectedTax || 0)) })) });
     const tips = allocateRounded(event.tip, (invoice.lines || []).map(l => toDec(l.netSales).plus(l.tax)));
     for (const [index, line] of (invoice.lines || []).entries()) {
       const before = previous.get(line.id);
@@ -163,7 +165,8 @@ export function payoutEvents(payments) {
 
 /** Invoice receivable snapshot uses the exact same event replay, including non-cash credits. */
 export function invoiceBalanceAsOf(invoice, asOf) {
-  let balance = { outstanding: max0(toDec(invoice.netSales).plus(invoice.tax)), retainedBill: toDec(0), credits: toDec(0) };
+  let balance = { outstanding: max0(toDec(invoice.netSales).plus(invoice.tax)), retainedBill: toDec(0), credits: toDec(0),
+    uncollectedTaxByLine: (invoice.lines || []).map(line => ({ lineId: line.id, amount: max0(toDec(line.tax)) })) };
   const events = invoiceCollectionEvents(invoice, { asOf, onBalance: value => { balance = value; } });
   return { ...balance, events };
 }

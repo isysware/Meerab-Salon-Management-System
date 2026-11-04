@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { db } = vi.hoisted(() => {
   const db = {};
-  for (const name of ['branch', 'staff', 'user', 'invoice', 'invoiceRefund', 'stockMovement', 'expense', 'payrollRun', 'commissionEvent', 'drawerMovement', 'accountMovement', 'bookingHistory']) {
+  for (const name of ['branch', 'staff', 'user', 'invoice', 'invoiceRefund', 'invoicePayment', 'stockMovement', 'expense', 'payrollRun', 'commissionEvent', 'drawerMovement', 'accountMovement', 'bookingHistory']) {
     db[name] = { findMany: vi.fn(), findUnique: vi.fn() };
   }
   db.payrollPayment = { findMany: vi.fn(() => { throw new Error('Payouts must not be recognized again'); }) };
@@ -21,7 +21,7 @@ beforeEach(() => {
   for (const model of Object.values(db)) model.findMany.mockResolvedValue([]);
   db.branch.findUnique.mockResolvedValue({ name: 'Test Branch' });
   const current = (args) => {
-    const range = args.where.date || args.where.finalizedAt || args.where.eventDate || args.where.expenseDate;
+    const range = args.where?.date || args.where?.finalizedAt || args.where?.eventDate || args.where?.expenseDate || args.where?.OR?.[0]?.finalizedAt || args.where?.month;
     return range?.gte >= new Date('2026-09-30T19:00:00Z');
   };
   db.invoice.findMany.mockImplementation(async args => current(args) ? [{ lines: [{ type: 'SERVICE', netSales: 1000 }] }] : []);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { salonService } from '@/services';
-import { incomeExpenseCashFlow, incomeExpenseCashText } from './incomeExpenseDisplay';
+import { incomeExpenseCashFlow, incomeExpenseCashText, incomeExpenseCollectionSummary } from './incomeExpenseDisplay';
 import { User } from '@/types/auth';
 import {
   IncomeExpenseReport,
@@ -190,6 +190,10 @@ export const IncomeExpenseReportPage: React.FC = () => {
   const handleExportExcel = () => {
     if (!reportData || !reportData.rows.length) return;
     const meta: [string, string][] = [
+      ['Collection-Based Operating Surplus', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).surplus)],
+      ['Actual Paid Operating Expenses', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).paidOperatingExpenses)],
+      ['Recognized Revenue (Accrual; Separate Information)', formatPKR(reportData.totals.recognizedIncome ?? 0)],
+      ['COGS (Separate Accounting Information)', formatPKR(reportData.kpis.cogs ?? 0)],
       ['Report', 'Income & Expense Reports'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -266,6 +270,10 @@ export const IncomeExpenseReportPage: React.FC = () => {
   const handleExportCsv = () => {
     if (!reportData || !reportData.rows.length) return;
     const meta: [string, string][] = [
+      ['Collection-Based Operating Surplus', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).surplus)],
+      ['Actual Paid Operating Expenses', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).paidOperatingExpenses)],
+      ['Recognized Revenue (Accrual; Separate Information)', formatPKR(reportData.totals.recognizedIncome ?? 0)],
+      ['COGS (Separate Accounting Information)', formatPKR(reportData.kpis.cogs ?? 0)],
       ['Report', 'Income & Expense Reports'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -346,14 +354,17 @@ export const IncomeExpenseReportPage: React.FC = () => {
     }
     const signedPaidFormatted = signedPaid >= 0 ? `+${formatPKR(signedPaid)}` : `-${formatPKR(Math.abs(signedPaid))}`;
     const meta: [string, string][] = [
+      ['Collection-Based Operating Surplus', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).surplus)],
+      ['Actual Paid Operating Expenses', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).paidOperatingExpenses)],
+      ['Recognized Revenue (Accrual; Separate Information)', formatPKR(reportData.totals.recognizedIncome ?? 0)],
+      ['COGS (Separate Accounting Information)', formatPKR(reportData.kpis.cogs ?? 0)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
       ['Revenue Collected (Excl. Tax)', `PKR ${formatPKR(reportData.totals.income)}`],
       ['Tax Collected', `PKR ${formatPKR(reportData.totals.collectedTax ?? reportData.kpis?.totalCollectedTax ?? 0)}`],
       ['Total Collections (Incl. Tax)', `PKR ${formatPKR(reportData.totals.collections ?? signedPaid)}`],
-      ['Operating Expenses', `PKR ${formatPKR(reportData.totals.expense)}`],
-      ['Net Profit / Loss', `PKR ${reportData.totals.net >= 0 ? '+' : '-'}${formatPKR(Math.abs(reportData.totals.net))}`],
+
       ['Outstanding Dues', `PKR ${formatPKR(reportData.totals.remaining || 0)}`],
     ];
     const headers = [
@@ -432,8 +443,9 @@ export const IncomeExpenseReportPage: React.FC = () => {
   // Calculations for bottom summary & Row 3 KPI Cards
   const totals = reportData?.totals ? { ...reportData.totals, paid: signedPaid } : { income: 0, expense: 0, paid: 0, discount: 0, remaining: 0, net: 0 };
   const totalCashCollected = totals.income;
-  const totalExpensesRecognized = totals.expense;
-  const netRealizedPosition = totals.net ?? ((totals.income || 0) - (totals.expense || 0));
+  const collectionSummary = incomeExpenseCollectionSummary(totals.income, reportData?.rows ?? []);
+  const totalExpensesRecognized = collectionSummary.paidOperatingExpenses;
+  const netRealizedPosition = collectionSummary.surplus;
 
   const totalBillSum = useMemo(() => {
     if (!reportData?.rows) return 0;
@@ -686,19 +698,19 @@ export const IncomeExpenseReportPage: React.FC = () => {
                 PKR {formatPKR(totalExpensesRecognized)}
               </span>
               <span className="text-[11px] text-[#78616C] font-medium mt-1 block leading-tight">
-                Operating Expenses
+                Actual Paid Operating Expenses
               </span>
             </div>
           </div>
 
-          {/* Card 5: Net Profit */}
+          {/* Card 5: Collection-Based Operating Surplus */}
           <div className="p-4 sm:p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
             <div className="flex items-center justify-between relative z-10">
               <div className="w-8 h-8 rounded-xl bg-white/90 shadow-2xs border border-white/80 flex items-center justify-center text-[#B82E69]">
                 <Landmark className="w-4 h-4" />
               </div>
               <span className={`shadow-2xs border border-white/60 text-[10px] font-bold px-2.5 py-0.5 rounded-full ${netRealizedPosition >= 0 ? 'bg-[#FDF2F5] text-[#B82E69]' : 'bg-rose-50 text-rose-700'}`}>
-                {netRealizedPosition >= 0 ? 'Net Profit' : 'Net Loss'}
+                Collection-Based Operating Surplus
               </span>
             </div>
             <div className="mt-3 relative z-10">
@@ -706,7 +718,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
                 {netRealizedPosition >= 0 ? `PKR ${formatPKR(netRealizedPosition)}` : `-PKR ${formatPKR(Math.abs(netRealizedPosition))}`}
               </span>
               <span className="text-[11px] text-[#78616C] font-medium mt-1 block leading-tight">
-                Operating bottomline position
+                Collected revenue less paid operating expenses
               </span>
             </div>
           </div>
@@ -1093,14 +1105,37 @@ export const IncomeExpenseReportPage: React.FC = () => {
                 {/* Row 2: Recognized Business Revenue */}
                 <tr className="border-b border-slate-200/70">
                   <td colSpan={4} className="py-3 px-4 text-right font-medium text-slate-700">
-                    Recognized Business Revenue (Accrual Net Sales)
+                    Collected Net Revenue (Excl. Tax and Tips)
                   </td>
                   <td colSpan={2} className="py-3 px-4 text-right font-bold font-mono tabular-nums text-emerald-700">
-                    +{formatPKR(reportData?.totals?.recognizedIncome ?? totals.income)}
+                    +{formatPKR(totals.income)}
                   </td>
                   <td colSpan={2} className="py-3 px-4"></td>
                 </tr>
 
+                {/* Row 4: Operating Overheads */}
+                <tr className="border-b border-slate-200/70">
+                  <td colSpan={4} className="py-3 px-4 text-right font-medium text-slate-700">
+                    Actual Paid Operating Expenses (Including Salary and Commission Payouts)
+                  </td>
+                  <td colSpan={2} className="py-3 px-4 text-right font-bold font-mono tabular-nums text-rose-700">
+                    -{formatPKR(totalExpensesRecognized)}
+                  </td>
+                  <td colSpan={2} className="py-3 px-4"></td>
+                </tr>
+
+                {/* Collection-based summary excludes unpaid accruals and separate COGS. */}
+                <tr>
+                  <td colSpan={4} className="py-3 px-4 text-right font-bold text-slate-900">
+                    Collection-Based Operating Surplus (Collected Revenue Less Paid Expenses)
+                  </td>
+                  <td colSpan={2} className={`py-3 px-4 text-right font-bold font-mono tabular-nums text-sm ${netRealizedPosition >= 0 ? 'text-[#B82E69]' : 'text-rose-700'}`}>
+                    {netRealizedPosition >= 0 ? `+${formatPKR(netRealizedPosition)}` : `-${formatPKR(Math.abs(netRealizedPosition))}`}
+                  </td>
+                  <td colSpan={2} className="py-3 px-4"></td>
+                </tr>
+                <tr className="border-t border-slate-200"><td colSpan={8} className="py-3 px-4 text-xs text-slate-600">Separate accounting information - not deducted from collection-based surplus</td></tr>
+                <tr><td colSpan={4} className="py-3 px-4 text-right">Recognized Revenue (Accrual Net Sales)</td><td colSpan={2} className="py-3 px-4 text-right font-mono">{formatPKR(reportData?.totals.recognizedIncome ?? 0)}</td><td colSpan={2} /></tr>
                 {/* Row 3: Cost of Goods Sold (COGS & Consumables) */}
                 {reportData?.kpis?.cogs !== undefined && (
                   <tr className="border-b border-slate-200/70">
@@ -1114,27 +1149,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
                   </tr>
                 )}
 
-                {/* Row 4: Operating Overheads */}
-                <tr className="border-b border-slate-200/70">
-                  <td colSpan={4} className="py-3 px-4 text-right font-medium text-slate-700">
-                    Operating Expenses (Vouchers, Finalized Salaries & Commission Earned)
-                  </td>
-                  <td colSpan={2} className="py-3 px-4 text-right font-bold font-mono tabular-nums text-rose-700">
-                    -{formatPKR(totalExpensesRecognized)}
-                  </td>
-                  <td colSpan={2} className="py-3 px-4"></td>
-                </tr>
-
-                {/* Row 5: Operating Profit (Revenue - COGS - Expenses) */}
-                <tr>
-                  <td colSpan={4} className="py-3 px-4 text-right font-bold text-slate-900">
-                    Net Operating Profit (Revenue − COGS − Operating Expenses)
-                  </td>
-                  <td colSpan={2} className={`py-3 px-4 text-right font-bold font-mono tabular-nums text-sm ${netRealizedPosition >= 0 ? 'text-[#B82E69]' : 'text-rose-700'}`}>
-                    {netRealizedPosition >= 0 ? `+${formatPKR(netRealizedPosition)}` : `-${formatPKR(Math.abs(netRealizedPosition))}`}
-                  </td>
-                  <td colSpan={2} className="py-3 px-4"></td>
-                </tr>
+                <tr><td colSpan={4} className="py-3 px-4 text-right">Reported Expense Recognition (Reference Only)</td><td colSpan={2} className="py-3 px-4 text-right font-mono">{formatPKR(totals.expense)}</td><td colSpan={2} /></tr>
               </tfoot>
             </table>
           </div>

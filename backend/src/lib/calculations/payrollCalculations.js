@@ -120,6 +120,12 @@ function evaluateEmployeePayroll(staff, month, policy, attendanceRecords, overti
   // Daily rate resolver per date (for monthly staff, daily rate = baseSalary / actualDaysInThatDateMonth)
   const getDailyRateForDate = (dateStr) => {
     if (isMonthly) {
+      if (policy?.customDivisorDays) {
+        return d(staff.baseSalary || 0).dividedBy(policy.customDivisorDays);
+      }
+      if (policy?.monthlyAbsenceDivisor) {
+        return d(staff.baseSalary || 0).dividedBy(policy.monthlyAbsenceDivisor);
+      }
       const days = getDaysForDate(dateStr);
       return d(staff.baseSalary || 0).dividedBy(days);
     }
@@ -426,14 +432,38 @@ function evaluateEmployeePayroll(staff, month, policy, attendanceRecords, overti
   const advanceRecoveryAmount = advanceRecoveries.reduce((s, a) => s.plus(d(a.amount)), d(0));
 
   const totalDeductions = preAdvanceDeductions.plus(advanceRecoveryAmount);
-  const netPayable = Decimal.max(0, grossPayable.minus(totalDeductions));
+  const standardNetPayable = Decimal.max(0, grossPayable.minus(totalDeductions));
   const attendanceImpact = d(0).minus(absenceDeductions.plus(attendancePenaltyDeductions));
+
+  // STEP 3: Reconciliation for previously finalized or paid custom salary in the same month
+  const alreadyPaidSalary = d(options.alreadyPaidSalary || 0);
+  const alreadyFinalizedNet = d(options.alreadyFinalizedNet || 0);
+  const previouslyPaidCustomSalary = Decimal.max(alreadyPaidSalary, alreadyFinalizedNet);
+
+  let monthlyEarnedSalary = standardNetPayable;
+  let remainingMonthlySalary = standardNetPayable;
+  let effectiveGrossPayable = grossPayable;
+  let netPayable = standardNetPayable;
+
+  if (isMonthly && previouslyPaidCustomSalary.gt(0)) {
+    remainingMonthlySalary = Decimal.max(0, standardNetPayable.minus(previouslyPaidCustomSalary));
+    effectiveGrossPayable = Decimal.max(0, grossPayable.minus(previouslyPaidCustomSalary));
+    netPayable = remainingMonthlySalary;
+  }
 
   let canFinalize = true;
   let blockReason;
   if (overlapDates.length) {
-    canFinalize = false;
-    blockReason = `Salary days have already been paid or reserved in an earlier finalized payroll run: ${overlapDates.join(', ')}.`;
+    if (runType === 'MONTHLY' && isMonthly && overlapDates.length < employedDates.length && previouslyPaidCustomSalary.gt(0)) {
+      // Monthly reconciliation run: earlier dates were already finalized in a custom range and deducted above!
+      // This is an intentional reconciliation, not a blocking conflict.
+    } else if (overlapDates.length >= employedDates.length) {
+      canFinalize = false;
+      blockReason = 'All salary days for this employee in this month have already been finalized.';
+    } else {
+      canFinalize = false;
+      blockReason = `Salary days have already been paid or reserved in an earlier finalized payroll run: ${overlapDates.join(', ')}.`;
+    }
   }
   const hasExceptions = exceptionDetails.length > 0;
   if (hasExceptions) {
@@ -455,6 +485,10 @@ function evaluateEmployeePayroll(staff, month, policy, attendanceRecords, overti
     formula = `${prorationFormula}. Base (PKR ${fmtDec(baseEarnings)}) - Penalties (PKR ${fmtDec(attendancePenaltyDeductions)}) + Overtime (PKR ${fmtDec(approvedOvertimeAmount)})${extrasText} = Net PKR ${fmtDec(netPayable)}`;
   } else {
     formula = `Commission-Only Contract: Base = PKR 0. Approved Overtime = PKR ${fmtDec(approvedOvertimeAmount)}${extrasText}. Net PKR ${fmtDec(netPayable)}. Commission earned is processed separately via Commission page.`;
+  }
+
+  if (isMonthly && previouslyPaidCustomSalary.gt(0)) {
+    formula += ` [Reconciliation: Full Month Earned PKR ${fmtDec(monthlyEarnedSalary)} - Previously Paid Custom Salary PKR ${fmtDec(previouslyPaidCustomSalary)} = Remaining Net PKR ${fmtDec(netPayable)}]`;
   }
 
   return {
@@ -521,7 +555,10 @@ function evaluateEmployeePayroll(staff, month, policy, attendanceRecords, overti
       otherDeductions: otherDeductions.toNumber(),
       advanceRecoveries,
       advanceRecoveryAmount: advanceRecoveryAmount.toNumber(),
-      grossPayable: grossPayable.toNumber(),
+      monthlyEarnedSalary: isMonthly && previouslyPaidCustomSalary.gt(0) ? monthlyEarnedSalary.toNumber() : undefined,
+      previouslyPaidCustomSalary: previouslyPaidCustomSalary.gt(0) ? previouslyPaidCustomSalary.toNumber() : 0,
+      remainingMonthlySalary: isMonthly && previouslyPaidCustomSalary.gt(0) ? remainingMonthlySalary.toNumber() : undefined,
+      grossPayable: effectiveGrossPayable.toNumber(),
       totalDeductions: totalDeductions.toNumber(),
       netPayable: netPayable.toNumber(),
       paidAmount: 0,

@@ -745,7 +745,62 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     // Graceful fallback for mock tests that don't mock commissionRun
   }
 
-  // Commission Events -> Staff Commission (Shows ONLY actual paid commission payouts unless includeCommission is requested)
+  // Standalone Commission Payments (Direct payouts made outside payroll)
+  // F09: Excluded for Accountants; confidential HR compensation
+  let hasEmittedCommissionPayouts = false;
+  if (actor.role !== 'ACCOUNTANT') {
+    try {
+      if (prisma.commissionPayment?.findMany) {
+        const standaloneCommPayments = await prisma.commissionPayment.findMany({
+          where: {
+            status: 'COMPLETED',
+            reversedAt: null,
+            payrollPaymentId: null,
+            paidAt: utcRange,
+            ...branchFilter,
+          },
+        });
+        if (standaloneCommPayments.length > 0) {
+          hasEmittedCommissionPayouts = true;
+          for (const cp of standaloneCommPayments) {
+            const amt = n(toDec(cp.amount));
+            rawRows.push({
+              id: `compay-${cp.id}`,
+              date: ymd(cp.paidAt),
+              type: 'COMMISSION_EXPENSE',
+              category: 'Staff Commission',
+              source: 'Expense - Staff Commission',
+              reference: cp.paymentNumber,
+              invoiceNumber: cp.paymentNumber,
+              customerName: cp.staffName,
+              branchId: cp.branchId,
+              branchName: branchMap.get(cp.branchId) || 'Branch',
+              userOrPayee: cp.staffName,
+              description: `Commission Payout to ${cp.staffName}`,
+              serviceAmount: amt,
+              tax: 0,
+              totalBill: amt,
+              collectedService: 0,
+              collectedTax: 0,
+              totalReceived: -amt,
+              remainingDues: 0,
+              income: 0,
+              expense: amt,
+              paid: amt,
+              discount: 0,
+              remaining: 0,
+              paymentMethod: cp.method || 'CASH',
+              status: 'PAID',
+            });
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // F08: Commission Events -> Staff Commission
+  // Prevent double counting: If commission payouts were already emitted, do not emit duplicate paid event rows.
+  // When includeCommission is requested, emit accrued (unpaid) commission events as liabilities.
   for (const evt of commissionEvents) {
     const commAmt = toDec(evt.amount);
     const signedAmt = evt.type === 'EARN' ? commAmt : -commAmt;
@@ -753,7 +808,12 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     const isPaid = evt.consumedByRunId ? paidCommissionRunIds.has(evt.consumedByRunId) : false;
     const amountVal = n(signedAmt);
 
-    // If commission is NOT paid yet (just accrued/earned on an invoice), DO NOT display as an expense unless requested
+    // If payouts are already displayed, skip paid events so they are not double-counted
+    if (hasEmittedCommissionPayouts && isPaid) {
+      continue;
+    }
+
+    // If commission is NOT paid yet, only display when includeCommission is requested
     if (!isPaid && query.includeCommission !== 'true') {
       continue;
     }
@@ -787,52 +847,6 @@ export const incomeExpenseReport = async (actor, query = {}) => {
       status: isPaid ? 'PAID' : 'ACCRUED',
     });
   }
-
-  // Standalone Commission Payments (Direct payouts made outside payroll)
-  try {
-    if (prisma.commissionPayment?.findMany) {
-      const standaloneCommPayments = await prisma.commissionPayment.findMany({
-        where: {
-          status: 'COMPLETED',
-          reversedAt: null,
-          payrollPaymentId: null,
-          paidAt: utcRange,
-          ...branchFilter,
-        },
-      });
-      for (const cp of standaloneCommPayments) {
-        const amt = n(toDec(cp.amount));
-        rawRows.push({
-          id: `compay-${cp.id}`,
-          date: ymd(cp.paidAt),
-          type: 'COMMISSION_EXPENSE',
-          category: 'Staff Commission',
-          source: 'Expense - Staff Commission',
-          reference: cp.paymentNumber,
-          invoiceNumber: cp.paymentNumber,
-          customerName: cp.staffName,
-          branchId: cp.branchId,
-          branchName: branchMap.get(cp.branchId) || 'Branch',
-          userOrPayee: cp.staffName,
-          description: `Commission Payout to ${cp.staffName}`,
-          serviceAmount: amt,
-          tax: 0,
-          totalBill: amt,
-          collectedService: 0,
-          collectedTax: 0,
-          totalReceived: -amt,
-          remainingDues: 0,
-          income: 0,
-          expense: amt,
-          paid: amt,
-          discount: 0,
-          remaining: 0,
-          paymentMethod: cp.method || 'CASH',
-          status: 'PAID',
-        });
-      }
-    }
-  } catch {}
 
   if (query.includeInventoryLoss === 'true') {
     for (const m of inventoryLosses) {
@@ -1101,7 +1115,7 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
   const dateRange = { gte: dateOnly(fromStr), lte: dateOnly(toStr) };
   const utcRange = { gte: fromDate, lte: toDate };
 
-  const [invoices, duesPayments, refunds, movements, expenses, payrollRuns, commissionEvents, standaloneCommPayments] = await Promise.all([
+  const [invoices, duesPayments, refunds, movements, expenses, payrollRuns, salaryPaymentsInPeriod, commissionEvents, standaloneCommPayments] = await Promise.all([
     prisma.invoice.findMany({
       where: {
         date: dateRange,
@@ -1242,6 +1256,7 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
           select: {
             netPayable: true,
             grossPayable: true,
+            snapshot: true,
             payments: {
               where: { status: { not: 'REVERSED' } },
               select: { amount: true, paidAt: true },
@@ -1250,6 +1265,16 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
         },
       },
     }),
+    prisma.payrollPayment?.findMany
+      ? prisma.payrollPayment.findMany({
+          where: {
+            status: 'COMPLETED',
+            paidAt: utcRange,
+            ...branchFilter,
+          },
+          select: { amount: true },
+        })
+      : Promise.resolve([]),
     prisma.commissionEvent.findMany({
       where: {
         eventDate: dateRange,
@@ -1421,19 +1446,30 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
     }
   }
 
+  // F10 & F11: Accrual salary expense recognizes earned wages without loan recovery distortion.
+  // Cash paid salaries strictly recognize payments made during the selected period.
   let salaryExpenses = toDec(0);
-  let paidSalaryExpenses = toDec(0);
   for (const run of payrollRuns) {
     for (const p of run.payslips) {
-      const salAmt = toDec(p.netPayable ?? p.grossPayable ?? 0);
+      const snap = typeof p.snapshot === 'string' ? JSON.parse(p.snapshot) : p.snapshot || {};
+      const advanceRecovery = toDec(snap.advanceRecoveryAmount || 0);
+      const salAmt = toDec(p.netPayable ?? p.grossPayable ?? 0).plus(advanceRecovery);
       salaryExpenses = salaryExpenses.plus(salAmt);
+    }
+  }
 
-      const activePayments = (p.payments || []).filter((pay) => pay.paidAt >= fromDate && pay.paidAt <= toDate);
-      if (activePayments.length > 0) {
-        const paidInPeriod = activePayments.reduce((acc, pay) => acc.plus(toDec(pay.amount)), toDec(0));
-        paidSalaryExpenses = paidSalaryExpenses.plus(paidInPeriod);
-      } else if (run.status === 'PAID') {
-        paidSalaryExpenses = paidSalaryExpenses.plus(salAmt);
+  let paidSalaryExpenses = toDec(0);
+  if (salaryPaymentsInPeriod && salaryPaymentsInPeriod.length > 0) {
+    for (const pay of salaryPaymentsInPeriod) {
+      paidSalaryExpenses = paidSalaryExpenses.plus(toDec(pay.amount));
+    }
+  } else {
+    for (const run of payrollRuns) {
+      for (const p of run.payslips) {
+        const activePayments = (p.payments || []).filter((pay) => pay.paidAt >= fromDate && pay.paidAt <= toDate);
+        if (activePayments.length > 0) {
+          paidSalaryExpenses = paidSalaryExpenses.plus(activePayments.reduce((acc, pay) => acc.plus(toDec(pay.amount)), toDec(0)));
+        }
       }
     }
   }

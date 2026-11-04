@@ -2136,6 +2136,17 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                     <span>Earned Base Salary:</span>
                     <span className="font-bold text-slate-900">Rs. {selectedPayslip.baseEarnings.toLocaleString()}</span>
                   </div>
+                  {Boolean(selectedPayslip.previouslyPaidCustomSalary && selectedPayslip.previouslyPaidCustomSalary > 0) && (
+                    <div className="flex justify-between text-indigo-700 bg-indigo-50/70 p-2 rounded-lg">
+                      <div>
+                        <span className="font-medium">Previously Paid (Custom Salary):</span>
+                        <span className="block text-[11px] text-indigo-600">Deducted from monthly payroll to prevent duplicate payout</span>
+                      </div>
+                      <span className="font-semibold">
+                        -Rs. {Number(selectedPayslip.previouslyPaidCustomSalary).toLocaleString()}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -3061,6 +3072,17 @@ export const PayrollPage: React.FC<PayrollPageProps> = ({ mode = 'GENERATE' }) =
                   <span>Total Deductions</span>
                   <span>-Rs. {formatSalaryNumber(selectedPayslip.totalDeductions)}</span>
                 </div>
+                {Boolean(selectedPayslip.previouslyPaidCustomSalary && selectedPayslip.previouslyPaidCustomSalary > 0) && (
+                  <div className="flex justify-between py-1.5 border-b border-indigo-200 bg-indigo-50/70 text-indigo-700 font-semibold px-2 rounded">
+                    <div>
+                      <span>Previously Paid (Custom Salary)</span>
+                      <span className="block text-[10px] text-indigo-500 font-normal">
+                        Full Month Earned: Rs. {formatSalaryNumber(selectedPayslip.monthlyEarnedSalary ?? selectedPayslip.netPayable)}
+                      </span>
+                    </div>
+                    <span>-Rs. {formatSalaryNumber(selectedPayslip.previouslyPaidCustomSalary)}</span>
+                  </div>
+                )}
 
                 {/* 4. Net Salary Payable */}
                 <div className="pt-2 flex justify-between font-bold text-sm text-slate-900 border-t-2 border-slate-900">

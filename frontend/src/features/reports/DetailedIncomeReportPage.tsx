@@ -154,6 +154,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
   const handleExportCsv = () => {
     if (!reportData || !reportData.rows.length) return;
     const meta: [string, string][] = [
+      ['Gross Customer Collection (Incl. Tax/Tips)', formatPKR(reportData.kpis.totalPaid)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
@@ -173,7 +174,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
       'Branch',
       'Qty',
       'Unit Price',
-      'Gross',
+      'Allocated Sales Before Discount (Excl. Tax)',
       'Discount',
       'Collected Net',
       'Tax',
@@ -213,6 +214,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
       return;
     }
     const meta: [string, string][] = [
+      ['Gross Customer Collection (Incl. Tax/Tips)', formatPKR(reportData.kpis.totalPaid)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
@@ -445,15 +447,15 @@ export const DetailedIncomeReportPage: React.FC = () => {
               </div>
 
               <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Collected Gross Allocation</span>
-                <span className="text-xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.grossSales)}</span>
-                <div className="text-[10px] text-slate-400 mt-1">Before discount</div>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Collected Net Revenue (Excl. Tax)</span>
+                <span className="text-xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.recognizedNetRevenue)}</span>
+                <div className="text-[10px] text-slate-400 mt-1">After discounts; excluding tax and tips</div>
               </div>
 
               <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
-                <span className="text-[10px] font-bold text-[#B82E69] uppercase tracking-wider block mb-1">Net Revenue</span>
-                <span className="text-xl font-extrabold text-[#B82E69] font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.recognizedNetRevenue)}</span>
-                <div className="text-[10px] text-emerald-600 mt-1">Actual receipts excluding tax and tips</div>
+                <span className="text-[10px] font-bold text-[#B82E69] uppercase tracking-wider block mb-1">Gross Customer Collection</span>
+                <span className="text-xl font-extrabold text-[#B82E69] font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.totalPaid)}</span>
+                <div className="text-[10px] text-emerald-600 mt-1">Actual receipts including collected tax and tips</div>
               </div>
 
               <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
@@ -543,7 +545,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
                     <th className="py-3.5 px-3 min-w-[140px] font-medium text-[#475569]">Client</th>
                     <th className="py-3.5 px-3 whitespace-nowrap font-medium text-[#475569]">Staff / Stylist</th>
                     <th className="py-3.5 px-3 text-center w-14 font-medium text-[#475569]">Qty</th>
-                    <th className="py-3.5 px-3 text-right whitespace-nowrap font-medium text-[#475569]">Gross</th>
+                    <th className="py-3.5 px-3 text-right whitespace-nowrap font-medium text-[#475569]">Allocated Sales (Excl. Tax)</th>
                     <th className="py-3.5 px-3 text-right whitespace-nowrap font-medium text-[#475569]">Discount</th>
                     <th className="py-3.5 px-3 text-right whitespace-nowrap font-bold text-[#9D2558]">Collected Net</th>
                     <th className="py-3.5 px-3 text-right whitespace-nowrap font-medium text-[#475569]">Tax</th>
@@ -800,7 +802,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
 
                   <tr>
                     <td colSpan={8} className="py-3 px-3 text-right font-medium text-slate-700">
-                      Collected Net Revenue Summary
+                      Collected Net Revenue Summary (Excl. Tax)
                     </td>
                     <td colSpan={7} className="py-3 px-3 text-right text-xs">
                       <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold mr-4">

@@ -446,14 +446,38 @@ export function evaluateEmployeePayroll(
   const advanceRecoveryAmount = advanceRecoveries.reduce((s: Decimal, a: any) => s.plus(d(a.amount)), d(0));
 
   const totalDeductions = preAdvanceDeductions.plus(advanceRecoveryAmount);
-  const netPayable = Decimal.max(0, grossPayable.minus(totalDeductions));
+  const standardNetPayable = Decimal.max(0, grossPayable.minus(totalDeductions));
   const attendanceImpact = d(0).minus(absenceDeductions.plus(attendancePenaltyDeductions));
+
+  // STEP 3: Reconciliation for previously finalized or paid custom salary in the same month
+  const alreadyPaidSalary = d((options as any).alreadyPaidSalary || 0);
+  const alreadyFinalizedNet = d((options as any).alreadyFinalizedNet || 0);
+  const previouslyPaidCustomSalary = Decimal.max(alreadyPaidSalary, alreadyFinalizedNet);
+
+  let monthlyEarnedSalary = standardNetPayable;
+  let remainingMonthlySalary = standardNetPayable;
+  let effectiveGrossPayable = grossPayable;
+  let netPayable = standardNetPayable;
+
+  if (isMonthly && previouslyPaidCustomSalary.gt(0)) {
+    remainingMonthlySalary = Decimal.max(0, standardNetPayable.minus(previouslyPaidCustomSalary));
+    effectiveGrossPayable = Decimal.max(0, grossPayable.minus(previouslyPaidCustomSalary));
+    netPayable = remainingMonthlySalary;
+  }
 
   let canFinalize = true;
   let blockReason: string | undefined;
   if (overlapDates.length) {
-    canFinalize = false;
-    blockReason = `Salary days have already been paid or reserved in an earlier finalized payroll run: ${overlapDates.join(', ')}.`;
+    if (runType === 'MONTHLY' && isMonthly && overlapDates.length < employedDates.length && previouslyPaidCustomSalary.gt(0)) {
+      // Monthly reconciliation run: earlier dates were already finalized in a custom range and deducted above!
+      // This is an intentional reconciliation, not a blocking conflict.
+    } else if (overlapDates.length >= employedDates.length) {
+      canFinalize = false;
+      blockReason = 'All salary days for this employee in this month have already been finalized.';
+    } else {
+      canFinalize = false;
+      blockReason = `Salary days have already been paid or reserved in an earlier finalized payroll run: ${overlapDates.join(', ')}.`;
+    }
   }
   const hasExceptions = exceptionDetails.length > 0;
   if (hasExceptions) {
@@ -475,6 +499,10 @@ export function evaluateEmployeePayroll(
     formula = `${prorationFormula}. Base (PKR ${fmtDec(baseEarnings)}) - Penalties (PKR ${fmtDec(attendancePenaltyDeductions)}) + Overtime (PKR ${fmtDec(approvedOvertimeAmount)})${extrasText} = Net PKR ${fmtDec(netPayable)}`;
   } else {
     formula = `Commission-Only Contract: Base = PKR 0. Approved Overtime = PKR ${fmtDec(approvedOvertimeAmount)}${extrasText}. Net PKR ${fmtDec(netPayable)}. Commission earned is processed separately via Commission page.`;
+  }
+
+  if (isMonthly && previouslyPaidCustomSalary.gt(0)) {
+    formula += ` [Reconciliation: Full Month Earned PKR ${fmtDec(monthlyEarnedSalary)} - Previously Paid Custom Salary PKR ${fmtDec(previouslyPaidCustomSalary)} = Remaining Net PKR ${fmtDec(netPayable)}]`;
   }
 
   return {
@@ -540,7 +568,10 @@ export function evaluateEmployeePayroll(
       otherDeductions: otherDeductions.toNumber(),
       advanceRecoveries,
       advanceRecoveryAmount: advanceRecoveryAmount.toNumber(),
-      grossPayable: grossPayable.toNumber(),
+      monthlyEarnedSalary: isMonthly && previouslyPaidCustomSalary.gt(0) ? monthlyEarnedSalary.toNumber() : undefined,
+      previouslyPaidCustomSalary: previouslyPaidCustomSalary.gt(0) ? previouslyPaidCustomSalary.toNumber() : 0,
+      remainingMonthlySalary: isMonthly && previouslyPaidCustomSalary.gt(0) ? remainingMonthlySalary.toNumber() : undefined,
+      grossPayable: effectiveGrossPayable.toNumber(),
       totalDeductions: totalDeductions.toNumber(),
       netPayable: netPayable.toNumber(),
       paidAmount: 0,

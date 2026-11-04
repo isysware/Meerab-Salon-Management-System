@@ -1,4 +1,13 @@
 import type { IncomeExpenseReportRow } from '../../types/salon';
+import Decimal from 'decimal.js';
+
+/** Collection summary of the displayed rows; unpaid accruals and COGS are reference information. */
+export function incomeExpenseCollectionSummary(income: number, rows: IncomeExpenseReportRow[]) {
+  const paid = rows.filter(row => ['OPERATING_EXPENSE', 'SALARY_EXPENSE', 'COMMISSION_EXPENSE'].includes(row.type))
+    .reduce((sum, row) => sum.plus(row.status === 'ACCRUED' ? 0 : row.cashFlow !== undefined ? -row.cashFlow : row.paid ?? 0), new Decimal(0));
+  return { paidOperatingExpenses: paid.toDecimalPlaces(2).toNumber(),
+    surplus: new Decimal(income).minus(paid).toDecimalPlaces(2).toNumber() };
+}
 
 /** Signed money moved for this row; cumulative invoice receipts must not repeat dues collections. */
 export function incomeExpenseCashFlow(row: IncomeExpenseReportRow): number {

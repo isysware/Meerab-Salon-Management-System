@@ -1,4 +1,4 @@
-import { loadCollectionEvents, collectionTotals } from './collectionEvents.js';
+import { loadCollectionEvents, collectionTotals, invoiceBalanceAsOf } from './collectionEvents.js';
 import prisma from '../../config/prisma.js';
 import { dateOnly, ymd } from '../../lib/dates.js';
 import { round2, toDec } from '../../lib/money.js';
@@ -21,7 +21,7 @@ export const taxReport = async (actor, query = {}) => {
     ...(ctx.branchId ? { branchId: ctx.branchId } : {}),
     ...(actor.role === 'ACCOUNTANT' ? { processedByUserId: actor.id } : {}),
   };
-  const [branches, invoices, refunds, collections] = await Promise.all([
+  const [branches, invoices, refunds, collections, receivables] = await Promise.all([
     prisma.branch.findMany({ select: { id: true, name: true } }),
     prisma.invoice.findMany({
       // Keep original recognition even after a void. Its dated reversal offsets it once.
@@ -38,6 +38,10 @@ export const taxReport = async (actor, query = {}) => {
       orderBy: { refundDate: 'asc' },
     }),
     loadCollectionEvents(scope, ctx.fromStr, ctx.toStr),
+    // End-date customer tax receivable includes prior invoices and later dated collections.
+    prisma.invoice.findMany({ where: { ...scope, date: { lte: dateOnly(ctx.toStr) }, tax: { gt: 0 } },
+      include: { lines: { include: { components: true }, orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] },
+        payments: true, refunds: { include: { lines: true } }, booking: { include: { payments: true } } } }),
   ]);
   const branchNames = new Map(branches.map(b => [b.id, b.name]));
   const lines = new Map();
@@ -129,6 +133,16 @@ export const taxReport = async (actor, query = {}) => {
   const sum = field => selected.reduce((total, row) => total.plus(row[field]), toDec(0));
   const collectionRows = collections.filter(e => !search || [e.invoice.invoiceNumber, e.line.name, e.invoice.clientName, branchNames.get(e.invoice.branchId), e.line.staffName, e.record.method, e.record.refundNumber].some(v => v?.toLowerCase().includes(search)));
   const collected = collectionTotals(collectionRows);
+  const uncollectedTax = receivables.reduce((total, invoice) => {
+    const balance = invoiceBalanceAsOf(invoice, ctx.toStr);
+    return balance.uncollectedTaxByLine.reduce((sum, item) => {
+      const line = invoice.lines.find(l => l.id === item.lineId);
+      const matches = !search || [invoice.invoiceNumber, line?.name, invoice.clientName, branchNames.get(invoice.branchId),
+        line?.staffName, invoice.paymentMethod, ...(invoice.refunds || []).filter(r => ymd(r.refundDate) <= ctx.toStr).map(r => r.refundNumber)]
+        .some(value => value?.toLowerCase().includes(search));
+      return matches ? sum.plus(item.amount) : sum;
+    }, total);
+  }, toDec(0));
   const tax = sum('taxAmount');
   const base = sum('taxableBase');
   return formatReportResponse(ctx.meta, {
@@ -137,6 +151,7 @@ export const taxReport = async (actor, query = {}) => {
     kpis: {
       totalInvoicesTaxed: invoiceRows.length, totalServicesTaxed: serviceRows.length,
       totalTaxableSales: number(base), totalTaxCharged: number(sum('grossTax')),
+      uncollectedCustomerTax: number(uncollectedTax),
       totalTaxCollected: collected.taxCollected, collectedRevenue: collected.collectedRevenue,
       totalTaxRefunded: number(sum('refundedTax')), netTaxLiability: number(tax),
     },

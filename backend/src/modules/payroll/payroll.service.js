@@ -62,6 +62,9 @@ const toPayslipDTO = (ps, run) => {
     paidAmount: paid.toNumber(), outstandingAmount: outstanding.toNumber(), status,
     calculationDetails: { ...snapshot.calculationDetails, formula },
     payments: (ps.payments ?? []).sort((a, b) => a.paidAt - b.paidAt).map(toPaymentDTO),
+    monthlyEarnedSalary: snapshot.monthlyEarnedSalary,
+    previouslyPaidCustomSalary: snapshot.previouslyPaidCustomSalary,
+    remainingMonthlySalary: snapshot.remainingMonthlySalary,
   };
 };
 
@@ -124,14 +127,28 @@ const evaluateBranchMonth = async (tx, actor, branchId, month, staffId, options 
       ...(options.excludeRunId ? { id: { not: options.excludeRunId } } : {}),
       month,
     },
-    include: { payslips: true },
+    include: {
+      payslips: {
+        include: {
+          payments: {
+            where: { status: 'COMPLETED' },
+          },
+        },
+      },
+    },
   });
 
   const alreadyFinalizedByStaff = new Map();
   const finalizedBaseByStaff = new Map();
+  const finalizedNetByStaff = new Map();
+  const paidSalaryByStaff = new Map();
   for (const fr of finalizedRuns) {
     for (const ps of fr.payslips) {
       finalizedBaseByStaff.set(ps.staffId, round2(toDec(finalizedBaseByStaff.get(ps.staffId) || 0).plus(ps.snapshot?.baseEarnings || 0)).toNumber());
+      finalizedNetByStaff.set(ps.staffId, round2(toDec(finalizedNetByStaff.get(ps.staffId) || 0).plus(ps.netPayable || 0)).toNumber());
+      const salPaid = (ps.payments || []).filter((p) => p.status === 'COMPLETED').reduce((acc, p) => acc.plus(toDec(p.amount)), toDec(0));
+      paidSalaryByStaff.set(ps.staffId, round2(toDec(paidSalaryByStaff.get(ps.staffId) || 0).plus(salPaid)).toNumber());
+
       if (!alreadyFinalizedByStaff.has(ps.staffId)) {
         alreadyFinalizedByStaff.set(ps.staffId, new Set());
       }
@@ -213,6 +230,8 @@ const evaluateBranchMonth = async (tx, actor, branchId, month, staffId, options 
         runType,
         alreadyFinalizedDates: staffFinalizedDates,
         alreadyFinalizedBaseEarnings: finalizedBaseByStaff.get(s.id) || 0,
+        alreadyFinalizedNet: finalizedNetByStaff.get(s.id) || 0,
+        alreadyPaidSalary: paidSalaryByStaff.get(s.id) || 0,
       }
     );
 
@@ -374,10 +393,14 @@ export const finalizeRun = async (actor, runId, options = {}) => {
       if (!r.canFinalize) throw conflict('PAYROLL_BLOCKED', `Cannot finalize payroll for ${r.staff.name}: ${r.blockReason}`);
 
       const alreadyDates = alreadyFinalizedByStaff?.get(r.staff.id);
-      if (alreadyDates) {
-        for (const d of r.payslip.consumedAttendanceDates || []) {
-          if (alreadyDates.has(d)) {
-            throw conflict('DUPLICATE_PAYROLL', `Staff member ${r.staff.name} already has finalized payroll covering date ${d}.`);
+      if (alreadyDates && alreadyDates.size > 0) {
+        const hasUnfinalizedDays = getDatesInRange(actualStart, actualEnd).some((d) => !alreadyDates.has(d));
+        const isReconciled = (r.payslip?.previouslyPaidCustomSalary || 0) > 0;
+        if (!isReconciled || !hasUnfinalizedDays) {
+          for (const d of r.payslip.consumedAttendanceDates || []) {
+            if (alreadyDates.has(d)) {
+              throw conflict('DUPLICATE_PAYROLL', `Staff member ${r.staff.name} already has finalized payroll covering date ${d}.`);
+            }
           }
         }
       }
@@ -557,10 +580,14 @@ export const finalizeRun = async (actor, runId, options = {}) => {
 
     for (const r of results) {
       const alreadyDates = alreadyFinalizedByStaff?.get(r.staff.id);
-      if (alreadyDates) {
-        for (const d of r.payslip.consumedAttendanceDates || []) {
-          if (alreadyDates.has(d)) {
-            throw conflict('DUPLICATE_PAYROLL', `Staff member ${r.staff.name} already has finalized payroll covering date ${d}.`);
+      if (alreadyDates && alreadyDates.size > 0) {
+        const hasUnfinalizedDays = getDatesInRange(actualStart, actualEnd).some((d) => !alreadyDates.has(d));
+        const isReconciled = (r.payslip?.previouslyPaidCustomSalary || 0) > 0;
+        if (!isReconciled || !hasUnfinalizedDays) {
+          for (const d of r.payslip.consumedAttendanceDates || []) {
+            if (alreadyDates.has(d)) {
+              throw conflict('DUPLICATE_PAYROLL', `Staff member ${r.staff.name} already has finalized payroll covering date ${d}.`);
+            }
           }
         }
       }
