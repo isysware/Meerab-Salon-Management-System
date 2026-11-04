@@ -174,6 +174,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
 
   // Signed Paid total: Net cash settled = income paid - expense paid (e.g. 2,000 - 150 - 50 = PKR 1,800)
   const signedPaid = useMemo(() => {
+    if (typeof reportData?.totals?.netCashMovement === 'number') return reportData.totals.netCashMovement;
     if (typeof reportData?.totals?.paid === 'number') {
       return reportData.totals.paid;
     }
@@ -186,6 +187,9 @@ export const IncomeExpenseReportPage: React.FC = () => {
     }, 0);
   }, [reportData]);
 
+  const customerCollections = reportData?.totals.customerCollections ?? reportData?.totals.collections ?? 0;
+  const nonOperatingCashOutflows = reportData?.totals.nonOperatingCashOutflows ?? reportData?.kpis.staffLoanCashOutflow ?? 0;
+
   // Export handlers
   const handleExportExcel = () => {
     if (!reportData || !reportData.rows.length) return;
@@ -194,7 +198,11 @@ export const IncomeExpenseReportPage: React.FC = () => {
       ['Actual Paid Operating Expenses', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).paidOperatingExpenses)],
       ['Recognized Revenue (Accrual; Separate Information)', formatPKR(reportData.totals.recognizedIncome ?? 0)],
       ['COGS (Separate Accounting Information)', formatPKR(reportData.kpis.cogs ?? 0)],
-      ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.staffLoanCashOutflow ?? 0)],
+      ['Total Customer Collections (Net of Customer Refunds; Incl. Tax and Tips)', formatPKR(customerCollections)],
+      ['Staff Loan Cash Outflow (Net of Reversals)', formatPKR(reportData.kpis.staffLoanCashOutflow ?? 0)],
+      ['Non-Operating Cash Outflows (Net of Reversals)', formatPKR(nonOperatingCashOutflows)],
+      ['Net Cash Movement', formatPKR(signedPaid)],
+      ...(reportData.kpis.staffLoanReceivable !== undefined ? [['Staff Loan Receivable (Current Branch Balance)', formatPKR(reportData.kpis.staffLoanReceivable)]] as [string, string][] : []),
       ['Report', 'Income & Expense Reports'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -210,8 +218,9 @@ export const IncomeExpenseReportPage: React.FC = () => {
       'Branch',
       'Service Amount (Excl. Tax)',
       'Tax Amount',
-      'Total Bill (Incl. Tax)',
-      'Total Received',
+      'Total Bill (Incl. Tax, Excl. Tip)',
+      'Tip Amount',
+      'Total Received (Incl. Tip)',
       'Remaining Dues',
       'Payment Status',
       'Date',
@@ -240,6 +249,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
         isSettlement ? '0.00' : isRefund ? `-${Math.abs(serviceAmountVal).toFixed(2)}` : isIncome ? `+${serviceAmountVal.toFixed(2)}` : `-${serviceAmountVal.toFixed(2)}`,
         isSettlement || !isIncome ? '0.00' : isRefund ? `-${Math.abs(taxVal).toFixed(2)}` : taxVal.toFixed(2),
         isSettlement ? '0.00' : isRefund ? `-${Math.abs(totalBillVal).toFixed(2)}` : totalBillVal.toFixed(2),
+        (r.tipAmount ?? 0).toFixed(2),
         incomeExpenseCashText(r),
         remainingVal.toFixed(2),
         r.status || 'PAID',
@@ -248,7 +258,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       ];
     });
 
-    const signedPaidFormatted = signedPaid >= 0 ? `+${signedPaid.toFixed(2)}` : `-${Math.abs(signedPaid).toFixed(2)}`;
+    const customerCollectionsFormatted = customerCollections.toFixed(2);
     const totalsRow = [
       'TOTALS (PKR)',
       '',
@@ -258,7 +268,8 @@ export const IncomeExpenseReportPage: React.FC = () => {
       `+${(reportData.totals.income || 0).toFixed(2)}`,
       `+${(reportData.totals.collectedTax ?? reportData.kpis?.totalCollectedTax ?? 0).toFixed(2)}`,
       `+${totalBillSum.toFixed(2)}`,
-      signedPaidFormatted,
+      (reportData.totals.tipAmount ?? 0).toFixed(2),
+      customerCollectionsFormatted,
       (reportData.totals.remaining || 0).toFixed(2),
       '',
       '',
@@ -275,7 +286,11 @@ export const IncomeExpenseReportPage: React.FC = () => {
       ['Actual Paid Operating Expenses', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).paidOperatingExpenses)],
       ['Recognized Revenue (Accrual; Separate Information)', formatPKR(reportData.totals.recognizedIncome ?? 0)],
       ['COGS (Separate Accounting Information)', formatPKR(reportData.kpis.cogs ?? 0)],
-      ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.staffLoanCashOutflow ?? 0)],
+      ['Total Customer Collections (Net of Customer Refunds; Incl. Tax and Tips)', formatPKR(customerCollections)],
+      ['Staff Loan Cash Outflow (Net of Reversals)', formatPKR(reportData.kpis.staffLoanCashOutflow ?? 0)],
+      ['Non-Operating Cash Outflows (Net of Reversals)', formatPKR(nonOperatingCashOutflows)],
+      ['Net Cash Movement', formatPKR(signedPaid)],
+      ...(reportData.kpis.staffLoanReceivable !== undefined ? [['Staff Loan Receivable (Current Branch Balance)', formatPKR(reportData.kpis.staffLoanReceivable)]] as [string, string][] : []),
       ['Report', 'Income & Expense Reports'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -291,8 +306,9 @@ export const IncomeExpenseReportPage: React.FC = () => {
       'Branch',
       'Service Amount (Excl. Tax)',
       'Tax Amount',
-      'Total Bill (Incl. Tax)',
-      'Total Received',
+      'Total Bill (Incl. Tax, Excl. Tip)',
+      'Tip Amount',
+      'Total Received (Incl. Tip)',
       'Remaining Dues',
       'Payment Status',
       'Date',
@@ -321,6 +337,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
         isSettlement ? '0.00' : isRefund ? `-${Math.abs(serviceAmountVal).toFixed(2)}` : isIncome ? `+${serviceAmountVal.toFixed(2)}` : `-${serviceAmountVal.toFixed(2)}`,
         isSettlement || !isIncome ? '0.00' : isRefund ? `-${Math.abs(taxVal).toFixed(2)}` : taxVal.toFixed(2),
         isSettlement ? '0.00' : isRefund ? `-${Math.abs(totalBillVal).toFixed(2)}` : totalBillVal.toFixed(2),
+        (r.tipAmount ?? 0).toFixed(2),
         incomeExpenseCashText(r),
         remainingVal.toFixed(2),
         r.status || 'PAID',
@@ -329,7 +346,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       ];
     });
 
-    const signedPaidFormatted = signedPaid >= 0 ? `+${signedPaid.toFixed(2)}` : `-${Math.abs(signedPaid).toFixed(2)}`;
+    const customerCollectionsFormatted = customerCollections.toFixed(2);
     const totalsRow = [
       'TOTALS (PKR)',
       '',
@@ -339,7 +356,8 @@ export const IncomeExpenseReportPage: React.FC = () => {
       `+${(reportData.totals.income || 0).toFixed(2)}`,
       `+${(reportData.totals.collectedTax ?? reportData.kpis?.totalCollectedTax ?? 0).toFixed(2)}`,
       `+${totalBillSum.toFixed(2)}`,
-      signedPaidFormatted,
+      (reportData.totals.tipAmount ?? 0).toFixed(2),
+      customerCollectionsFormatted,
       (reportData.totals.remaining || 0).toFixed(2),
       '',
       '',
@@ -354,19 +372,23 @@ export const IncomeExpenseReportPage: React.FC = () => {
       window.print();
       return;
     }
-    const signedPaidFormatted = signedPaid >= 0 ? `+${formatPKR(signedPaid)}` : `-${formatPKR(Math.abs(signedPaid))}`;
+    const customerCollectionsFormatted = formatPKR(customerCollections);
     const meta: [string, string][] = [
       ['Collection-Based Operating Surplus', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).surplus)],
       ['Actual Paid Operating Expenses', formatPKR(incomeExpenseCollectionSummary(reportData.totals.income, reportData.rows).paidOperatingExpenses)],
       ['Recognized Revenue (Accrual; Separate Information)', formatPKR(reportData.totals.recognizedIncome ?? 0)],
       ['COGS (Separate Accounting Information)', formatPKR(reportData.kpis.cogs ?? 0)],
-      ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.staffLoanCashOutflow ?? 0)],
+      ['Total Customer Collections (Net of Customer Refunds; Incl. Tax and Tips)', formatPKR(customerCollections)],
+      ['Staff Loan Cash Outflow (Net of Reversals)', formatPKR(reportData.kpis.staffLoanCashOutflow ?? 0)],
+      ['Non-Operating Cash Outflows (Net of Reversals)', formatPKR(nonOperatingCashOutflows)],
+      ['Net Cash Movement', formatPKR(signedPaid)],
+      ...(reportData.kpis.staffLoanReceivable !== undefined ? [['Staff Loan Receivable (Current Branch Balance)', formatPKR(reportData.kpis.staffLoanReceivable)]] as [string, string][] : []),
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
       ['Revenue Collected (Excl. Tax)', `PKR ${formatPKR(reportData.totals.income)}`],
       ['Tax Collected', `PKR ${formatPKR(reportData.totals.collectedTax ?? reportData.kpis?.totalCollectedTax ?? 0)}`],
-      ['Total Collections (Incl. Tax)', `PKR ${formatPKR(reportData.totals.collections ?? signedPaid)}`],
+      ['Total Customer Collections (Incl. Tax and Tips)', `PKR ${formatPKR(customerCollections)}`],
 
       ['Outstanding Dues', `PKR ${formatPKR(reportData.totals.remaining || 0)}`],
     ];
@@ -378,8 +400,9 @@ export const IncomeExpenseReportPage: React.FC = () => {
       'Branch',
       'Service Amount (Excl. Tax)',
       'Tax Amount',
-      'Total Bill (Incl. Tax)',
-      'Total Received',
+      'Total Bill (Incl. Tax, Excl. Tip)',
+      'Tip Amount',
+      'Total Received (Incl. Tip)',
       'Remaining Dues',
       'Status',
       'Date',
@@ -407,7 +430,8 @@ export const IncomeExpenseReportPage: React.FC = () => {
         isSettlement ? '0.00' : isRefund ? `-${formatPKR(Math.abs(serviceAmountVal))}` : isIncome ? `+${formatPKR(serviceAmountVal)}` : `-${formatPKR(serviceAmountVal)}`,
         isSettlement || !isIncome ? '0.00' : isRefund ? `-${formatPKR(Math.abs(taxVal))}` : formatPKR(taxVal),
         isSettlement ? '0.00' : isRefund ? `-${formatPKR(Math.abs(totalBillVal))}` : formatPKR(totalBillVal),
-        r.cashFlow !== undefined ? `${r.cashFlow >= 0 ? '+' : '-'}${formatPKR(Math.abs(r.cashFlow))}` : isAccruedComm || !r.paid ? '0.00' : isIncome ? `+${formatPKR(r.paid)}` : `-${formatPKR(r.paid)}`,
+        formatPKR(r.tipAmount ?? 0),
+        incomeExpenseCashText(r),
         formatPKR(remainingVal),
         r.status || 'PAID',
         formatDateDisplay(r.date),
@@ -430,7 +454,8 @@ export const IncomeExpenseReportPage: React.FC = () => {
         `+${formatPKR(reportData.totals.income)}`,
         `+${formatPKR(reportData.totals.collectedTax ?? reportData.kpis?.totalCollectedTax ?? 0)}`,
         `+${formatPKR(totalBillSum)}`,
-        signedPaidFormatted,
+        formatPKR(reportData.totals.tipAmount ?? 0),
+        customerCollectionsFormatted,
         `+${formatPKR(reportData.totals.remaining || 0)}`,
         '',
         '',
@@ -678,10 +703,10 @@ export const IncomeExpenseReportPage: React.FC = () => {
             </div>
             <div className="mt-3 relative z-10">
               <span className="text-xl sm:text-2xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
-                PKR {formatPKR(reportData?.totals?.collections ?? signedPaid)}
+                PKR {formatPKR(customerCollections)}
               </span>
               <span className="text-[11px] text-[#78616C] font-medium mt-1 block leading-tight">
-                Total Collections (incl. tax)
+                Total Customer Collections (incl. tax and tips)
               </span>
             </div>
           </div>
@@ -846,8 +871,9 @@ export const IncomeExpenseReportPage: React.FC = () => {
                   <th className="py-3 px-4 min-w-[200px]">Invoice / Customer</th>
                   <th className="py-3 px-4 text-right whitespace-nowrap">Service Amount (Excl. Tax)</th>
                   <th className="py-3 px-4 text-right whitespace-nowrap">Tax Amount</th>
-                  <th className="py-3 px-4 text-right whitespace-nowrap">Total Bill (Incl. Tax)</th>
-                  <th className="py-3 px-4 text-right whitespace-nowrap">Total Received</th>
+                  <th className="py-3 px-4 text-right whitespace-nowrap">Total Bill (Incl. Tax, Excl. Tip)</th>
+                  <th className="py-3 px-4 text-right whitespace-nowrap">Tip Amount</th>
+                  <th className="py-3 px-4 text-right whitespace-nowrap">Total Received (Incl. Tip)</th>
                   <th className="py-3 px-4 text-right whitespace-nowrap">Remaining Dues</th>
                   <th className="py-3 px-4 text-center w-28 whitespace-nowrap">Payment Status</th>
                   <th className="py-3 px-4 whitespace-nowrap">Date / Payment Method</th>
@@ -974,7 +1000,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
                           )}
                         </td>
 
-                        {/* 4. Total Bill (Incl. Tax) */}
+                        {/* 4. Total Bill (Incl. Tax, Excl. Tip) */}
                         <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono tabular-nums font-semibold text-[#18191B]">
                           {isSettlement ? (
                             <span className="text-slate-400">—</span>
@@ -987,6 +1013,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
                           )}
                         </td>
 
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono tabular-nums text-slate-700">PKR {formatPKR(row.tipAmount ?? 0)}</td>
                         {/* 5. Total Received */}
                         <td className="py-3.5 px-4 text-right whitespace-nowrap font-mono tabular-nums font-semibold">
                           {isSettlement ? (
@@ -1060,7 +1087,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={8} className="py-16 text-center text-slate-400 font-medium">
+                    <td colSpan={9} className="py-16 text-center text-slate-400 font-medium">
                       No records found for the selected branch, dates, and filters.
                     </td>
                   </tr>
@@ -1071,8 +1098,8 @@ export const IncomeExpenseReportPage: React.FC = () => {
               <tfoot className="bg-[#FAF8F9]/90 border-t-2 border-slate-200 text-xs">
                 {reportData?.totals.collections !== undefined && (
                   <tr className="border-b border-slate-200/70">
-                    <td colSpan={4} className="py-3 px-4 text-right font-semibold text-slate-700">Total Collections (Net Client Payments)</td>
-                    <td className="py-3 px-4 text-right font-bold font-mono tabular-nums text-emerald-700">+{formatPKR(reportData.totals.collections ?? signedPaid)}</td>
+                    <td colSpan={5} className="py-3 px-4 text-right font-semibold text-slate-700">Total Customer Collections (Net of Customer Refunds)</td>
+                    <td className="py-3 px-4 text-right font-bold font-mono tabular-nums text-emerald-700">{formatPKR(customerCollections)}</td>
                     <td colSpan={3} />
                   </tr>
                 )}
@@ -1093,9 +1120,10 @@ export const IncomeExpenseReportPage: React.FC = () => {
                   <td className="py-3.5 px-4 text-right font-mono tabular-nums text-sm text-[#18191B]">
                     +{formatPKR(totalBillSum)}
                   </td>
+                  <td className="py-3.5 px-4 text-right font-mono tabular-nums text-sm text-slate-700">PKR {formatPKR(reportData?.totals.tipAmount ?? 0)}</td>
                   {/* Col 5: Total Received */}
-                  <td className={`py-3.5 px-4 text-right font-mono tabular-nums text-sm ${signedPaid >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                    {signedPaid >= 0 ? `+${formatPKR(signedPaid)}` : `-${formatPKR(Math.abs(signedPaid))}`}
+                  <td className={`py-3.5 px-4 text-right font-mono tabular-nums text-sm ${customerCollections >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                    {formatPKR(customerCollections)}
                   </td>
                   {/* Col 6: Remaining Dues */}
                   <td className="py-3.5 px-4 text-right font-mono tabular-nums text-sm text-amber-700">
@@ -1107,7 +1135,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
 
                 {/* Row 2: Recognized Business Revenue */}
                 <tr className="border-b border-slate-200/70">
-                  <td colSpan={4} className="py-3 px-4 text-right font-medium text-slate-700">
+                  <td colSpan={5} className="py-3 px-4 text-right font-medium text-slate-700">
                     Collected Net Revenue (Excl. Tax and Tips)
                   </td>
                   <td colSpan={2} className="py-3 px-4 text-right font-bold font-mono tabular-nums text-emerald-700">
@@ -1118,7 +1146,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
 
                 {/* Row 4: Operating Overheads */}
                 <tr className="border-b border-slate-200/70">
-                  <td colSpan={4} className="py-3 px-4 text-right font-medium text-slate-700">
+                  <td colSpan={5} className="py-3 px-4 text-right font-medium text-slate-700">
                     Actual Paid Operating Expenses (Including Salary and Commission Payouts)
                   </td>
                   <td colSpan={2} className="py-3 px-4 text-right font-bold font-mono tabular-nums text-rose-700">
@@ -1129,7 +1157,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
 
                 {/* Collection-based summary excludes unpaid accruals and separate COGS. */}
                 <tr>
-                  <td colSpan={4} className="py-3 px-4 text-right font-bold text-slate-900">
+                  <td colSpan={5} className="py-3 px-4 text-right font-bold text-slate-900">
                     Collection-Based Operating Surplus (Collected Revenue Less Paid Expenses)
                   </td>
                   <td colSpan={2} className={`py-3 px-4 text-right font-bold font-mono tabular-nums text-sm ${netRealizedPosition >= 0 ? 'text-[#B82E69]' : 'text-rose-700'}`}>
@@ -1137,12 +1165,16 @@ export const IncomeExpenseReportPage: React.FC = () => {
                   </td>
                   <td colSpan={2} className="py-3 px-4"></td>
                 </tr>
-                <tr className="border-t border-slate-200"><td colSpan={8} className="py-3 px-4 text-xs text-slate-600">Separate accounting information - not deducted from collection-based surplus</td></tr>
-                <tr><td colSpan={4} className="py-3 px-4 text-right">Recognized Revenue (Accrual Net Sales)</td><td colSpan={2} className="py-3 px-4 text-right font-mono">{formatPKR(reportData?.totals.recognizedIncome ?? 0)}</td><td colSpan={2} /></tr>
+                <tr><td colSpan={5} className="py-3 px-4 text-right">Non-Operating Cash Outflows (Net of Reversals)</td><td colSpan={2} className="py-3 px-4 text-right font-mono">{formatPKR(nonOperatingCashOutflows)}</td><td colSpan={2} /></tr>
+                <tr><td colSpan={5} className="py-3 px-4 text-right font-semibold">Net Cash Movement</td><td colSpan={2} className="py-3 px-4 text-right font-mono font-semibold">{formatPKR(signedPaid)}</td><td colSpan={2} /></tr>
+                {reportData?.kpis.staffLoanReceivable !== undefined && <tr><td colSpan={5} className="py-3 px-4 text-right">Staff Loan Receivable (Current Branch Balance)</td><td colSpan={2} className="py-3 px-4 text-right font-mono">{formatPKR(reportData.kpis.staffLoanReceivable)}</td><td colSpan={2} /></tr>}
+                <tr><td colSpan={5} className="py-3 px-4 text-right">Staff Loan Cash Outflow (Net of Reversals)</td><td colSpan={2} className="py-3 px-4 text-right font-mono">{formatPKR(reportData?.kpis.staffLoanCashOutflow ?? 0)}</td><td colSpan={2} /></tr>
+                <tr className="border-t border-slate-200"><td colSpan={9} className="py-3 px-4 text-xs text-slate-600">Separate accounting information - not deducted from collection-based surplus</td></tr>
+                <tr><td colSpan={5} className="py-3 px-4 text-right">Recognized Revenue (Accrual Net Sales)</td><td colSpan={2} className="py-3 px-4 text-right font-mono">{formatPKR(reportData?.totals.recognizedIncome ?? 0)}</td><td colSpan={2} /></tr>
                 {/* Row 3: Cost of Goods Sold (COGS & Consumables) */}
                 {reportData?.kpis?.cogs !== undefined && (
                   <tr className="border-b border-slate-200/70">
-                    <td colSpan={4} className="py-3 px-4 text-right font-medium text-slate-700">
+                    <td colSpan={5} className="py-3 px-4 text-right font-medium text-slate-700">
                       Cost of Goods Sold (Retail COGS & Consumable Usage)
                     </td>
                     <td colSpan={2} className="py-3 px-4 text-right font-bold font-mono tabular-nums text-amber-600">
@@ -1152,8 +1184,8 @@ export const IncomeExpenseReportPage: React.FC = () => {
                   </tr>
                 )}
 
-                <tr><td colSpan={4} className="py-3 px-4 text-right">Staff Loan Disbursements - Non-Operating (Net of Reversals)</td><td colSpan={2} className="py-3 px-4 text-right font-mono">{formatPKR(reportData?.kpis.staffLoanCashOutflow ?? 0)}</td><td colSpan={2} /></tr>
-                <tr><td colSpan={4} className="py-3 px-4 text-right">Reported Expense Recognition (Reference Only)</td><td colSpan={2} className="py-3 px-4 text-right font-mono">{formatPKR(totals.expense)}</td><td colSpan={2} /></tr>
+
+                <tr><td colSpan={5} className="py-3 px-4 text-right">Reported Expense Recognition (Reference Only)</td><td colSpan={2} className="py-3 px-4 text-right font-mono">{formatPKR(totals.expense)}</td><td colSpan={2} /></tr>
               </tfoot>
             </table>
           </div>

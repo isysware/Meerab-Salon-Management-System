@@ -125,6 +125,33 @@ describe('Staff loan cash and reporting reconciliation', () => {
     expect(ledger.kpis).toMatchObject({ staffLoanCashOutflow: 10000, totalOperatingExpenses: 0, netOperatingPosition: 0 });
     expect(ledger.totals.paid).toBe(-10000); expect(ledger.rows).toHaveLength(1);
   });
+  it('separates 1,100 customer collections, 1,000 loan outflow, 100 net cash and 1,000 receivable', async () => {
+    await issueAdvance(actor, { ...input, amount: 1000, recoveryPerMonth: 200 });
+    db.salaryAdvance.findMany.mockResolvedValue([{ ...loan, amount: 1000, recoveries: [] }]);
+    db.invoice.findMany.mockResolvedValue([{ id: 'i1', invoiceNumber: 'INV-1', date: new Date('2026-11-01'), branchId: 'b1',
+      netSales: 1000, tax: 100, total: 1100, amountDue: 0, payments: [{ kind: 'POS', billAmountAllocated: 1100 }],
+      lines: [{ type: 'SERVICE', netSales: 1000, tax: 100 }] }]);
+    const report = await incomeExpenseReport(actor, query);
+    expect(report.totals).toMatchObject({ customerCollections: 1100, staffLoanCashOutflow: 1000,
+      nonOperatingCashOutflows: 1000, netCashMovement: 100, income: 1000, expense: 0, net: 1000 });
+    expect(report.kpis.staffLoanReceivable).toBe(1000);
+    expect(report.rows.find(r => r.source === 'Staff Loan').cashFlow).toBe(-1000);
+    db.expense.findMany.mockResolvedValue([{ id: 'e1', expenseDate: new Date('2026-11-02'), branchId: 'b1',
+      status: 'POSTED', amount: 50, category: 'General', paymentSource: 'CASH_DRAWER' }]);
+    const withExpense = await incomeExpenseReport(actor, query);
+    expect(withExpense.totals).toMatchObject({ customerCollections: 1100, nonOperatingCashOutflows: 1000, netCashMovement: 50, expense: 50, net: 950 });
+    db.invoiceRefund.findMany.mockResolvedValue([{ id: 'rf1', refundDate: new Date('2026-11-03'),
+      netReversed: 200, taxReversed: 20, cashOut: 220, invoice: { id: 'i1', branchId: 'b1' } }]);
+    const withRefund = await incomeExpenseReport(actor, query);
+    expect(withRefund.totals).toMatchObject({ customerCollections: 880, nonOperatingCashOutflows: 1000, netCashMovement: -170, expense: 50, net: 750 });
+  });
+  it('current loan receivable uses active payroll recoveries without changing period cash outflows', async () => {
+    await issueAdvance(actor, input);
+    db.salaryAdvance.findMany.mockResolvedValue([{ ...loan, recoveries: [{ status: 'ACTIVE', amount: 2000 }, { status: 'RELEASED', amount: 1000 }] }]);
+    const report = await incomeExpenseReport(actor, query);
+    expect(report.kpis.staffLoanReceivable).toBe(8000);
+    expect(report.totals).toMatchObject({ customerCollections: 0, nonOperatingCashOutflows: 10000, netCashMovement: -10000 });
+  });
   it('uses reversal date and excludes unrelated payroll reversals', async () => {
     await issueAdvance(actor, input);
     state.cash.push({ ...state.cash[0], id: 'reversed', direction: 'IN', type: 'REVERSAL', createdAt: new Date('2026-12-02T09:00:00Z') });

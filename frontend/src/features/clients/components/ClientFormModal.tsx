@@ -78,7 +78,7 @@ export const ClientFormModal: React.FC<ClientFormModalProps> = ({
       setSourceDetails(clientToEdit.sourceDetails || '');
       setNotes(clientToEdit.notes || '');
     } else {
-      setBranchId(user?.role === 'SUPER_ADMIN' ? '' : activeBranchId);
+      setBranchId(activeBranchId || (branches.length > 0 ? branches[0].id : ''));
       setName(initialName);
       setPhone(initialPhone);
       setEmail('');

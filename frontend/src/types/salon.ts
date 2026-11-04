@@ -2310,6 +2310,7 @@ export interface IncomeExpenseReportRow {
 }
 
 export interface IncomeExpenseReportKPIs {
+  staffLoanReceivable?: number;
   staffLoanCashOutflow?: number;
   totalCollections?: number;
   totalCollectedIncome?: number;
@@ -2360,6 +2361,10 @@ export interface IncomeExpenseReport {
   kpis: IncomeExpenseReportKPIs;
   rows: IncomeExpenseReportRow[];
   totals: {
+    customerCollections?: number;
+    staffLoanCashOutflow?: number;
+    nonOperatingCashOutflows?: number;
+    netCashMovement?: number;
     tipAmount?: number;
     collections?: number;
     totalCollections?: number;

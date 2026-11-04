@@ -1,6 +1,13 @@
 import prisma from '../../config/prisma.js';
 import { toDateString } from '../../lib/dates.js';
 import { round2, toDec } from '../../lib/money.js';
+import { advanceBalance } from '../payroll/payroll.extras.service.js';
+
+/** Current receivable uses the same active payroll recoveries as Staff Loans. */
+export async function currentStaffLoanReceivable(scope, db = prisma) {
+  const loans = await db.salaryAdvance.findMany({ where: { ...scope, status: 'ACTIVE' }, include: { recoveries: true } });
+  return round2(loans.reduce((sum, loan) => sum.plus(advanceBalance(loan)), toDec(0))).toNumber();
+}
 
 export const STAFF_LOAN_CATEGORY = 'Staff Loan Disbursement - Non-Operating Cash Outflow';
 export const isStaffLoanMovement = m => m.sourceModule === 'PAYROLL' &&

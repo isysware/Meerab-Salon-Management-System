@@ -583,9 +583,13 @@ export const TipsStatementPage: React.FC = () => {
           </div>
 
           {/* Card 5: Unallocated Tips Pool */}
-          <div className="p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
+          <div
+            onClick={() => navigate('/accounts/tips-management')}
+            className="p-5 rounded-[24px] border border-amber-200/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-amber-400 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group cursor-pointer"
+            title="Click to allocate and pay staff tips in Tips Management"
+          >
             <div className="flex items-center justify-between relative z-10">
-              <div className="w-8 h-8 rounded-xl bg-white/90 shadow-2xs border border-white/80 flex items-center justify-center text-amber-600">
+              <div className="w-8 h-8 rounded-xl bg-amber-50 shadow-2xs border border-amber-100 flex items-center justify-center text-amber-600">
                 <AlertTriangle className="w-4 h-4" />
               </div>
               <span className="bg-amber-50 text-amber-700 shadow-2xs border border-white/60 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
@@ -596,8 +600,9 @@ export const TipsStatementPage: React.FC = () => {
               <span className="text-2xl sm:text-3xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
                 PKR {formatCurrency(summary.unallocatedTips)}
               </span>
-              <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Collected but unassigned float
+              <span className="text-xs text-amber-800 font-semibold mt-1 flex items-center justify-between">
+                <span>Collected float pool</span>
+                <span className="text-[10px] font-bold text-[#B82E69] underline">Allocate & Pay ➔</span>
               </span>
             </div>
           </div>
@@ -693,8 +698,17 @@ export const TipsStatementPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Export Buttons */}
+            {/* Export & Action Buttons */}
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigate('/accounts/tips-management')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#B82E69] to-[#9D2558] hover:from-[#A02358] hover:to-[#851C47] text-white shadow-xs text-xs font-bold transition-all cursor-pointer active:scale-[0.98]"
+                title="Go to Tips Management to allocate and disburse payouts to staff"
+              >
+                <Coins className="w-3.5 h-3.5" />
+                <span>Allocate & Pay Tips ➔</span>
+              </button>
               <button
                 type="button"
                 onClick={handleExportCSV}
@@ -855,9 +869,21 @@ export const TipsStatementPage: React.FC = () => {
                           {formatCurrency(r.unallocatedAmount)}
                         </td>
                         <td className="py-3 px-4 text-center">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FDF2F5] text-[#B82E69] border border-[#B82E69]/20">
-                            {r.status}
-                          </span>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#FDF2F5] text-[#B82E69] border border-[#B82E69]/20">
+                              {r.status}
+                            </span>
+                            {r.unallocatedAmount > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => navigate('/accounts/tips-management')}
+                                className="px-2 py-0.5 bg-[#B82E69] hover:bg-[#A02358] text-white text-[10px] font-bold rounded-lg shadow-2xs cursor-pointer transition-colors"
+                                title="Allocate and disburse this tip in Tips Management"
+                              >
+                                Allocate & Pay
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))

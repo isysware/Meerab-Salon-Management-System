@@ -3394,12 +3394,40 @@ export const POSBillingPage: React.FC = () => {
               return (
                 <div className="space-y-3">
                   {/* Customer Details when there are Remaining Dues */}
-                  {currentDue > 0 && !isNamedClientValid && (
+                  {currentDue > 0 && selectedClient && (
+                    <div className="p-2.5 bg-emerald-50/70 border border-emerald-200/90 rounded-2xl flex items-center justify-between text-xs shadow-2xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="font-bold text-[#23151D] truncate block text-xs">
+                            Client: <span className="text-[#B82E69]">{selectedClient.name}</span> ({selectedClient.phone})
+                          </span>
+                          <span className="text-[10px] text-slate-500 block">
+                            Customer account linked • Due will be tracked in ledger
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setIsClientPickerOpen(true)}
+                          className="text-[10px] font-bold text-[#B82E69] bg-white border border-rose-200/80 px-2 py-0.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                        >
+                          Change
+                        </button>
+                        <Badge variant="neutral" className="bg-amber-50 text-amber-800 border-amber-200 text-[10px] font-mono font-bold shrink-0">
+                          Due: {formatCurrency(currentDue)}
+                        </Badge>
+                      </div>
+                    </div>
+                  )}
+
+                  {currentDue > 0 && !selectedClient && (
                     <div className="p-3 bg-[#FAF8F9] border border-rose-100/90 rounded-2xl space-y-2.5 text-xs shadow-2xs">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5 font-bold text-[#23151D] text-xs">
                           <User className="w-3.5 h-3.5 text-[#B82E69] shrink-0" />
-                          <span>Customer Details</span>
+                          <span>Customer Details (Required for Khata / Dues)</span>
                         </div>
                         <span className="text-[11px] font-mono font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-lg border border-amber-200/80">
                           Due: {formatCurrency(currentDue)}
@@ -3412,7 +3440,7 @@ export const POSBillingPage: React.FC = () => {
                           className="flex-1 py-1.5 px-3 bg-white hover:bg-rose-50/80 text-[#9D2558] border border-rose-200/90 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition-all active:scale-[0.98]"
                         >
                           <Search className="w-3.5 h-3.5 text-[#B82E69]" />
-                          Select Client
+                          Select Existing Client
                         </button>
                         <button
                           type="button"
@@ -3437,7 +3465,7 @@ export const POSBillingPage: React.FC = () => {
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] font-bold text-slate-600 block mb-1">Phone Number *</label>
+                          <label className="text-[10px] font-bold text-slate-600 block mb-1">Phone Number (10–11 digits) *</label>
                           <Input
                             placeholder="03001234567"
                             value={clientPhone === 'N/A' ? '' : clientPhone}
@@ -3449,36 +3477,24 @@ export const POSBillingPage: React.FC = () => {
                           />
                         </div>
                       </div>
-                    </div>
-                  )}
-
-                  {currentDue > 0 && isNamedClientValid && (
-                    <div className="p-2.5 bg-emerald-50/70 border border-emerald-200/90 rounded-2xl flex items-center justify-between text-xs shadow-2xs">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <div className="min-w-0">
-                          <span className="font-bold text-[#23151D] truncate block text-xs">
-                            Client: <span className="text-[#B82E69]">{clientName}</span> ({clientPhone})
-                          </span>
-                          <span className="text-[10px] text-slate-500 block">
-                            {selectedClientId ? 'Customer account linked' : 'Will link by phone number'}
+                      {/* Real-time Status Indicator */}
+                      {isNamedClientValid ? (
+                        <div className="p-2 bg-emerald-50/90 border border-emerald-200/90 rounded-xl flex items-center gap-2 text-[11px] text-emerald-800 font-medium">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>Contact details valid — will create/link customer and record dues in Client Ledger.</span>
+                        </div>
+                      ) : (
+                        <div className="p-2 bg-amber-50/80 border border-amber-200/80 rounded-xl flex items-center gap-2 text-[10px] text-amber-800 font-medium">
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>
+                            {!cleanClientName || cleanClientName.toLowerCase() === 'walk-in customer' || cleanClientName.toLowerCase() === 'walk-in' || cleanClientName.toLowerCase() === 'n/a'
+                              ? 'Customer name is required so unpaid balance is tracked in their ledger.'
+                              : cleanClientDigits.length < 10
+                              ? `Please enter at least 10 digits for phone number (currently: ${cleanClientDigits.length} digits).`
+                              : 'Please enter valid customer name and contact phone number.'}
                           </span>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {selectedClientId && (
-                          <button
-                            type="button"
-                            onClick={() => setIsClientLedgerOpen(true)}
-                            className="text-[10px] font-bold text-[#B82E69] bg-white border border-rose-200/80 px-2 py-0.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
-                          >
-                            Ledger
-                          </button>
-                        )}
-                        <Badge variant="neutral" className="bg-amber-50 text-amber-800 border-amber-200 text-[10px] font-mono font-bold shrink-0">
-                          Due: {formatCurrency(currentDue)}
-                        </Badge>
-                      </div>
+                      )}
                     </div>
                   )}
 

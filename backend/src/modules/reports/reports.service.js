@@ -5,7 +5,7 @@
 // Voided invoices never count as performance. Tips are reported separately from sales.
 
 import { accruedCommissionForPeriod } from './fullCommissionAccrual.js';
-import { loadStaffLoanMovements, STAFF_LOAN_CATEGORY } from './staffLoanMovements.js';
+import { loadStaffLoanMovements, currentStaffLoanReceivable, STAFF_LOAN_CATEGORY } from './staffLoanMovements.js';
 import prisma from '../../config/prisma.js';
 import { forbidden, notFound } from '../../lib/AppError.js';
 import { resolveReadBranch } from '../../lib/scope.js';
@@ -1055,6 +1055,9 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   const settlementCashFlow = filteredRows.reduce((sum, row) => sum.plus(row.cashFlow || 0), toDec(0));
   const staffLoanCashOutflow = filteredRows.filter(r => r.source === 'Staff Loan')
     .reduce((sum, row) => sum.minus(row.cashFlow || 0), toDec(0));
+  // Non-customer settlements move cash without becoming operating expenses.
+  const nonOperatingCashOutflows = filteredRows.filter(r => r.type === 'SETTLEMENT' && !['POS', 'BOOKING'].includes(r.source))
+    .reduce((sum, row) => sum.minus(row.cashFlow || 0), toDec(0));
   const totalCollections = filteredRows.reduce((sum, row) => row.type === 'SETTLEMENT' && ['POS', 'BOOKING'].includes(row.source)
     ? sum.plus(row.cashFlow || 0) : sum, totalPaidIncome);
   const totalPaid = totalPaidIncome.minus(totalPaidExpense).plus(settlementCashFlow);
@@ -1069,6 +1072,8 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   const totalRefundsPaid = refunds.reduce((s, r) => s.plus(toDec(r.cashOut || 0)), toDec(0));
 
   const kpis = {
+    ...(['ADMIN', 'SUPER_ADMIN'].includes(actor.role)
+      ? { staffLoanReceivable: await currentStaffLoanReceivable(branchFilter) } : {}),
     staffLoanCashOutflow: n(staffLoanCashOutflow),
     totalCollectedIncome: n(totalIncome),
     totalRecognizedIncome: n(totalRecognizedIncome),
@@ -1093,6 +1098,10 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   };
 
   const totals = {
+    customerCollections: n(totalCollections),
+    staffLoanCashOutflow: n(staffLoanCashOutflow),
+    nonOperatingCashOutflows: n(nonOperatingCashOutflows),
+    netCashMovement: n(totalPaid),
     tipAmount: n(filteredRows.reduce((sum, row) => sum.plus(row.tipAmount || 0), toDec(0))),
     income: n(totalIncome),
     collectedIncome: n(totalIncome),
