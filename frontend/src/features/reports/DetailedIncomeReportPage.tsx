@@ -792,7 +792,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
                       PKR {formatPKR(totals.recognizedNet)}
                     </td>
                     <td className="py-3.5 px-3 text-right tabular-nums text-slate-700 font-semibold">
-                      +PKR {formatPKR(totals.tax)}
+                      +PKR {formatPKR(totals.netTax)}
                     </td>
                     <td className="py-3.5 px-3 text-right tabular-nums font-bold text-slate-900">
                       PKR {formatPKR(totals.recognizedNet + totals.netTax)}

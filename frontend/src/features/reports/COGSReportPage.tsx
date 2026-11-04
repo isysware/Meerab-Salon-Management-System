@@ -237,7 +237,7 @@ export const COGSReportPage: React.FC = () => {
               </div>
               <p className="text-xs text-[#78616C] font-medium mt-0.5">
                 {viewMode === 'ACCRUAL'
-                  ? 'Recognized net sales turnover, landed COGS, and earned overheads to determine Net Operating Profit'
+                  ? 'Recognized net sales, COGS and full completed-service commission expense; later collections do not recognize commission again'
                   : 'Actual collected service/product revenue (excl. tax), statutory tax segregation, and direct cash disbursements'}
               </p>
             </div>
@@ -620,7 +620,7 @@ export const COGSReportPage: React.FC = () => {
                 <span className="flex h-2 w-2 rounded-full bg-sky-500 animate-pulse" />
                 <span className="font-semibold text-slate-800">Collection Basis Rule:</span>
                 <span className="text-slate-600 text-[11.5px]">
-                  Only realized cash receipts excl. tax are recognized as operating turnover. Sales tax is separated as statutory liability. Unpaid commissions are retained as liability and not deducted from Cash Surplus until disbursed.
+                  Only realized cash receipts excl. tax are recognized as operating turnover. Sales tax is separated as statutory liability. Full service commission is recognized separately in Accounting P&L. Cash surplus deducts actual paid operating expenses only; COGS and inventory write-offs are separate information.
                 </span>
               </div>
               <div className="flex items-center gap-2.5 font-mono text-[11px]">

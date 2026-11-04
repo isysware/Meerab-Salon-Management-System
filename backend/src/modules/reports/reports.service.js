@@ -4,6 +4,7 @@
 //   • Staff performance   — invoice-line attribution + commission, tips, attendance, overtime
 // Voided invoices never count as performance. Tips are reported separately from sales.
 
+import { accruedCommissionForPeriod } from './fullCommissionAccrual.js';
 import prisma from '../../config/prisma.js';
 import { forbidden, notFound } from '../../lib/AppError.js';
 import { resolveReadBranch } from '../../lib/scope.js';
@@ -1110,16 +1111,15 @@ const resolvePriorPeriodDates = (fromStr, toStr) => {
   };
 };
 
-const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) => {
+export const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) => {
   const branchFilter = branchId ? { branchId } : {};
   const dateRange = { gte: dateOnly(fromStr), lte: dateOnly(toStr) };
   const utcRange = { gte: fromDate, lte: toDate };
 
-  const [invoices, duesPayments, refunds, movements, expenses, payrollRuns, salaryPaymentsInPeriod, commissionEvents, standaloneCommPayments] = await Promise.all([
+  const [invoices, duesPayments, refunds, movements, expenses, payrollRuns, salaryPaymentsInPeriod, commissionExpenses, commissionPayments] = await Promise.all([
     prisma.invoice.findMany({
       where: {
         date: dateRange,
-        lifecycle: { not: 'VOIDED' },
         ...branchFilter,
       },
       select: {
@@ -1275,28 +1275,10 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
           select: { amount: true },
         })
       : Promise.resolve([]),
-    prisma.commissionEvent.findMany({
-      where: {
-        eventDate: dateRange,
-        ...branchFilter,
-      },
-      select: {
-        type: true,
-        amount: true,
-      },
-    }),
-    prisma.commissionPayment?.findMany
-      ? prisma.commissionPayment.findMany({
-          where: {
-            status: 'COMPLETED',
-            reversedAt: null,
-            payrollPaymentId: null,
-            paidAt: utcRange,
-            ...branchFilter,
-          },
-          select: { amount: true },
-        })
-      : Promise.resolve([]),
+    accruedCommissionForPeriod(branchFilter, fromStr, toStr),
+    prisma.commissionPayment.findMany({ where: { ...branchFilter,
+      status: { in: ['COMPLETED', 'REVERSED'] }, paidAt: { lte: toDate } },
+      select: { id: true, amount: true, paidAt: true, reversedAt: true } }),
   ]);
 
   // 1. Accrual Invoiced Turnover by streams
@@ -1377,13 +1359,13 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
 
   // Accrual net revenue
   const grossSales = serviceSales.plus(packageSales).plus(productSales);
-  const totalNetSales = max0(grossSales.minus(totalRefunds));
+  const totalNetSales = grossSales.minus(totalRefunds);
 
   // Collection net revenue
-  const totalGrossCollections = max0(totalPOSCollections.plus(totalDuesCollections).minus(totalRefundsCashOut));
-  const finalCollectedTax = max0(totalCollectedTax.minus(totalRefundsTax));
+  const totalGrossCollections = totalPOSCollections.plus(totalDuesCollections).minus(totalRefundsCashOut);
+  const finalCollectedTax = totalCollectedTax.minus(totalRefundsTax);
   const collectedGrossSales = collectedServiceSales.plus(collectedPackageSales).plus(collectedProductSales);
-  const totalCollectedRevenue = max0(collectedGrossSales.minus(totalRefunds));
+  const totalCollectedRevenue = collectedGrossSales.minus(totalRefundsCashOut);
 
   // 2. Direct Material Costs (COGS & Consumables)
   let productCogs = toDec(0);
@@ -1406,7 +1388,6 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
       inventoryLoss = inventoryLoss.plus(cost);
     }
   }
-  productCogs = max0(productCogs);
   materialConsumption = max0(materialConsumption);
   inventoryLoss = max0(inventoryLoss);
 
@@ -1474,17 +1455,10 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
     }
   }
 
-  let commissionExpenses = toDec(0);
-  for (const c of commissionEvents) {
-    const amt = toDec(c.amount);
-    commissionExpenses = c.type === 'EARN' ? commissionExpenses.plus(amt) : commissionExpenses.minus(amt);
-  }
-  commissionExpenses = max0(commissionExpenses);
-
-  let paidCommissionExpenses = toDec(0);
-  for (const cp of (standaloneCommPayments || [])) {
-    paidCommissionExpenses = paidCommissionExpenses.plus(toDec(cp.amount));
-  }
+  // Both standalone and payroll-linked commission payouts are counted once by payment ID.
+  const paidCommissionExpenses = payoutEvents(commissionPayments)
+    .filter(payment => payment.date >= fromStr && payment.date <= toStr)
+    .reduce((sum, payment) => sum.plus(payment.signedAmount), toDec(0));
 
   // Accrual Operating Overheads
   const totalOperatingExpenses = directExpenses
@@ -1493,19 +1467,18 @@ const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, toDate) 
     .plus(inventoryLoss);
 
   const netOperatingProfit = grossContribution.minus(totalOperatingExpenses);
-  const operatingMarginPercent = totalNetSales.greaterThan(0)
-    ? round2(netOperatingProfit.dividedBy(totalNetSales).times(100)).toNumber()
+  const operatingMarginPercent = !totalNetSales.isZero()
+    ? round2(netOperatingProfit.dividedBy(totalNetSales.abs()).times(100)).toNumber()
     : 0;
 
   // Collection Operating Overheads & Cash Surplus
   const totalPaidOperatingExpenses = paidDirectExpenses
     .plus(paidSalaryExpenses)
-    .plus(paidCommissionExpenses)
-    .plus(inventoryLoss);
+    .plus(paidCommissionExpenses);
 
-  const collectionCashSurplus = collectionGrossContribution.minus(totalPaidOperatingExpenses);
-  const collectionMarginPercent = totalCollectedRevenue.greaterThan(0)
-    ? round2(collectionCashSurplus.dividedBy(totalCollectedRevenue).times(100)).toNumber()
+  const collectionCashSurplus = totalCollectedRevenue.minus(totalPaidOperatingExpenses);
+  const collectionMarginPercent = !totalCollectedRevenue.isZero()
+    ? round2(collectionCashSurplus.dividedBy(totalCollectedRevenue.abs()).times(100)).toNumber()
     : 0;
 
   const unpaidCommissionLiability = max0(totalEarnedCommissionOnCollections.minus(paidCommissionExpenses));
@@ -1597,7 +1570,7 @@ export const operatingProfitReport = async (actor, query = {}) => {
     // ── SECTION 4: OPERATING EXPENSES ──
     { id: 'sec-opex', name: '4. OPERATING OVERHEADS & EXPENSES', section: 'EXPENSE', isHeader: true, currentAmount: 0, percentOfRevenue: 0, priorAmount: 0, growthPercent: null },
     { id: 'exp-salaries', name: 'Salaries & Wages (Finalized Payroll)', section: 'EXPENSE', isSubItem: true, currentAmount: currentMetrics.salaryExpenses, percentOfRevenue: calcPct(currentMetrics.salaryExpenses), priorAmount: priorMetrics.salaryExpenses, growthPercent: calcGrowth(currentMetrics.salaryExpenses, priorMetrics.salaryExpenses) },
-    { id: 'exp-comm', name: 'Staff Commissions (Earned Attribution)', section: 'EXPENSE', isSubItem: true, currentAmount: currentMetrics.commissionExpenses, percentOfRevenue: calcPct(currentMetrics.commissionExpenses), priorAmount: priorMetrics.commissionExpenses, growthPercent: calcGrowth(currentMetrics.commissionExpenses, priorMetrics.commissionExpenses) },
+    { id: 'exp-comm', name: 'Full Completed-Service Commission (Accrual)', section: 'EXPENSE', isSubItem: true, currentAmount: currentMetrics.commissionExpenses, percentOfRevenue: calcPct(currentMetrics.commissionExpenses), priorAmount: priorMetrics.commissionExpenses, growthPercent: calcGrowth(currentMetrics.commissionExpenses, priorMetrics.commissionExpenses) },
     { id: 'exp-direct', name: 'Direct Operating Expenses (Rent, Utilities, etc.)', section: 'EXPENSE', isSubItem: true, currentAmount: currentMetrics.directExpenses, percentOfRevenue: calcPct(currentMetrics.directExpenses), priorAmount: priorMetrics.directExpenses, growthPercent: calcGrowth(currentMetrics.directExpenses, priorMetrics.directExpenses) },
     { id: 'exp-loss', name: 'Inventory Shrinkage & Write-offs (Damage/Loss)', section: 'EXPENSE', isSubItem: true, currentAmount: currentMetrics.inventoryLoss, percentOfRevenue: calcPct(currentMetrics.inventoryLoss), priorAmount: priorMetrics.inventoryLoss, growthPercent: calcGrowth(currentMetrics.inventoryLoss, priorMetrics.inventoryLoss) },
     { id: 'tot-opex', name: 'TOTAL OPERATING EXPENSES', section: 'EXPENSE', isTotal: true, currentAmount: currentMetrics.totalOperatingExpenses, percentOfRevenue: calcPct(currentMetrics.totalOperatingExpenses), priorAmount: priorMetrics.totalOperatingExpenses, growthPercent: calcGrowth(currentMetrics.totalOperatingExpenses, priorMetrics.totalOperatingExpenses) },
@@ -1694,7 +1667,7 @@ export const operatingProfitReport = async (actor, query = {}) => {
     },
     {
       id: 'd-8',
-      accountName: 'Staff Performance Commissions',
+      accountName: 'Full Completed-Service Commission',
       classification: 'OPERATING_EXPENSE',
       department: 'Human Resources / Commission',
       currentAmount: currentMetrics.commissionExpenses,
@@ -1702,7 +1675,7 @@ export const operatingProfitReport = async (actor, query = {}) => {
       priorAmount: priorMetrics.commissionExpenses,
       varianceAmount: currentMetrics.commissionExpenses - priorMetrics.commissionExpenses,
       growthPercent: calcGrowth(currentMetrics.commissionExpenses, priorMetrics.commissionExpenses),
-      notes: 'Staff-attributed net sales commissions earned across services/packages',
+      notes: 'Full commission from historical invoice service/package snapshots, recognized on invoice date; dated credits reverse it. Customer receipts and payouts do not recognize this expense again.',
     },
     ...Object.entries(currentMetrics.expensesByCategory).map(([cat, amt], idx) => {
       const priorAmt = priorMetrics.expensesByCategory[cat] || 0;
@@ -1830,7 +1803,7 @@ export const operatingProfitReport = async (actor, query = {}) => {
     { id: 'col-tot-gross', name: 'TOTAL GROSS INFLOW (REVENUE + TAX)', section: 'STATUTORY_TAX', isTotal: true, currentAmount: currentMetrics.totalGrossCollections, percentOfRevenue: calcColPct(currentMetrics.totalGrossCollections), priorAmount: priorMetrics.totalGrossCollections, growthPercent: calcColGrowth(currentMetrics.totalGrossCollections, priorMetrics.totalGrossCollections) },
 
     // ── SECTION 3: COST OF SALES ──
-    { id: 'col-sec-cos', name: '3. COST OF SALES (DIRECT MATERIAL COSTS)', section: 'COGS', isHeader: true, currentAmount: 0, percentOfRevenue: 0, priorAmount: 0, growthPercent: null },
+    { id: 'col-sec-cos', name: '3. COST OF SALES (SEPARATE NON-CASH INFORMATION)', section: 'COGS', isHeader: true, currentAmount: 0, percentOfRevenue: 0, priorAmount: 0, growthPercent: null },
     { id: 'col-cos-cogs', name: 'Retail Products COGS (FIFO/FEFO Landed)', section: 'COGS', isSubItem: true, currentAmount: currentMetrics.productCogs, percentOfRevenue: calcColPct(currentMetrics.productCogs), priorAmount: priorMetrics.productCogs, growthPercent: calcColGrowth(currentMetrics.productCogs, priorMetrics.productCogs) },
     { id: 'col-cos-cons', name: 'Salon Consumable Material Consumption', section: 'COGS', isSubItem: true, currentAmount: currentMetrics.materialConsumption, percentOfRevenue: calcColPct(currentMetrics.materialConsumption), priorAmount: priorMetrics.materialConsumption, growthPercent: calcColGrowth(currentMetrics.materialConsumption, priorMetrics.materialConsumption) },
     { id: 'col-tot-cos', name: 'TOTAL COST OF SALES', section: 'COGS', isTotal: true, currentAmount: currentMetrics.totalCostOfSales, percentOfRevenue: calcColPct(currentMetrics.totalCostOfSales), priorAmount: priorMetrics.totalCostOfSales, growthPercent: calcColGrowth(currentMetrics.totalCostOfSales, priorMetrics.totalCostOfSales) },
@@ -1843,7 +1816,7 @@ export const operatingProfitReport = async (actor, query = {}) => {
     { id: 'col-exp-salary', name: 'Disbursed Salaries & Wages (Paid Outflows)', section: 'EXPENSE', isSubItem: true, currentAmount: currentMetrics.paidSalaryExpenses, percentOfRevenue: calcColPct(currentMetrics.paidSalaryExpenses), priorAmount: priorMetrics.paidSalaryExpenses, growthPercent: calcColGrowth(currentMetrics.paidSalaryExpenses, priorMetrics.paidSalaryExpenses) },
     { id: 'col-exp-comm', name: 'Disbursed Staff Commissions (Actual Paid)', section: 'EXPENSE', isSubItem: true, currentAmount: currentMetrics.paidCommissionExpenses, percentOfRevenue: calcColPct(currentMetrics.paidCommissionExpenses), priorAmount: priorMetrics.paidCommissionExpenses, growthPercent: calcColGrowth(currentMetrics.paidCommissionExpenses, priorMetrics.paidCommissionExpenses) },
     { id: 'col-exp-direct', name: 'Paid Direct Operating Expenses (Vouchers / Cash Out)', section: 'EXPENSE', isSubItem: true, currentAmount: currentMetrics.paidDirectExpenses, percentOfRevenue: calcColPct(currentMetrics.paidDirectExpenses), priorAmount: priorMetrics.paidDirectExpenses, growthPercent: calcColGrowth(currentMetrics.paidDirectExpenses, priorMetrics.paidDirectExpenses) },
-    { id: 'col-exp-loss', name: 'Inventory Shrinkage & Write-offs (Damage/Loss)', section: 'EXPENSE', isSubItem: true, currentAmount: currentMetrics.inventoryLoss, percentOfRevenue: calcColPct(currentMetrics.inventoryLoss), priorAmount: priorMetrics.inventoryLoss, growthPercent: calcColGrowth(currentMetrics.inventoryLoss, priorMetrics.inventoryLoss) },
+    { id: 'col-exp-loss', name: 'Inventory Shrinkage & Write-offs (Separate Non-Cash Information)', section: 'MEMORANDUM', isSubItem: true, currentAmount: currentMetrics.inventoryLoss, percentOfRevenue: calcColPct(currentMetrics.inventoryLoss), priorAmount: priorMetrics.inventoryLoss, growthPercent: calcColGrowth(currentMetrics.inventoryLoss, priorMetrics.inventoryLoss) },
     { id: 'col-tot-opex', name: 'TOTAL PAID OPERATING CASH OUTFLOWS', section: 'EXPENSE', isTotal: true, currentAmount: currentMetrics.totalPaidOperatingExpenses, percentOfRevenue: calcColPct(currentMetrics.totalPaidOperatingExpenses), priorAmount: priorMetrics.totalPaidOperatingExpenses, growthPercent: calcColGrowth(currentMetrics.totalPaidOperatingExpenses, priorMetrics.totalPaidOperatingExpenses) },
 
     // ── SECTION 6: COLLECTION-BASED CASH SURPLUS ──
@@ -1982,8 +1955,8 @@ export const operatingProfitReport = async (actor, query = {}) => {
     }),
     {
       id: 'col-d-loss',
-      accountName: 'Inventory Losses & Expiry Write-Offs',
-      classification: 'OPERATING_EXPENSE',
+      accountName: 'Inventory Losses & Expiry Write-Offs (Non-Cash Reference)',
+      classification: 'MEMORANDUM',
       department: 'Stock Custody',
       currentAmount: currentMetrics.inventoryLoss,
       percentOfRevenue: calcColPct(currentMetrics.inventoryLoss),
@@ -2680,7 +2653,7 @@ export const inventoryReport = async (actor, query = {}) => {
     ]);
 
     const today = await getBusinessDate();
-    const todayStr = dateOnly(today);
+    const todayStr = ymd(today);
 
     let totalCostVal = toDec(0);
     let totalRetailVal = toDec(0);
@@ -2711,7 +2684,7 @@ export const inventoryReport = async (actor, query = {}) => {
       totalCostVal = totalCostVal.plus(costVal);
       totalRetailVal = totalRetailVal.plus(retailVal);
 
-      const expDateStr = b.expiryDate ? dateOnly(b.expiryDate) : null;
+      const expDateStr = b.expiryDate ? ymd(b.expiryDate) : null;
       let expStatus = 'VALID';
       if (expDateStr && expDateStr < todayStr) {
         expStatus = 'EXPIRED';
@@ -2790,14 +2763,17 @@ export const inventoryReport = async (actor, query = {}) => {
       nearExpiryBatchesCount,
     };
 
+    const filteredCostValue = filteredRows.reduce((acc, r) => acc.plus(toDec(r.costValue)), toDec(0));
+    const filteredRetailValue = filteredRows.reduce((acc, r) => acc.plus(toDec(r.retailValue)), toDec(0));
+
     const totals = {
       remainingQuantity: n(filteredRows.reduce((acc, r) => acc + r.remainingQuantity, 0)),
-      costValue: n(totalCostVal),
-      retailValue: n(totalRetailVal),
-      potentialProfit: n(totalRetailVal.minus(totalCostVal)),
+      costValue: n(filteredCostValue),
+      retailValue: n(filteredRetailValue),
+      potentialProfit: n(filteredRetailValue.minus(filteredCostValue)),
     };
 
-    return formatReportResponse(ctx.meta, {
+    return formatReportResponse({ ...ctx.meta, basisNote: 'Current live inventory custody and valuation as of today; stock counts reflect active available batches.' }, {
       type: subType,
       kpis,
       rows: filteredRows,
@@ -3034,6 +3010,7 @@ export const inventoryReport = async (actor, query = {}) => {
     const suppliers = await prisma.supplier.findMany({
       where: {
         ...(query.supplierId ? { id: query.supplierId } : {}),
+        ...(ctx.branchId ? { OR: [{ branchId: ctx.branchId }, { branchId: 'ALL' }] } : {}),
       },
       orderBy: { name: 'asc' },
     });
@@ -3074,11 +3051,25 @@ export const inventoryReport = async (actor, query = {}) => {
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
     });
 
+    const supplierIds = suppliers.map((s) => s.id);
+    const openingLedgerEntries = await prisma.supplierLedger.findMany({
+      where: {
+        supplierId: { in: supplierIds },
+        entryType: 'OPENING_BALANCE',
+        ...branchFilter,
+      },
+      select: { supplierId: true },
+    });
+    const hasOpeningEntry = new Set(openingLedgerEntries.map((e) => e.supplierId));
+
     const supplierRunning = new Map();
     let totalOpeningPayable = toDec(0);
     for (const s of suppliers) {
       const prior = priorMap.get(s.id) || toDec(0);
-      const open = toDec(s.openingPayable || 0).plus(prior);
+      // F07: If an OPENING_BALANCE ledger entry exists, prior or period ledger entries already capture it.
+      // Only unledgered legacy supplier records should add openingPayable directly.
+      const unledgeredOpening = !hasOpeningEntry.has(s.id) ? toDec(s.openingPayable || 0) : toDec(0);
+      const open = prior.plus(unledgeredOpening);
       supplierRunning.set(s.id, open);
       totalOpeningPayable = totalOpeningPayable.plus(open);
     }
@@ -3248,7 +3239,7 @@ export const inventoryReport = async (actor, query = {}) => {
 
   if (subType === 'expiry') {
     const today = await getBusinessDate();
-    const todayStr = dateOnly(today);
+    const todayStr = ymd(today);
 
     const batches = await prisma.inventoryBatch.findMany({
       where: {
@@ -3271,7 +3262,7 @@ export const inventoryReport = async (actor, query = {}) => {
 
     const rows = [];
     for (const b of batches) {
-      const expDateStr = dateOnly(b.expiryDate);
+      const expDateStr = ymd(b.expiryDate);
       const days = Math.round((new Date(expDateStr).getTime() - new Date(todayStr).getTime()) / (1000 * 3600 * 24));
       const rem = toDec(b.remainingQuantity);
       const cost = rem.times(b.unitCost);
@@ -3466,50 +3457,53 @@ export const attendanceOvertimeReport = async (actor, query = {}) => {
   }
 
   // Include standalone overtime records that don't have an attendance punch on that date
-  for (const ot of overtimeRecords) {
-    const dateStr = ymd(ot.workDate) || String(ot.workDate).slice(0, 10);
-    const key = `${ot.staffId}_${dateStr}`;
-    if (!recordKeys.has(key)) {
-      recordKeys.add(key);
-      const st = staffMap.get(ot.staffId);
-      const staffName = st?.name || 'Unknown Staff';
-      const employeeCode = st?.employeeCode || '—';
-      const designation = st?.designation || 'Staff';
-      const branchName = branchMap.get(ot.branchId) || 'Branch';
+  for (const [key, dayOts] of otMap.entries()) {
+    if (recordKeys.has(key)) continue;
+    recordKeys.add(key);
 
-      const isApproved = ot.status === 'APPROVED';
-      const otMin = isApproved ? (ot.approvedMinutes || ot.minutes || 0) : ot.minutes;
-      const otHours = n(toDec(otMin).dividedBy(60));
-      const otAmount = isApproved ? n(ot.amount || 0) : 0;
+    const firstOt = dayOts[0];
+    const dateStr = ymd(firstOt.workDate) || String(firstOt.workDate).slice(0, 10);
+    const st = staffMap.get(firstOt.staffId);
+    const staffName = st?.name || 'Unknown Staff';
+    const employeeCode = st?.employeeCode || '—';
+    const designation = st?.designation || 'Staff';
+    const branchName = branchMap.get(firstOt.branchId) || 'Branch';
 
-      rows.push({
-        id: `ot-${ot.id}`,
-        date: dateStr,
-        staffId: ot.staffId,
-        staffName,
-        employeeCode,
-        designation,
-        branchId: ot.branchId,
-        branchName,
-        shift: st?.shift || 'Overtime Entry',
-        checkIn: '—',
-        checkOut: '—',
-        scheduledHours: 0,
-        workedHours: 0,
-        lateMinutes: 0,
-        earlyExitMinutes: 0,
-        isLate: false,
-        status: isApproved ? 'APPROVED_OVERTIME' : 'OVERTIME_ENTRY',
-        source: 'MANUAL',
-        otMinutes: otMin,
-        otHours,
-        otAmount,
-        otStatus: ot.status,
-        otReason: ot.reason || '—',
-        otApprovedBy: ot.approvedByName || '—',
-        notes: ot.notes || '',
-      });
-    }
+    const approvedOt = dayOts.filter((o) => o.status === 'APPROVED');
+    const otMin = approvedOt.reduce((sum, o) => sum + (o.approvedMinutes || o.minutes || 0), 0);
+    const otHours = n(toDec(otMin).dividedBy(60));
+    const otAmount = n(approvedOt.reduce((sum, o) => sum.plus(toDec(o.amount || 0)), toDec(0)));
+    const otStatus = approvedOt.length > 0 ? 'APPROVED' : dayOts[0].status;
+    const otReason = dayOts.map((o) => o.reason).filter(Boolean).join('; ') || '—';
+    const otApprovedBy = dayOts.map((o) => o.approvedByName).filter(Boolean).join(', ') || '—';
+
+    rows.push({
+      id: `ot-${firstOt.id}`,
+      date: dateStr,
+      staffId: firstOt.staffId,
+      staffName,
+      employeeCode,
+      designation,
+      branchId: firstOt.branchId,
+      branchName,
+      shift: st?.shift || 'Overtime Entry',
+      checkIn: '—',
+      checkOut: '—',
+      scheduledHours: 0,
+      workedHours: 0,
+      lateMinutes: 0,
+      earlyExitMinutes: 0,
+      isLate: false,
+      status: approvedOt.length > 0 ? 'APPROVED_OVERTIME' : 'OVERTIME_ENTRY',
+      source: 'MANUAL',
+      otMinutes: otMin,
+      otHours,
+      otAmount,
+      otStatus,
+      otReason,
+      otApprovedBy,
+      notes: dayOts.map((o) => o.notes).filter(Boolean).join('; ') || '',
+    });
   }
 
   rows.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(a.staffName || '').localeCompare(String(b.staffName || '')));

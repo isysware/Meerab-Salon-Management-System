@@ -1984,6 +1984,12 @@ export interface StaffSalaryReportQuery {
 }
 
 export interface StaffCommissionReportRow {
+  fullInvoiceCommission?: number;
+  collectionBasedPayable?: number;
+  remainingNotYetPayable?: number;
+  invoiceEligibleNetSales?: number;
+  invoiceCommissionReference?: number;
+  paymentStatus?: 'PAID' | 'PARTIAL' | 'UNPAID';
   eventId: string;
   date: string;
   staffId: string;
@@ -2004,6 +2010,11 @@ export interface StaffCommissionReportRow {
 }
 
 export interface StaffCommissionReportStaff {
+  fullInvoiceCommission?: number;
+  collectionBasedPayable?: number;
+  remainingNotYetPayable?: number;
+  invoiceEligibleNetSales?: number;
+  invoiceCommissionReference?: number;
   staffId: string;
   staffName: string;
   employeeCode: string;

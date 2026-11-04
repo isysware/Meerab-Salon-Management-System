@@ -177,6 +177,12 @@ export const StaffCommissionReportPage: React.FC = () => {
   const handleExportExcel = () => {
     if (!reportData) return;
     const meta: [string, string][] = [
+      ['Full Invoice Commission (After Credits)', formatPKR(reportData.totals.fullInvoiceCommission ?? 0)],
+      ['Collection-Based Payable (As of End Date)', formatPKR(reportData.totals.collectionBasedPayable ?? 0)],
+      ['Remaining Not-Yet-Payable (As of End Date)', formatPKR(reportData.totals.remainingNotYetPayable ?? 0)],
+      ['Commission Basis', 'Accounting recognizes full completed-service commission once. Collection payable and remaining not-yet-payable are separate end-date balances, not additional payouts.'],
+      ['Invoice Eligible Net Sales (Distinct Period Lines)', formatPKR(reportData.totals.invoiceEligibleNetSales ?? 0)],
+      ['Full-Invoice Commission (Reference Only)', formatPKR(reportData.totals.invoiceCommissionReference ?? 0)],
       ['Report', 'Staff Commission Reports'],
       ['Calculation Basis', reportData.dateBasis || 'Actual eligible customer collections; balances include all sources'],
       ['Branch', branchName(selectedBranch)],
@@ -190,19 +196,21 @@ export const StaffCommissionReportPage: React.FC = () => {
     const staffHeaders = [
       'Staff',
       'Employee Code',
+      'Full Invoice Commission (After Credits)', 'Collection-Based Payable (End Date)', 'Remaining Not-Yet-Payable (End Date)', 'Invoice Eligible Net Sales',
       'Eligible Collected Net Sales',
       'Opening Liability',
-      'Earned',
+      'Collection-Based Earned Commission',
       'Reversed',
       'Net',
       'Paid',
-      'Outstanding',
+      'Outstanding Earned Commission',
     ];
 
     const staffRows = [
       ...reportData.byStaff.map((s) => [
         s.staffName,
         s.employeeCode,
+        (s.fullInvoiceCommission ?? 0).toFixed(2), (s.collectionBasedPayable ?? 0).toFixed(2), (s.remainingNotYetPayable ?? 0).toFixed(2), (s.invoiceEligibleNetSales ?? 0).toFixed(2),
         s.attributedNetSales.toFixed(2),
         s.openingLiability.toFixed(2),
         s.earned.toFixed(2),
@@ -214,6 +222,7 @@ export const StaffCommissionReportPage: React.FC = () => {
       [
         'TOTALS',
         '',
+        (reportData.totals.fullInvoiceCommission ?? 0).toFixed(2), (reportData.totals.collectionBasedPayable ?? 0).toFixed(2), (reportData.totals.remainingNotYetPayable ?? 0).toFixed(2), (reportData.totals.invoiceEligibleNetSales ?? 0).toFixed(2),
         reportData.totals.attributedNetSales.toFixed(2),
         reportData.totals.openingLiability.toFixed(2),
         reportData.totals.earned.toFixed(2),
@@ -232,12 +241,14 @@ export const StaffCommissionReportPage: React.FC = () => {
       'Item',
       'Source',
       'Event Type',
-      'Attributed Net',
+      'Invoice Eligible Net Sales (Original Reference)',
+      'Payment Status (Period End)',
+      'Eligible Collected Net Sales',
       'Rate %',
-      'Earned',
+      'Collection-Based Earned Commission',
       'Reversed',
       'Net',
-      'Run Status',
+      'Run Status', 'Full Invoice Commission (After Credits)', 'Collection-Based Payable (End Date)', 'Remaining Not-Yet-Payable (End Date)',
     ];
 
     const linesRows = reportData.rows.map((r) => [
@@ -248,12 +259,14 @@ export const StaffCommissionReportPage: React.FC = () => {
       r.itemName,
       r.source,
       r.eventType,
+      (r.invoiceEligibleNetSales ?? 0).toFixed(2),
+      r.paymentStatus || '',
       r.attributedNetSales.toFixed(2),
       `${r.rateSnapshot}%`,
       r.earned.toFixed(2),
       r.reversed.toFixed(2),
       r.net.toFixed(2),
-      r.runStatus,
+      r.runStatus, (r.fullInvoiceCommission ?? 0).toFixed(2), (r.collectionBasedPayable ?? 0).toFixed(2), (r.remainingNotYetPayable ?? 0).toFixed(2),
     ]);
 
     downloadReportExcel(`Staff_Commission_${fromDate}_${toDate}.csv`, meta, [
@@ -265,6 +278,12 @@ export const StaffCommissionReportPage: React.FC = () => {
   const handleExportCsv = () => {
     if (!reportData) return;
     const meta: [string, string][] = [
+      ['Full Invoice Commission (After Credits)', formatPKR(reportData.totals.fullInvoiceCommission ?? 0)],
+      ['Collection-Based Payable (As of End Date)', formatPKR(reportData.totals.collectionBasedPayable ?? 0)],
+      ['Remaining Not-Yet-Payable (As of End Date)', formatPKR(reportData.totals.remainingNotYetPayable ?? 0)],
+      ['Commission Basis', 'Accounting recognizes full completed-service commission once. Collection payable and remaining not-yet-payable are separate end-date balances, not additional payouts.'],
+      ['Invoice Eligible Net Sales (Distinct Period Lines)', formatPKR(reportData.totals.invoiceEligibleNetSales ?? 0)],
+      ['Full-Invoice Commission (Reference Only)', formatPKR(reportData.totals.invoiceCommissionReference ?? 0)],
       ['Report', 'Staff Commission Reports'],
       ['Calculation Basis', reportData.dateBasis || 'Actual eligible customer collections; balances include all sources'],
       ['Branch', branchName(selectedBranch)],
@@ -275,19 +294,21 @@ export const StaffCommissionReportPage: React.FC = () => {
     const staffHeaders = [
       'Staff',
       'Employee Code',
+      'Full Invoice Commission (After Credits)', 'Collection-Based Payable (End Date)', 'Remaining Not-Yet-Payable (End Date)', 'Invoice Eligible Net Sales',
       'Eligible Collected Net Sales',
       'Opening Liability',
-      'Earned',
+      'Collection-Based Earned Commission',
       'Reversed',
       'Net',
       'Paid',
-      'Outstanding',
+      'Outstanding Earned Commission',
     ];
 
     const staffRows = [
       ...reportData.byStaff.map((s) => [
         s.staffName,
         s.employeeCode,
+        (s.fullInvoiceCommission ?? 0).toFixed(2), (s.collectionBasedPayable ?? 0).toFixed(2), (s.remainingNotYetPayable ?? 0).toFixed(2), (s.invoiceEligibleNetSales ?? 0).toFixed(2),
         s.attributedNetSales.toFixed(2),
         s.openingLiability.toFixed(2),
         s.earned.toFixed(2),
@@ -299,6 +320,7 @@ export const StaffCommissionReportPage: React.FC = () => {
       [
         'TOTALS',
         '',
+        (reportData.totals.fullInvoiceCommission ?? 0).toFixed(2), (reportData.totals.collectionBasedPayable ?? 0).toFixed(2), (reportData.totals.remainingNotYetPayable ?? 0).toFixed(2), (reportData.totals.invoiceEligibleNetSales ?? 0).toFixed(2),
         reportData.totals.attributedNetSales.toFixed(2),
         reportData.totals.openingLiability.toFixed(2),
         reportData.totals.earned.toFixed(2),
@@ -311,12 +333,20 @@ export const StaffCommissionReportPage: React.FC = () => {
 
     downloadReportCsv(`Staff_Commission_${fromDate}_${toDate}.csv`, meta, [
       { title: 'By Staff', headers: staffHeaders, rows: staffRows },
+      { title: 'Collection Explanation', headers: ['Date', 'Invoice', 'Staff', 'Payment Status (Period End)', 'Invoice Eligible Net Sales (Original Reference)', 'Eligible Collected Net Sales', 'Collection-Based Earned Commission', 'Commission Reversed', 'Full Invoice Commission (After Credits)', 'Collection-Based Payable (End Date)', 'Remaining Not-Yet-Payable (End Date)'],
+        rows: reportData.rows.map(r => [r.date, r.invoiceNumber, r.staffName, r.paymentStatus || '', (r.invoiceEligibleNetSales ?? 0).toFixed(2), r.attributedNetSales.toFixed(2), r.earned.toFixed(2), r.reversed.toFixed(2), (r.fullInvoiceCommission ?? 0).toFixed(2), (r.collectionBasedPayable ?? 0).toFixed(2), (r.remainingNotYetPayable ?? 0).toFixed(2)]) },
     ]);
   };
 
   const handlePrint = () => {
     if (!reportData) return;
     const meta: [string, string][] = [
+      ['Full Invoice Commission (After Credits)', formatPKR(reportData.totals.fullInvoiceCommission ?? 0)],
+      ['Collection-Based Payable (As of End Date)', formatPKR(reportData.totals.collectionBasedPayable ?? 0)],
+      ['Remaining Not-Yet-Payable (As of End Date)', formatPKR(reportData.totals.remainingNotYetPayable ?? 0)],
+      ['Commission Basis', 'Accounting recognizes full completed-service commission once. Collection payable and remaining not-yet-payable are separate end-date balances, not additional payouts.'],
+      ['Invoice Eligible Net Sales (Distinct Period Lines)', formatPKR(reportData.totals.invoiceEligibleNetSales ?? 0)],
+      ['Full-Invoice Commission (Reference Only)', formatPKR(reportData.totals.invoiceCommissionReference ?? 0)],
       ['Branch', branchName(selectedBranch)],
       ['Date Range', `${fromDate} to ${toDate}`],
       ['Generated By', user.name],
@@ -326,17 +356,19 @@ export const StaffCommissionReportPage: React.FC = () => {
       const headers = [
         'Staff',
         'Code',
-        'Attributed Sales',
+        'Full Invoice Commission (After Credits)', 'Collection-Based Payable (End Date)', 'Remaining Not-Yet-Payable (End Date)', 'Invoice Eligible Net Sales',
+        'Eligible Collected Net Sales',
         'Opening Liab.',
-        'Earned',
+        'Collection-Based Earned Commission',
         'Reversed',
         'Net',
         'Paid',
-        'Outstanding',
+        'Outstanding Earned Commission',
       ];
       const rows = reportData.byStaff.map((s) => [
         s.staffName,
         s.employeeCode,
+        formatPKR(s.fullInvoiceCommission ?? 0), formatPKR(s.collectionBasedPayable ?? 0), formatPKR(s.remainingNotYetPayable ?? 0), formatPKR(s.invoiceEligibleNetSales ?? 0),
         formatPKR(s.attributedNetSales),
         formatPKR(s.openingLiability),
         formatPKR(s.earned),
@@ -348,6 +380,7 @@ export const StaffCommissionReportPage: React.FC = () => {
       const footers = [
         'TOTALS',
         '',
+        formatPKR(reportData.totals.fullInvoiceCommission ?? 0), formatPKR(reportData.totals.collectionBasedPayable ?? 0), formatPKR(reportData.totals.remainingNotYetPayable ?? 0), formatPKR(reportData.totals.invoiceEligibleNetSales ?? 0),
         formatPKR(reportData.totals.attributedNetSales),
         formatPKR(reportData.totals.openingLiability),
         formatPKR(reportData.totals.earned),
@@ -372,9 +405,11 @@ export const StaffCommissionReportPage: React.FC = () => {
         'Invoice',
         'Customer',
         'Item',
-        'Sales',
-        'Rate',
-        'Earned',
+        'Invoice Eligible Net Sales (Original Reference)',
+        'Payment Status (Period End)',
+        'Eligible Collected Net Sales',
+        'Rate', 'Full Invoice Commission (After Credits)', 'Collection-Based Payable (End Date)', 'Remaining Not-Yet-Payable (End Date)',
+        'Collection-Based Earned Commission',
         'Reversed',
         'Net',
       ];
@@ -384,8 +419,10 @@ export const StaffCommissionReportPage: React.FC = () => {
         r.invoiceNumber,
         r.customer,
         r.itemName,
+        formatPKR(r.invoiceEligibleNetSales ?? 0),
+        r.paymentStatus || '',
         formatPKR(r.attributedNetSales),
-        `${r.rateSnapshot}%`,
+        `${r.rateSnapshot}%`, formatPKR(r.fullInvoiceCommission ?? 0), formatPKR(r.collectionBasedPayable ?? 0), formatPKR(r.remainingNotYetPayable ?? 0),
         formatPKR(r.earned),
         formatPKR(r.reversed),
         formatPKR(r.net),
@@ -605,6 +642,7 @@ export const StaffCommissionReportPage: React.FC = () => {
                 <div>
                   <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Eligible Collected Net Sales</p>
                   <p className="text-xl font-bold text-slate-900 mt-1 font-mono tabular-nums">PKR {formatPKR(t.attributedNetSales)}</p>
+                  <p className="text-[11px] text-slate-500">Invoice eligible: PKR {formatPKR(t.invoiceEligibleNetSales ?? 0)}</p>
                   <p className="text-[11px] text-slate-400 mt-0.5">Completed services baseline</p>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
@@ -616,7 +654,8 @@ export const StaffCommissionReportPage: React.FC = () => {
                 <div>
                   <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Gross Commission</p>
                   <p className="text-xl font-bold text-[#B82E69] mt-1 font-mono tabular-nums">PKR {formatPKR(t.earned)}</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Net payable: PKR {formatPKR(t.net)}</p>
+                  <p className="text-[11px] text-slate-500">Full Invoice Commission: PKR {formatPKR(t.fullInvoiceCommission ?? 0)}</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Collection-Based Payable: PKR {formatPKR(t.collectionBasedPayable ?? 0)}; Not-Yet-Payable: PKR {formatPKR(t.remainingNotYetPayable ?? 0)}</p>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-rose-50 text-[#B82E69] flex items-center justify-center">
                   <BadgePercent className="w-5 h-5" />
@@ -636,7 +675,7 @@ export const StaffCommissionReportPage: React.FC = () => {
 
               <div className="border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] p-5 rounded-[24px] flex items-center justify-between">
                 <div>
-                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Outstanding Liability</p>
+                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Outstanding Earned Commission</p>
                   <p className="text-xl font-bold text-amber-600 mt-1 font-mono tabular-nums">PKR {formatPKR(t.outstanding)}</p>
                   <p className="text-[11px] text-slate-400 mt-0.5">Pending settlement</p>
                 </div>
@@ -722,11 +761,11 @@ export const StaffCommissionReportPage: React.FC = () => {
                       <th className="py-3.5 px-4">Employee Code</th>
                       <th className="py-3.5 px-4 text-right">Eligible Collected Net Sales</th>
                       <th className="py-3.5 px-4 text-right">Opening Liability</th>
-                      <th className="py-3.5 px-4 text-right">Earned</th>
+                      <th className="py-3.5 px-4 text-right">Collection-Based Earned</th>
                       <th className="py-3.5 px-4 text-right">Reversed</th>
                       <th className="py-3.5 px-4 text-right">Net Commission</th>
                       <th className="py-3.5 px-4 text-right">Paid</th>
-                      <th className="py-3.5 px-4 text-right">Outstanding</th>
+                      <th className="py-3.5 px-4 text-right">Outstanding Earned</th>
                     </tr>
                   </thead>
                   <tbody className="text-slate-700 divide-y divide-rose-100/50">
@@ -747,12 +786,14 @@ export const StaffCommissionReportPage: React.FC = () => {
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums font-semibold text-slate-800">
                             {formatPKR(s.attributedNetSales)}
+                            <span className="block text-[10px] text-slate-500">Invoice eligible: {formatPKR(s.invoiceEligibleNetSales ?? 0)}</span>
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums text-slate-600">
                             {formatPKR(s.openingLiability)}
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums font-semibold text-[#B82E69]">
                             {formatPKR(s.earned)}
+                            <span className="block text-[10px] text-slate-500">Full: {formatPKR(s.fullInvoiceCommission ?? 0)} / Not yet payable: {formatPKR(s.remainingNotYetPayable ?? 0)}</span>
                           </td>
                           <td className="py-3.5 px-4 text-right font-mono tabular-nums text-rose-600">
                             {s.reversed ? formatPKR(s.reversed) : '—'}
@@ -798,7 +839,7 @@ export const StaffCommissionReportPage: React.FC = () => {
                       <th className="py-3.5 px-4">Source</th>
                       <th className="py-3.5 px-4 text-right">Attributed Net</th>
                       <th className="py-3.5 px-4 text-right">Rate %</th>
-                      <th className="py-3.5 px-4 text-right">Earned</th>
+                      <th className="py-3.5 px-4 text-right">Collection-Based Earned</th>
                       <th className="py-3.5 px-4 text-right">Reversed</th>
                       <th className="py-3.5 px-4 text-right">Net</th>
                       <th className="py-3.5 px-4 text-center">Run Status</th>
@@ -825,6 +866,7 @@ export const StaffCommissionReportPage: React.FC = () => {
                             </td>
                             <td className="py-3.5 px-4 text-slate-700 font-medium whitespace-nowrap">
                               <span className="font-semibold text-[#B82E69] font-mono">{r.invoiceNumber}</span>
+                              <span className="block text-[10px] text-amber-700">{r.paymentStatus} (period end)</span>
                               {r.eventType === 'REVERSAL' && (
                                 <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
                                   REVERSAL
@@ -836,6 +878,7 @@ export const StaffCommissionReportPage: React.FC = () => {
                             <td className="py-3.5 px-4 text-slate-500 capitalize">{r.source.toLowerCase()}</td>
                             <td className="py-3.5 px-4 text-right font-mono tabular-nums font-semibold text-slate-800">
                               {formatPKR(r.attributedNetSales)}
+                              <span className="block text-[10px] text-slate-500">Invoice eligible: {formatPKR(r.invoiceEligibleNetSales ?? 0)}</span>
                             </td>
                             <td className="py-3.5 px-4 text-right font-mono tabular-nums text-slate-600">
                               {r.rateSnapshot}%

@@ -4,8 +4,10 @@
 //  • Commission: dated EARN/REVERSAL events (event date basis); payouts by paid date;
 //    liability = earned − reversed − paid (opening before `from`, closing at `to`).
 
+import { allocatePaymentToInvoice } from '../../lib/calculations/collectionAllocation.js';
+import { fullCommissionSnapshot } from './fullCommissionAccrual.js';
 import prisma from '../../config/prisma.js';
-import { loadCollectionEvents, payoutEvents } from './collectionEvents.js';
+import { loadCollectionEvents, payoutEvents, invoiceBalanceAsOf } from './collectionEvents.js';
 import { forbidden } from '../../lib/AppError.js';
 import { resolveReadBranch } from '../../lib/scope.js';
 import { dateOnly, endOfDay, startOfDay, ymd } from '../../lib/dates.js';
@@ -88,12 +90,14 @@ export const staffCommissionReport = async (actor, q) => {
   const b = resolveReadBranch(actor, q.branchId);
   const scope = b ? { branchId: b } : {};
   const staffFilter = q.staffId && q.staffId !== 'ALL' ? { staffId: q.staffId } : {};
-  const [collections, payments, staff, recordedEvents] = await Promise.all([
+  const [collections, payments, staff, recordedEvents, periodInvoices] = await Promise.all([
     loadCollectionEvents(scope, null, q.endDate),
     prisma.commissionPayment.findMany({ where: { ...scope, ...staffFilter, status: { in: ['COMPLETED', 'REVERSED'] }, paidAt: { lte: endOfDay(q.endDate) } } }),
     prisma.staff.findMany({ where: { ...scope, ...(staffFilter.staffId ? { id: staffFilter.staffId } : {}) }, select: { id: true, name: true, employeeCode: true } }),
     prisma.commissionEvent.findMany({ where: { ...scope, ...staffFilter, eventDate: { gte: dateOnly(q.startDate), lte: dateOnly(q.endDate) } },
       select: { invoiceId: true, lineId: true, staffId: true, componentId: true, eventDate: true, consumedByRunId: true } }),
+    prisma.invoice.findMany({ where: { ...scope, date: { gte: dateOnly(q.startDate), lte: dateOnly(q.endDate) } },
+      include: { lines: { include: { components: true }, orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] }, refunds: { include: { lines: true } }, payments: true } }),
   ]);
   const staffById = new Map(staff.map(s => [s.id, s]));
   const recordedStatus = new Map();
@@ -102,9 +106,35 @@ export const staffCommissionReport = async (actor, q) => {
     const key = eventKey(event.invoiceId, event.lineId, event.staffId, event.componentId, ymd(event.eventDate));
     recordedStatus.set(key, event.consumedByRunId || recordedStatus.get(key) === 'IN_RUN' ? 'IN_RUN' : 'NOT_RUN');
   }
+  // Read-only original snapshot references. These never create earnings or payout liabilities.
+  const invoiceReferences = new Map();
+  const attributionKey = (invoiceId, lineId, staffId, componentId) => [invoiceId, lineId, staffId, componentId || ''].join(':');
+  const earnedToDate = new Map();
+  for (const event of collections) for (const c of event.commissions) {
+    const key = attributionKey(event.invoice.id, event.line.id, c.staffId, c.componentId);
+    earnedToDate.set(key, (earnedToDate.get(key) || toDec(0)).plus(c.amount));
+  }
+  for (const invoice of [...collections.map(event => event.invoice), ...periodInvoices]) {
+    if (invoiceReferences.has(invoice.id)) continue;
+    const full = allocatePaymentToInvoice({ invoice, paymentAmount: toDec(invoice.netSales).plus(invoice.tax) });
+    const balance = invoiceBalanceAsOf(invoice, q.endDate);
+    invoiceReferences.set(invoice.id, { full, obligation: fullCommissionSnapshot(invoice, q.endDate), paymentStatus: balance.outstanding.isZero() ? 'PAID' : balance.retainedBill.gt(0) ? 'PARTIAL' : 'UNPAID' });
+  }
   const allRows = collections.flatMap(event => event.commissions.map(c => {
     const comp = event.line.components?.find(component => component.id === c.componentId);
+    const reference = invoiceReferences.get(event.invoice.id);
+    const fullCommission = reference.full.commissionsToRecord.find(item => item.lineId === event.line.id && item.staffId === c.staffId && item.componentId === c.componentId);
+    const obligation = reference.obligation.commissionsToRecord.find(item => item.lineId === event.line.id && item.staffId === c.staffId && item.componentId === c.componentId);
+    const earned = earnedToDate.get(attributionKey(event.invoice.id, event.line.id, c.staffId, c.componentId)) || toDec(0);
+    const unpayable = toDec(obligation?.amount || 0).minus(earned);
     return {
+      fullInvoiceCommission: num(obligation?.amount || 0),
+      collectionBasedPayable: num(earned),
+      remainingNotYetPayable: num(unpayable.gt(0) ? unpayable : 0),
+      attributionKey: [event.invoice.id, event.line.id, c.staffId, c.componentId || ''].join(':'),
+      invoiceEligibleNetSales: num(fullCommission?.attributedNet || 0),
+      invoiceCommissionReference: num(fullCommission?.amount || 0),
+      paymentStatus: reference.paymentStatus,
       eventId: event.id + ':' + c.staffId + ':' + (c.componentId || ''), date: event.date,
       staffId: c.staffId, staffName: staffById.get(c.staffId)?.name || c.staffName || '',
       invoiceId: event.invoice.id, invoiceNumber: event.invoice.invoiceNumber, customer: event.invoice.clientName || '',
@@ -124,18 +154,38 @@ export const staffCommissionReport = async (actor, q) => {
   const byStaff = staff.map(st => {
     const mine = period.filter(r => r.staffId === st.id);
     const paid = paidEvents.filter(p => p.staffId === st.id);
+    const referenceLines = new Map(mine.map(row => [row.attributionKey, row]));
+    // Include newly invoiced unpaid services in the full obligation disclosure without inventing earnings.
+    for (const invoice of periodInvoices.filter(i => ymd(i.date) >= q.startDate && ymd(i.date) <= q.endDate)) {
+      const reference = invoiceReferences.get(invoice.id);
+      for (const original of reference.full.commissionsToRecord.filter(c => c.staffId === st.id)) {
+        const key = attributionKey(invoice.id, original.lineId, original.staffId, original.componentId);
+        if (referenceLines.has(key)) continue;
+        const full = reference.obligation.commissionsToRecord.find(c => c.lineId === original.lineId && c.staffId === st.id && c.componentId === original.componentId);
+        const earned = earnedToDate.get(key) || toDec(0);
+        const remaining = toDec(full?.amount || 0).minus(earned);
+        referenceLines.set(key, { invoiceEligibleNetSales: num(original.attributedNet), invoiceCommissionReference: num(original.amount),
+          fullInvoiceCommission: num(full?.amount || 0), collectionBasedPayable: num(earned), remainingNotYetPayable: num(remaining.gt(0) ? remaining : 0) });
+      }
+    }
+    const invoiceLines = [...referenceLines.values()];
     const openingLiability = sumBy(allRows.filter(r => r.staffId === st.id && r.date < q.startDate), r => r.net)
       .minus(sumBy(paid.filter(p => p.date < q.startDate), p => p.signedAmount));
     const earned = sumBy(mine, r => r.earned), reversed = sumBy(mine, r => r.reversed);
     const settled = sumBy(paid.filter(p => p.date >= q.startDate), p => p.signedAmount);
     return { staffId: st.id, staffName: st.name, employeeCode: st.employeeCode,
+      fullInvoiceCommission: num(sumBy(invoiceLines, r => r.fullInvoiceCommission)),
+      collectionBasedPayable: num(sumBy(invoiceLines, r => r.collectionBasedPayable)),
+      remainingNotYetPayable: num(sumBy(invoiceLines, r => r.remainingNotYetPayable)),
+      invoiceEligibleNetSales: num(sumBy(invoiceLines, r => r.invoiceEligibleNetSales)),
+      invoiceCommissionReference: num(sumBy(invoiceLines, r => r.invoiceCommissionReference)),
       attributedNetSales: num(sumBy(mine, r => r.attributedNetSales)), earned: num(earned), reversed: num(reversed),
       net: num(earned.minus(reversed)), paid: num(settled), openingLiability: num(openingLiability),
       outstanding: num(openingLiability.plus(earned).minus(reversed).minus(settled)) };
   }).sort((a, b) => a.employeeCode.localeCompare(b.employeeCode));
-  const totals = Object.fromEntries(['attributedNetSales', 'earned', 'reversed', 'net', 'paid', 'openingLiability', 'outstanding']
+  const totals = Object.fromEntries(['fullInvoiceCommission', 'collectionBasedPayable', 'remainingNotYetPayable', 'invoiceEligibleNetSales', 'invoiceCommissionReference', 'attributedNetSales', 'earned', 'reversed', 'net', 'paid', 'openingLiability', 'outstanding']
     .map(key => [key, num(sumBy(byStaff, row => row[key]))]));
   return { filters: { ...q, branchId: b || 'ALL' },
-    dateBasis: 'Actual customer payment/refund/reversal dates; net of tax and tips. Staff balances include all sources; source/invoice filters apply to detail rows only.',
+    dateBasis: 'Actual customer payment/refund/reversal dates; net of tax and tips. Staff balances include all sources; source/invoice filters apply to detail rows only. Invoice amounts are original snapshots of distinct lines newly invoiced or represented by period events; detail references repeat across installments and are not additive. Full invoice commission after dated credits is recognized on completed-service invoice dates in Accounting P&L. Collection-based payable and not-yet-payable amounts are as of period end for the represented lines; they are not added again to earned commission or payouts.',
     summary: totals, byStaff, rows, totals };
 };

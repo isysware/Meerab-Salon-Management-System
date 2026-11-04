@@ -188,7 +188,7 @@ export const TaxReportPage: React.FC = () => {
       ['Uncollected Customer Tax (As of Period End)', formatPKR(reportData.kpis.uncollectedCustomerTax ?? 0)],
       ['Basis', 'Statutory output tax uses invoice/credit dates. Collected tax uses actual receipt/refund/reversal dates; tax remittances and input credits are not calculated here.'],
       ['Invoice Tax', formatPKR(reportData.kpis.totalTaxCharged ?? 0)],
-      ['Tax Collected', formatPKR(reportData.kpis.totalTaxCollected)],
+      ['Tax Collected from Customer', formatPKR(reportData.kpis.totalTaxCollected)],
       ['Report', 'Tax Management & Summary Report'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -285,7 +285,7 @@ export const TaxReportPage: React.FC = () => {
       ['Uncollected Customer Tax (As of Period End)', formatPKR(reportData.kpis.uncollectedCustomerTax ?? 0)],
       ['Basis', 'Statutory output tax uses invoice/credit dates. Collected tax uses actual receipt/refund/reversal dates; tax remittances and input credits are not calculated here.'],
       ['Invoice Tax', formatPKR(reportData.kpis.totalTaxCharged ?? 0)],
-      ['Tax Collected', formatPKR(reportData.kpis.totalTaxCollected)],
+      ['Tax Collected from Customer', formatPKR(reportData.kpis.totalTaxCollected)],
       ['Report', 'Tax Management & Summary Report'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
@@ -367,14 +367,14 @@ export const TaxReportPage: React.FC = () => {
       ['Uncollected Customer Tax (As of Period End)', formatPKR(reportData.kpis.uncollectedCustomerTax ?? 0)],
       ['Basis', 'Statutory output tax uses invoice/credit dates. Collected tax uses actual receipt/refund/reversal dates; tax remittances and input credits are not calculated here.'],
       ['Invoice Tax', formatPKR(reportData.kpis.totalTaxCharged ?? 0)],
-      ['Tax Collected', formatPKR(reportData.kpis.totalTaxCollected)],
+      ['Tax Collected from Customer', formatPKR(reportData.kpis.totalTaxCollected)],
       ['Report', 'Tax Management & Summary Report'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['Period', `${formatDateDisplay(reportData.meta.from)} – ${formatDateDisplay(reportData.meta.to)}`],
       ['Total Taxable Sales', `PKR ${formatPKR(reportData.kpis.totalTaxableSales)}`],
-      ['Tax Collected', `PKR ${formatPKR(reportData.kpis.totalTaxCollected)}`],
+      ['Tax Collected from Customer', `PKR ${formatPKR(reportData.kpis.totalTaxCollected)}`],
       ['Tax Refunded', `PKR ${formatPKR(reportData.kpis.totalTaxRefunded)}`],
-      ['Net Tax Liability', `PKR ${formatPKR(reportData.kpis.netTaxLiability)}`],
+      ['Statutory Tax Payable', `PKR ${formatPKR(reportData.kpis.netTaxLiability)}`],
     ];
 
     if (activeTab === 'SERVICES') {
@@ -601,15 +601,15 @@ export const TaxReportPage: React.FC = () => {
                 <TrendingUp className="w-4 h-4" />
               </div>
               <span className="bg-blue-50 text-blue-700 shadow-2xs border border-white/60 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                Taxable Base
+                Invoice Tax
               </span>
             </div>
             <div className="mt-3 relative z-10">
               <span className="text-2xl sm:text-3xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
-                PKR {formatPKR(reportData.totals.taxableBase || 0)}
+                PKR {formatPKR(reportData.kpis.totalTaxCharged ?? 0)}
               </span>
               <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Gross taxable turnover
+                Taxable turnover: PKR {formatPKR(reportData.totals.taxableBase || 0)}
               </span>
             </div>
           </div>
@@ -621,7 +621,7 @@ export const TaxReportPage: React.FC = () => {
                 <Receipt className="w-4 h-4" />
               </div>
               <span className="bg-emerald-50 text-emerald-700 shadow-2xs border border-white/60 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                Collected Tax
+                Tax Collected from Customer
               </span>
             </div>
             <div className="mt-3 relative z-10">
@@ -661,7 +661,7 @@ export const TaxReportPage: React.FC = () => {
                 <Landmark className="w-4 h-4" />
               </div>
               <span className="bg-[#FDF2F5] text-[#B82E69] shadow-2xs border border-white/60 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                Payable
+                Statutory Tax Payable
               </span>
             </div>
             <div className="mt-3 relative z-10">
@@ -681,19 +681,16 @@ export const TaxReportPage: React.FC = () => {
                 <Percent className="w-4 h-4" />
               </div>
               <span className="bg-purple-50 text-purple-700 shadow-2xs border border-white/60 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                Effective %
+                Uncollected Customer Tax
               </span>
             </div>
             <div className="mt-3 relative z-10">
               <span className="text-2xl sm:text-3xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
-                {reportData.totals.taxableBase > 0
-                  ? `${((reportData.totals.taxAmount / reportData.totals.taxableBase) * 100).toFixed(1)}%`
-                  : '0.0%'}
+                PKR {formatPKR(reportData.kpis.uncollectedCustomerTax ?? 0)}
               </span>
               <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Weighted effective rate
-                <span className="block mt-1">Invoice Tax: PKR {formatPKR(reportData.kpis.totalTaxCharged ?? 0)}</span>
-                <span className="block mt-1">Uncollected Customer Tax: PKR {formatPKR(reportData.kpis.uncollectedCustomerTax ?? 0)} (as of period end)</span>
+                Customer balance as of period end; not statutory tax payable
+
               </span>
             </div>
           </div>
@@ -949,14 +946,14 @@ export const TaxReportPage: React.FC = () => {
 
                   <tr>
                     <td colSpan={8} className="py-3 px-4 text-right font-extrabold text-slate-900">
-                      Net Sales Tax Liability (Payable to Revenue Authority)
+                      Statutory Tax Payable (Existing Recognition Basis)
                     </td>
                     <td colSpan={4} className="py-3 px-4 text-right font-extrabold font-mono tabular-nums text-[#B82E69] text-sm">
                       PKR {formatPKR(reportData?.kpis.netTaxLiability ?? reportData?.totals.netTax ?? 0)}
                     </td>
                   </tr>
-                  <tr className="border-t border-slate-200"><td colSpan={8} className="py-3 px-4 text-right">Tax Collected (Customer Payments; Separate from Statutory Liability)</td><td colSpan={4} className="py-3 px-4 text-right font-mono">PKR {formatPKR(reportData.kpis.totalTaxCollected)}</td></tr>
-                  <tr><td colSpan={8} className="py-3 px-4 text-right">Uncollected Customer Tax (As of Period End)</td><td colSpan={4} className="py-3 px-4 text-right font-mono">PKR {formatPKR(reportData.kpis.uncollectedCustomerTax ?? 0)}</td></tr>
+                  <tr className="border-t border-slate-200"><td colSpan={8} className="py-3 px-4 text-right">Tax Collected (Customer Payments; Separate from Statutory Liability)</td><td colSpan={4} className="py-3 px-4 text-right font-mono">PKR {formatPKR(reportData?.kpis.totalTaxCollected ?? 0)}</td></tr>
+                  <tr><td colSpan={8} className="py-3 px-4 text-right">Uncollected Customer Tax (As of Period End)</td><td colSpan={4} className="py-3 px-4 text-right font-mono">PKR {formatPKR(reportData?.kpis.uncollectedCustomerTax ?? 0)}</td></tr>
                 </tfoot>
               </table>
             </div>

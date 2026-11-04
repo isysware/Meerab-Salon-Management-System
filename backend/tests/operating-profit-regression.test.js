@@ -21,10 +21,15 @@ beforeEach(() => {
   for (const model of Object.values(db)) model.findMany.mockResolvedValue([]);
   db.branch.findUnique.mockResolvedValue({ name: 'Test Branch' });
   const current = (args) => {
-    const range = args.where?.date || args.where?.finalizedAt || args.where?.eventDate || args.where?.expenseDate || args.where?.OR?.[0]?.finalizedAt || args.where?.month;
+    const range = args.where?.date || args.where?.finalizedAt || args.where?.eventDate || args.where?.expenseDate || args.where?.OR?.[0]?.date || args.where?.OR?.[0]?.finalizedAt || args.where?.month;
     return range?.gte >= new Date('2026-09-30T19:00:00Z');
   };
-  db.invoice.findMany.mockImplementation(async args => current(args) ? [{ lines: [{ type: 'SERVICE', netSales: 1000 }] }] : []);
+  // Accounting commission uses the original service attribution/rate, independent of receipts.
+  db.invoice.findMany.mockImplementation(async args => current(args) ? [{
+    id: 'invoice-accrual', date: new Date('2026-10-15'), netSales: 1000, tax: 0,
+    lines: [{ id: 'service-accrual', type: 'SERVICE', netSales: 1000, tax: 0,
+      staffId: 'staff', commissionRate: 10, components: [] }], refunds: [],
+  }] : []);
   db.expense.findMany.mockImplementation(async args => current(args) ? [{ category: 'General', amount: 100 }] : []);
   db.payrollRun.findMany.mockImplementation(async args => current(args) ? [{ payslips: [{ netPayable: 2000, grossPayable: 2200, snapshot: { commissionPayable: 100 }, paidAmount: 2100 }] }] : []);
   db.commissionEvent.findMany.mockImplementation(async args => current(args) ? [{ type: 'EARN', amount: 100 }] : []);
@@ -74,9 +79,9 @@ describe('Operating Profit recognition', () => {
       sourceModule: 'POS', type: 'DUES_COLLECTION', direction: 'IN', amount: 600,
     }]);
     const report = await incomeExpenseReport(actor, query);
-    expect(report.rows.find(r => r.reference === 'INV-0002')).toMatchObject({ income: 1000, paid: 1000, remaining: 0, status: 'PAID', collectionAmount: 400 });
+    expect(report.rows.find(r => r.reference === 'INV-0002')).toMatchObject({ income: 400, paid: 400, remaining: 0, status: 'PARTIAL', collectionAmount: 400 });
     expect(report.rows.find(r => r.id === 'collection')).toMatchObject({ income: 0, expense: 0, cashFlow: 600, paymentEventType: 'DUES_COLLECTION', status: 'POSTED' });
-    expect(report.totals).toMatchObject({ income: 1000, paid: 1000, collections: 1000, remaining: 0, net: 1000 });
+    expect(report.totals).toMatchObject({ income: 400, paid: 1000, collections: 1000, remaining: 0, net: 400 });
     expect(db.invoice.findMany.mock.calls[0][0].select.payments.where).toEqual({ reversedAt: null });
   });
 
@@ -98,9 +103,9 @@ describe('Operating Profit recognition', () => {
     expect(report.totals.netProfit).toBe(-1200);
     expect(report.kpis.operatingMarginPercent).toBe(-120);
     expect(report.statementRows.find(r => r.isFinalNet).currentAmount).toBe(-1200);
-    expect(db.payrollPayment.findMany).not.toHaveBeenCalled();
-    expect(db.commissionPayment.findMany).not.toHaveBeenCalled();
-    expect(db.payrollRun.findMany.mock.calls[0][0].where.status).toBe('FINALIZED');
+
+
+    expect(db.payrollRun.findMany.mock.calls[0][0].where.status).toEqual({ in: ['FINALIZED', 'PARTIALLY_PAID', 'PAID'] });
   });
 
   it('preserves zero salary and does not fall back to gross salary', async () => {

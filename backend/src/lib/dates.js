@@ -31,7 +31,11 @@ export const toTimeString = (date = new Date()) =>
 export const ymd = (d) => (d ? new Date(d).toISOString().slice(0, 10) : undefined);
 
 /** Convert 'YYYY-MM-DD' into the Date Prisma expects for a @db.Date column. */
-export const dateOnly = (str) => new Date(`${str}T00:00:00.000Z`);
+export const dateOnly = (val) => {
+  if (!val) return val;
+  const str = val instanceof Date ? val.toISOString().slice(0, 10) : typeof val === 'string' ? val.slice(0, 10) : String(val).slice(0, 10);
+  return new Date(`${str}T00:00:00.000Z`);
+};
 
 /** Start of day (00:00 Karachi) for 'YYYY-MM-DD' as a UTC Date. */
 export const startOfDay = (dateStr) => new Date(`${dateStr}T00:00:00+05:00`);

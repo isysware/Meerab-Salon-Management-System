@@ -87,6 +87,10 @@ const incomeExpenseQuery = z.object({
   userType: z.string().optional(),
   userId: z.string().optional(),
   user: z.string().optional(),
+  includeUnpaid: z.string().optional(),
+  includeCommission: z.string().optional(),
+  includeInventoryLoss: z.string().optional(),
+  includePayroll: z.string().optional(),
 });
 reportRoutes.get(
   '/income-expense',

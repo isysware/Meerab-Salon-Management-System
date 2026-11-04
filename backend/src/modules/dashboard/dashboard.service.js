@@ -33,7 +33,7 @@ export const computeBranchMetrics = async (branchIds, date, { id, name, code }) 
   const live = { ...scope, lifecycle: { not: 'VOIDED' } };
 
   const [sales, refunds, dues, payments, expenses, reversals, onDuty, apptCount, drawers, accounts, collectionEvents, staffPayments] = await Promise.all([
-    prisma.invoice.aggregate({ where: { ...live, date: day }, _sum: { subtotal: true, discount: true, netSales: true, tax: true }, _count: true }),
+    prisma.invoice.aggregate({ where: { ...scope, date: day }, _sum: { subtotal: true, discount: true, netSales: true, tax: true }, _count: true }),
     prisma.invoiceRefund.findMany({ where: { refundDate: day, invoice: scope }, select: { netReversed: true, taxReversed: true, tipReversed: true, cashOut: true, method: true } }),
     prisma.invoice.aggregate({ where: { ...live, amountDue: { gt: 0 } }, _sum: { amountDue: true } }),
     prisma.invoicePayment.groupBy({ by: ['method'], where: { ...scope, date: day }, _sum: { amount: true, tipAmountAllocated: true } }),
@@ -77,8 +77,8 @@ export const computeBranchMetrics = async (branchIds, date, { id, name, code }) 
     branchId: id, branchName: name, branchCode: code,
     grossSales: n(sumOf(sales, 'subtotal')),
     totalDiscounts: n(sumOf(sales, 'discount')),
-    netSales: n(max0(sumOf(sales, 'netSales').minus(netReversed))),
-    taxBilled: n(max0(sumOf(sales, 'tax').minus(taxReversed))),
+    netSales: n(sumOf(sales, 'netSales').minus(netReversed)),
+    taxBilled: n(sumOf(sales, 'tax').minus(taxReversed)),
     tipsCollected: collected.tipsCollected,
     collectedRevenue: collected.collectedRevenue,
     taxCollected: collected.taxCollected,
