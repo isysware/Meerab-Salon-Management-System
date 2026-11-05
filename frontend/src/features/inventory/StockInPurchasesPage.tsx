@@ -289,7 +289,7 @@ export const StockInPurchasesPage: React.FC = () => {
           batchNumber: l.batchNumber,
           quantity: Number(l.quantity) || 1,
           unitPurchaseCost: Number(l.unitPurchaseCost) || 0,
-          sellingPrice: l.sellingPrice !== undefined && Number(l.sellingPrice) > 0 ? Number(l.sellingPrice) : undefined,
+          sellingPrice: l.sellingPrice !== undefined ? Number(l.sellingPrice) : undefined,
           expiryDate: l.expiryDate || undefined,
         })),
       };
@@ -838,14 +838,14 @@ export const StockInPurchasesPage: React.FC = () => {
                         </div>
                         <div>
                           <label htmlFor={'stock-in-sale-price-' + idx} className="block text-[11px] font-semibold text-slate-600 mb-1">
-                            Update Sale Price <span className="text-slate-400 font-normal">(Optional — preserves current {item?.sellingPrice !== undefined ? `PKR ${item.sellingPrice}` : ''} if blank)</span>
+                            Batch Sale Price <span className="text-slate-400 font-normal">(Optional — defaults to {item?.sellingPrice !== undefined ? `PKR ${item.sellingPrice}` : ''} if blank)</span>
                           </label>
                           <input
                             id={'stock-in-sale-price-' + idx}
                             type="number"
                             min="0"
                             step="0.01"
-                            placeholder={item?.sellingPrice !== undefined ? `Current: PKR ${item.sellingPrice}` : 'Keep previous price'}
+                            placeholder={item?.sellingPrice !== undefined ? `Current: PKR ${item.sellingPrice}` : 'Use product default'}
                             value={line.sellingPrice !== undefined ? line.sellingPrice : ''}
                             onChange={(e) => handleUpdateLine(idx, { sellingPrice: e.target.value ? Number(e.target.value) : undefined })}
                             className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:outline-hidden font-mono"

@@ -119,6 +119,7 @@ export const createItem = async (input, actor) =>
               initialQuantity: openingQty,
               remainingQuantity: 0,
               unitCost,
+              sellingPrice: item.sellingPrice, priceSource: 'STOCK_IN',
             },
           });
 
@@ -193,7 +194,7 @@ export const stockSnapshots = async (actor, branchId) => {
         currentStock: current, minStockLevel: min,
         isLowStock: current <= min && current > 0, isOutOfStock: current <= 0,
         valuationCostBasis: round2(value).toNumber(),
-        potentialRetailValue: item.itemType === 'SALON_CONSUMABLE' ? 0 : round2(stock.times(item.sellingPrice)).toNumber(),
+        potentialRetailValue: item.itemType === 'SALON_CONSUMABLE' ? 0 : round2(own.reduce((sum, batch) => sum.plus(toDec(batch.remainingQuantity).times(batch.sellingPrice ?? item.sellingPrice)), toDec(0))).toNumber(),
         validBatchesCount: counts.VALID, nearExpiryBatchesCount: counts.NEAR_EXPIRY, expiredBatchesCount: counts.EXPIRED,
       });
     }
@@ -555,6 +556,7 @@ export const createPurchase = async (input, actor, request) => {
           purchaseId: purchase.id, purchaseNumber, supplierId: supplier.id, supplierName: supplier.name,
           receivedDate: purchaseDate, mfgDate: l.mfgDate ? dateOnly(l.mfgDate) : null, expiryDate: l.expiryDate ? dateOnly(l.expiryDate) : null,
           initialQuantity: qty(l.quantity), remainingQuantity: 0, unitCost: costs[i].landedUnitCost,
+          sellingPrice: round2(l.item.itemType === 'SALON_CONSUMABLE' ? 0 : (l.sellingPrice ?? l.item.sellingPrice)), priceSource: 'STOCK_IN',
         },
       });
       await postStockMovement(tx, {
@@ -571,13 +573,7 @@ export const createPurchase = async (input, actor, request) => {
         },
       });
 
-      // Synchronize authorized selling-price update if explicitly specified on stock-in
-      if (l.sellingPrice !== undefined && Number(l.sellingPrice) > 0 && l.item.itemType !== 'SALON_CONSUMABLE') {
-        await tx.inventoryItem.update({
-          where: { id: l.item.id },
-          data: { sellingPrice: round2(l.sellingPrice) },
-        });
-      }
+      // The Product Master remains a default; receipt prices belong to this batch.
     }
 
     const ledgerBase = { supplierId: supplier.id, branchId, date: purchaseDate, referenceType: 'PURCHASE', referenceId: purchase.id, referenceNumber: purchaseNumber, userId: actor.id, userName: actor.name };

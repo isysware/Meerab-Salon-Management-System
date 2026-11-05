@@ -3,6 +3,7 @@
 // dated InvoiceRefund event that reverses: net sales, tax (at the original rate snapshot), commission
 // (dated REVERSAL events), stock (RETURN_IN at the original cost layers) and money actually received.
 
+import { refundBatchSlices } from '../../lib/batchPricing.js';
 import prisma from '../../config/prisma.js';
 import { auditLog } from '../../lib/audit.js';
 import { badRequest, conflict, forbidden } from '../../lib/AppError.js';
@@ -63,6 +64,7 @@ export const refundInvoice = async (input, actor) => {
       ? invoice.lines.map((l) => ({ lineId: l.id, quantity: toDec(l.quantity).minus(already.get(l.id) ?? 0), restock: l.type === 'PRODUCT' ? 'RESALABLE' : 'NONE' }))
           .filter((r) => r.quantity.greaterThan(0))
       : (input.lines ?? []).map((r) => ({ ...r, quantity: toDec(r.quantity) }));
+    if (new Set(requested.map(r => r.lineId)).size !== requested.length) throw badRequest('DUPLICATE_REFUND_LINE', 'Select each invoice line only once.');
     if (!requested.length) throw badRequest('NOTHING_TO_REFUND', 'Select at least one line and quantity to refund.');
 
     // A void or a refund that closes the invoice also returns the tip (spec §12.1), so the tip
@@ -101,8 +103,10 @@ export const refundInvoice = async (input, actor) => {
       // Final refund of a line takes exactly what is left so totals reconcile to the cent.
       const prevNet = invoice.refunds.flatMap((x) => x.lines).filter((x) => x.lineId === line.id).reduce((s, x) => s.plus(x.net), toDec(0));
       const prevTax = invoice.refunds.flatMap((x) => x.lines).filter((x) => x.lineId === line.id).reduce((s, x) => s.plus(x.tax), toDec(0));
-      const net = lastUnits ? round2(toDec(line.netSales).minus(prevNet)) : round2(toDec(line.netSales).times(ratio));
-      const tax = lastUnits ? round2(toDec(line.tax).minus(prevTax)) : round2(net.times(line.taxRate));
+      const slices = line.type === 'PRODUCT' ? refundBatchSlices(line.batches, already.get(line.id) ?? 0, r.quantity) : [];
+      const priced = slices.length > 0 && slices.every(b => b.net !== null && b.tax !== null);
+      const net = priced ? round2(slices.reduce((sum, b) => sum.plus(b.net), toDec(0))) : lastUnits ? round2(toDec(line.netSales).minus(prevNet)) : round2(toDec(line.netSales).times(ratio));
+      const tax = priced ? round2(slices.reduce((sum, b) => sum.plus(b.tax), toDec(0))) : lastUnits ? round2(toDec(line.tax).minus(prevTax)) : round2(net.times(line.taxRate));
       netReversed = netReversed.plus(net);
       taxReversed = taxReversed.plus(tax);
       const restock = line.type === 'PRODUCT' ? (r.restock || 'RESALABLE') : 'NONE';
@@ -163,12 +167,10 @@ export const refundInvoice = async (input, actor) => {
 
       // Stock: resalable goods return to their original cost layers; damaged ones are written off.
       if (line.type === 'PRODUCT' && restock !== 'NONE') {
-        let toReturn = r.quantity;
-        for (const lb of [...line.batches].reverse()) {
-          if (toReturn.lessThanOrEqualTo(0)) break;
-          const qtyBack = toDec(lb.qty).lessThan(toReturn) ? toDec(lb.qty) : toReturn;
-          toReturn = toReturn.minus(qtyBack);
-          const batch = await tx.inventoryBatch.findUnique({ where: { id: lb.batchId } });
+        for (const lb of slices) {
+          const qtyBack = lb.quantity;
+          const batch = await tx.inventoryBatch.findFirst({ where: { id: lb.batchId, itemId: line.itemId, branchId: invoice.branchId } });
+          if (!batch) throw conflict('RETURN_BATCH_MISSING', 'Original batch is unavailable in this branch.');
           const common = {
             branchCode: branch.code, branchId: invoice.branchId, itemId: line.itemId, batch, quantity: qtyBack, unitCost: lb.unitCost,
             sourceReferenceType: 'RETURN', sourceReferenceId: refund.id, sourceReferenceNumber: refundNumber, actor,

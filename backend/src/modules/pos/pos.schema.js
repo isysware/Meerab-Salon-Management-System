@@ -21,7 +21,7 @@ const payment = z.object({
 const cartItem = z.object({
   cartInstanceId: z.string().optional(),
   type:           z.enum(['SERVICE', 'PACKAGE', 'PRODUCT']),
-  item:           z.object({ id: z.string().min(1), name: z.string().optional(), price: z.number().optional(), sellingPrice: z.number().optional() }).passthrough(),
+  item:           z.object({ id: z.string().min(1), name: z.string().optional(), price: z.number().optional(), sellingPrice: z.number().optional(), batchQuote: z.array(z.object({ batchId: z.string().min(1), quantity: z.number().finite().positive(), sellingPrice: money.min(0) })).optional() }).passthrough(),
   quantity:       z.number(),
   staffId:        z.string().optional().nullable().default('house'),
   staffName:      z.string().optional().nullable(),

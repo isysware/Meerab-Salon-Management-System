@@ -1,0 +1,280 @@
+// src/modules/inventory/inventory.mapper.js
+// Inventory rows → frontend types (InventoryItem, InventoryBatch, Supplier, Purchase, …).
+
+import { num, opt, iso } from '../../lib/dto.js';
+import { ymd, toTimeString, toDateString } from '../../lib/dates.js';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export const toItemDTO = (i) => ({
+  id:                  i.id,
+  sku:                 i.sku,
+  code:                i.sku,
+  barcode:             opt(i.barcode),
+  name:                i.name,
+  category:            i.category,
+  description:         opt(i.description),
+  brand:               opt(i.brand),
+  imageUrl:            opt(i.imageUrl),
+  itemType:            i.itemType,
+  defaultPurchaseCost: num(i.defaultPurchaseCost),
+  sellingPrice:        num(i.sellingPrice),
+  price:               num(i.sellingPrice),
+  purchaseUnit:        i.purchaseUnit,
+  issueUnit:           i.issueUnit,
+  unitConversionRatio: i.unitConversionRatio === null ? undefined : num(i.unitConversionRatio),
+  taxTreatment:        i.taxTreatment,
+  specificTaxRuleId:   opt(i.specificTaxRuleId),
+  minStockLevel:       num(i.minStockLevel),
+  trackBatch:          i.trackBatch,
+  trackExpiry:         i.trackExpiry,
+  nearExpiryAlertDays: i.nearExpiryAlertDays,
+  isActive:            i.isActive,
+  branchAvailability:  i.branchAvailability,
+  createdAt:           iso(i.createdAt),
+  updatedAt:           iso(i.updatedAt),
+});
+
+/** Derived batch status: EXHAUSTED > QUARANTINED > EXPIRED > NEAR_EXPIRY > VALID. */
+export const deriveBatchStatus = (b, businessDate, alertDays = 60) => {
+  if (num(b.remainingQuantity) <= 0) return 'EXHAUSTED';
+  if (b.status === 'QUARANTINED') return 'QUARANTINED';
+  if (b.expiryDate) {
+    const exp = ymd(b.expiryDate);
+    if (exp < businessDate) return 'EXPIRED';
+    const diffDays = (new Date(exp) - new Date(businessDate)) / DAY_MS;
+    if (diffDays >= 0 && diffDays <= alertDays) return 'NEAR_EXPIRY';
+  }
+  return 'VALID';
+};
+
+export const toBatchDTO = (b, businessDate) => ({
+  id:                b.id,
+  itemId:            b.itemId,
+  itemName:          b.item?.name,
+  itemSku:           b.item?.sku,
+  branchId:          b.branchId,
+  batchNumber:       b.batchNumber,
+  purchaseId:        opt(b.purchaseId),
+  purchaseNumber:    opt(b.purchaseNumber),
+  supplierId:        opt(b.supplierId),
+  supplierName:      opt(b.supplierName),
+  receivedDate:      ymd(b.receivedDate),
+  mfgDate:           ymd(b.mfgDate),
+  expiryDate:        ymd(b.expiryDate),
+  initialQuantity:   num(b.initialQuantity),
+  purchasedQuantity: num(b.initialQuantity),
+  remainingQuantity: num(b.remainingQuantity),
+  unitCostSnapshot:  num(b.unitCost),
+  sellingPrice: b.sellingPrice == null ? undefined : num(b.sellingPrice),
+  priceSource: b.priceSource,
+  allocationOrder: b.allocationOrder,
+  unitPurchaseCost:  num(b.unitCost),
+  status:            deriveBatchStatus(b, businessDate, b.item?.nearExpiryAlertDays ?? 60),
+  quarantinedReason: opt(b.quarantinedReason),
+  createdAt:         iso(b.createdAt),
+  updatedAt:         iso(b.updatedAt),
+});
+
+/** @param totals { currentPayable, totalPurchases, totalPayments, totalReturns } derived from the ledger */
+export const toSupplierDTO = (s, totals) => ({
+  id:             s.id,
+  supplierCode:   s.supplierCode,
+  name:           s.name,
+  companyName:    opt(s.companyName),
+  phone:          s.phone,
+  email:          opt(s.email),
+  contactPerson:  opt(s.contactPerson),
+  address:        opt(s.address),
+  taxNumber:      opt(s.taxNumber),
+  notes:          opt(s.notes),
+  branchId:       s.branchId,
+  isActive:       s.isActive,
+  openingPayable: num(s.openingPayable),
+  openingBalance: num(s.openingPayable),
+  currentPayable: totals.currentPayable,
+  currentBalance: totals.currentPayable,
+  totalPurchases: totals.totalPurchases,
+  totalPayments:  totals.totalPayments,
+  totalReturns:   totals.totalReturns,
+  createdById:    s.createdById,
+  createdByName:  s.createdByName,
+  createdAt:      iso(s.createdAt),
+  updatedAt:      iso(s.updatedAt),
+});
+
+export const toLedgerEntryDTO = (e, supplierName, runningBalance) => ({
+  id:              e.id,
+  supplierId:      e.supplierId,
+  supplierName,
+  branchId:        e.branchId,
+  date:            ymd(e.date),
+  time:            toTimeString(e.createdAt),
+  entryType:       e.entryType,
+  type:            e.entryType,
+  referenceType:   e.referenceType,
+  referenceId:     e.referenceId,
+  referenceNumber: e.referenceNumber,
+  reference:       e.referenceNumber,
+  description:     e.description,
+  debit:           num(e.debit),
+  credit:          num(e.credit),
+  payableCredit:   num(e.credit),
+  payableDebit:    num(e.debit),
+  runningBalance:  num(runningBalance),
+  createdById:     e.userId,
+  createdByName:   e.userName,
+  createdAt:       iso(e.createdAt),
+});
+
+export const toPurchaseDTO = (p, accountName) => ({
+  id:                    p.id,
+  purchaseNumber:        p.purchaseNumber,
+  branchId:              p.branchId,
+  supplierId:            p.supplierId,
+  supplierName:          p.supplierName,
+  purchaseDate:          ymd(p.purchaseDate),
+  supplierInvoiceNumber: opt(p.supplierInvoiceNumber),
+  invoiceNumber:         opt(p.supplierInvoiceNumber),
+  notes:                 opt(p.notes),
+  subtotal:              num(p.subtotal),
+  discount:              num(p.discount),
+  netAmount:             num(p.netAmount),
+  totalCost:             num(p.netAmount),
+  paidAmount:            num(p.paidAmount),
+  balanceDue:            num(p.balanceDue),
+  balanceAmount:         num(p.balanceDue),
+  paymentMethod:         p.paymentMethod,
+  paymentStatus:         p.paymentStatus,
+  paymentAccountId:      opt(p.paymentAccountId),
+  paymentAccountName:    accountName,
+  cashDrawerId:          opt(p.cashDrawerId),
+  lines: [...(p.lines ?? [])].sort((a, b) => a.sortOrder - b.sortOrder).map((l) => ({
+    id:                     l.id,
+    itemId:                 l.itemId,
+    itemName:               l.itemName,
+    itemSku:                l.itemSku,
+    quantity:               num(l.quantity),
+    unitPurchaseCost:       num(l.unitPurchaseCost),
+    historicalCostSnapshot: num(l.landedUnitCost),
+    landedUnitCost:         num(l.landedUnitCost),
+    lineDiscount:           num(l.lineDiscount),
+    lineTotal:              num(l.lineTotal),
+    batchNumber:            l.batchNumber,
+    expiryDate:             ymd(l.expiryDate),
+    mfgDate:                ymd(l.mfgDate),
+    batchId:                l.batchId,
+  })),
+  status:                p.status,
+  createdById:           p.createdById,
+  createdByName:         p.createdByName,
+  createdAt:             iso(p.createdAt),
+});
+
+export const toSupplierPaymentDTO = (p, supplierName, accountName) => ({
+  id:                 p.id,
+  paymentNumber:      p.paymentNumber,
+  allocations: p.allocations,
+  reversedAt: p.reversedAt ? iso(p.reversedAt) : undefined,
+  reversedByName: p.reversedByName,
+  reversalReason: p.reversalReason,
+  reversalDate: p.reversalDate ? ymd(p.reversalDate) : undefined,
+  supplierId:         p.supplierId,
+  supplierName,
+  branchId:           p.branchId,
+  paymentDate:        ymd(p.paymentDate),
+  paymentTime:        toTimeString(p.createdAt),
+  amount:             num(p.amount),
+  method:             p.method,
+  paymentAccountId:   opt(p.paymentAccountId),
+  paymentAccountName: accountName,
+  cashDrawerId:       opt(p.cashDrawerId),
+  reference:          opt(p.reference),
+  notes:              opt(p.notes),
+  paidById:           p.paidById,
+  paidByName:         p.paidByName,
+  createdAt:          iso(p.createdAt),
+});
+
+export const toSupplierReturnDTO = (r, supplierName) => ({
+  id:               r.id,
+  returnNumber:     r.returnNumber,
+  branchId:         r.branchId,
+  supplierId:       r.supplierId,
+  supplierName,
+  purchaseId:       opt(r.purchaseId),
+  purchaseNumber:   opt(r.purchaseNumber),
+  returnDate:       ymd(r.returnDate),
+  lines: (r.lines ?? []).map((l) => ({
+    itemId: l.itemId, itemName: l.itemName, itemSku: l.itemSku, batchId: l.batchId, batchNumber: l.batchNumber,
+    quantity: num(l.quantity), unitCost: num(l.unitCost), totalCost: num(l.totalCost),
+  })),
+  totalAmount:      num(r.totalAmount),
+  refundTreatment:  r.refundTreatment,
+  paymentAccountId: opt(r.paymentAccountId),
+  cashDrawerId:     opt(r.cashDrawerId),
+  reason:           r.reason,
+  notes:            opt(r.notes),
+  createdById:      r.createdById,
+  createdByName:    r.createdByName,
+  createdAt:        iso(r.createdAt),
+});
+
+export const toMovementDTO = (m) => ({
+  id:                    m.id,
+  movementNumber:        m.movementNumber,
+  branchId:              m.branchId,
+  itemId:                m.itemId,
+  itemName:              m.item?.name,
+  itemSku:               m.item?.sku,
+  batchId:               opt(m.batchId),
+  batchNumber:           opt(m.batch?.batchNumber),
+  movementType:          m.movementType,
+  direction:             m.direction,
+  quantity:              num(m.quantity),
+  unitCostSnapshot:      num(m.unitCost),
+  totalCostImpact:       num(m.totalCost),
+  sourceReferenceType:   m.sourceReferenceType,
+  sourceReferenceId:     m.sourceReferenceId,
+  referenceId:           m.sourceReferenceId,
+  sourceReferenceNumber: m.sourceReferenceNumber,
+  reason:                m.reason,
+  notes:                 opt(m.notes),
+  createdById:           m.userId,
+  createdByName:         m.userName,
+  actorName:             m.userName,
+  createdAt:             iso(m.createdAt),
+  timestamp:             iso(m.createdAt),
+  date:                  toDateString(m.createdAt),
+});
+
+export const toStockSettlementDTO = (s) => {
+  const lines = (s.lines ?? []).map((l) => ({
+    itemId: l.itemId, itemName: l.itemName, itemSku: l.itemSku, batchId: opt(l.batchId), batchNumber: opt(l.batchNumber),
+    systemQuantity: num(l.systemQuantity), countedQuantity: num(l.countedQuantity), difference: num(l.difference),
+    unitCostSnapshot: num(l.unitCost), costImpact: num(l.costImpact), reason: l.reason, notes: opt(l.notes),
+  }));
+  const sum = (f) => lines.reduce((t, l) => t + l[f], 0);
+  const netImpact = Math.round(sum('costImpact') * 100) / 100;
+  return {
+    id:                       s.id,
+    settlementNumber:         s.settlementNumber,
+    branchId:                 s.branchId,
+    countDate:                ymd(s.countDate),
+    notes:                    opt(s.notes),
+    status:                   s.status,
+    lines,
+    totalSystemQuantity:      sum('systemQuantity'),
+    totalCountedQuantity:     sum('countedQuantity'),
+    totalDiscrepancyQuantity: sum('difference'),
+    totalNetCostImpact:       netImpact,
+    totalCostVariance:        netImpact,
+    createdById:              s.createdById,
+    createdByName:            s.createdByName,
+    conductedByName:          s.createdByName,
+    approvedById:             opt(s.approvedById),
+    approvedByName:           opt(s.approvedByName),
+    createdAt:                iso(s.createdAt),
+    postedAt:                 iso(s.postedAt),
+  };
+};

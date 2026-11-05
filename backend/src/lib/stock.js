@@ -48,7 +48,7 @@ export const pickBatches = async (tx, { itemId, branchId, quantity, businessDate
     if (ra !== rb) return ra - rb;
     const ca = a.createdAt ? (a.createdAt instanceof Date ? a.createdAt.getTime() : new Date(a.createdAt).getTime()) : 0;
     const cb = b.createdAt ? (b.createdAt instanceof Date ? b.createdAt.getTime() : new Date(b.createdAt).getTime()) : 0;
-    return ca - cb;
+    return ca - cb || String(a.id).localeCompare(String(b.id));
   });
 
   const available = batches.reduce((s, b) => s.plus(b.remainingQuantity), toDec(0));
@@ -196,7 +196,7 @@ export const previewBatchPicks = async (prismaClient, { itemId, branchId, quanti
     if (ra !== rb) return ra - rb;
     const ca = a.createdAt ? (a.createdAt instanceof Date ? a.createdAt.getTime() : new Date(a.createdAt).getTime()) : 0;
     const cb = b.createdAt ? (b.createdAt instanceof Date ? b.createdAt.getTime() : new Date(b.createdAt).getTime()) : 0;
-    return ca - cb;
+    return ca - cb || String(a.id).localeCompare(String(b.id));
   });
 
   const available = batches.reduce((s, b) => s.plus(b.remainingQuantity), toDec(0));

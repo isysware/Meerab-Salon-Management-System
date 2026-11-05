@@ -273,6 +273,8 @@ export interface InventoryBatch {
   purchasedQuantity?: number; // alias for initialQuantity
   remainingQuantity: number;
   unitCostSnapshot: number;
+  sellingPrice?: number; // immutable batch receipt price
+  priceSource?: string;
   unitPurchaseCost?: number; // alias for unitCostSnapshot
   status: BatchStatus;
   quarantinedReason?: string;
@@ -952,6 +954,7 @@ export interface InvoiceLineItemComponent {
 }
 
 export interface InvoiceLineItem {
+  batchAllocations?: Array<{ batchId: string; batchNumber: string; quantity: number; unitCost: number; sellingPrice: number; discountAllocated?: number; taxAllocated?: number }>;
   id: string;
   name: string;
   type: 'SERVICE' | 'PRODUCT' | 'PACKAGE' | 'CUSTOM_SERVICE';
@@ -2361,6 +2364,8 @@ export interface IncomeExpenseReportRow {
 export interface IncomeExpenseReportKPIs {
   staffLoanReceivable?: number;
   staffLoanCashOutflow?: number;
+  supplierPayments?: number;
+  supplierCashOutflow?: number;
   totalCollections?: number;
   totalCollectedIncome?: number;
   totalRecognizedIncome: number;
@@ -2416,6 +2421,8 @@ export interface IncomeExpenseReport {
     accruedSalaryExpenses?: number;
     customerCollections?: number;
     staffLoanCashOutflow?: number;
+    supplierPayments?: number;
+    supplierCashOutflow?: number;
     nonOperatingCashOutflows?: number;
     netCashMovement?: number;
     tipAmount?: number;
@@ -3234,6 +3241,8 @@ export interface DetailedExpenseCategoryItem {
 
 export interface DetailedExpensesReportKPIs {
   nonOperatingCashOutflow?: number;
+  supplierPayments?: number;
+  supplierCashOutflow?: number;
   totalCashOutflow?: number;
   unpaidSalaries?: number;
   unpaidCommissions?: number;
@@ -3312,6 +3321,11 @@ export interface DetailedExpensesReport {
     amount: number;
     cash: number;
     online: number;
+    operatingExpenses?: number;
+    nonOperatingCashOutflow?: number;
+    supplierPayments?: number;
+    supplierCashOutflow?: number;
+    totalCashOutflow?: number;
   };
 }
 

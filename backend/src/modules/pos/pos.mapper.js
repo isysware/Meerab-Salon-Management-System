@@ -67,6 +67,12 @@ const toLineDTO = (l) => {
     total:               num(l.total),
     ...(l.type === 'PACKAGE' ? { packageComponents: components, packageComponentsSnapshot: components } : {}),
     ...(l.type === 'PRODUCT' ? {
+      batchAllocations: [...batches].sort((a,b) => a.sortOrder - b.sortOrder).map(b => ({
+        batchId: b.batchId, batchNumber: b.batchNumber, quantity: num(b.qty), unitCost: num(b.unitCost),
+        sellingPrice: b.sellingPrice == null ? num(l.unitPrice) : num(b.sellingPrice),
+        discountAllocated: b.discountAllocated == null ? undefined : num(b.discountAllocated),
+        taxAllocated: b.taxAllocated == null ? undefined : num(b.taxAllocated),
+      })),
       batchId:          batches[0]?.batchId,
       batchNumber:      batches.map((b) => b.batchNumber).join(', ') || undefined,
       unitCostSnapshot: l.unitCostSnapshot === null ? undefined : num(l.unitCostSnapshot),

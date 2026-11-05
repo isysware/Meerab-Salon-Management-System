@@ -1,0 +1,12 @@
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    environment: 'node',
+    include: [
+      'tests/inventory-fifo-fefo.test.js',
+      'tests/supplier-payment-reporting.test.js',
+    ],
+  },
+});
+

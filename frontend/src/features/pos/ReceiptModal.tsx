@@ -85,7 +85,8 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       .map((li) => {
         const qty = li.quantity > 1 ? `${li.quantity}x ` : '';
         const stylist = li.staffName ? `\n  Stylist: ${li.staffName}` : '';
-        return `• ${qty}${li.name}${stylist}\n  Amount: ${formatCurrency(li.unitPrice * li.quantity)}`;
+        const breakdown = li.batchAllocations?.map(a => `\n  ${a.quantity} × ${formatCurrency(a.sellingPrice)}`).join('') || '';
+        return `• ${qty}${li.name}${stylist}\n  Amount: ${formatCurrency(li.netSales == null ? li.unitPrice * li.quantity : li.netSales + (li.discountAllocated ?? 0))}${breakdown}`;
       })
       .join('\n');
 
@@ -406,7 +407,8 @@ Powered by Isysware Software Solutions`;
                       </span>
                     </div>
                     <span className="font-mono font-semibold text-slate-900 shrink-0 text-right">
-                      {formatCurrency(li.unitPrice * li.quantity)}
+                      {formatCurrency(li.netSales == null ? li.unitPrice * li.quantity : li.netSales + (li.discountAllocated ?? 0))}
+                      {li.batchAllocations?.map(a => <span key={a.batchId} className="block text-[10px] font-normal text-slate-500">{a.batchNumber}: {a.quantity} × {formatCurrency(a.sellingPrice)}</span>)}
                     </span>
                   </div>
 

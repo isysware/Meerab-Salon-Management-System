@@ -195,12 +195,12 @@ export const InventoryPage: React.FC = () => {
       for (const item of items) {
         const itemBatches = bts.filter((b) => b.itemId === item.id && (bId === 'ALL' || b.branchId === bId));
         const currentQty = itemBatches.reduce((sum, b) => sum + (b.remainingQuantity || 0), 0);
-        const itemVal = itemBatches.reduce((sum, b) => sum + (b.remainingQuantity || 0) * (b.unitCostSnapshot || item.defaultPurchaseCost), 0);
+        const itemVal = itemBatches.reduce((sum, b) => sum + (b.remainingQuantity || 0) * (b.unitCostSnapshot ?? item.defaultPurchaseCost), 0);
 
         sMap[item.id] = { currentStock: currentQty, valuation: itemVal };
         totalCostVal += itemVal;
         const isConsumable = item.itemType === 'SALON_CONSUMABLE';
-        totalRetailVal += isConsumable ? 0 : currentQty * (item.sellingPrice || 0);
+        totalRetailVal += isConsumable ? 0 : itemBatches.reduce((sum, b) => sum + (b.remainingQuantity || 0) * (b.sellingPrice ?? item.sellingPrice ?? 0), 0);
 
         if (currentQty <= 0) {
           outCount++;
@@ -2209,6 +2209,8 @@ export const InventoryPage: React.FC = () => {
                   <div>
                     <span className="text-[10px] text-slate-400 block">Cost Snapshot:</span>
                     <span className="font-mono">{formatCurrency(batch.unitCostSnapshot || 0)}</span>
+                    <span className="text-[10px] text-slate-400 block">Batch Sale Price:</span>
+                    <span className="font-mono">{batch.sellingPrice == null ? 'Pending migration' : formatCurrency(batch.sellingPrice)}</span>
                   </div>
                 </div>
 

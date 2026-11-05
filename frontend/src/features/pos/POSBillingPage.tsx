@@ -1,3 +1,6 @@
+import Decimal from 'decimal.js';
+import { orderedSaleBatches, quoteCart } from './batchPricing';
+import type { InventoryBatch } from '@/types/salon';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from '@/context/RouterContext';
@@ -128,6 +131,7 @@ export const POSBillingPage: React.FC = () => {
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [packages, setPackages] = useState<PackageItem[]>([]);
   const [products, setProducts] = useState<InventoryItem[]>([]);
+  const [saleBatches, setSaleBatches] = useState<InventoryBatch[]>([]);
   const [productStockMap, setProductStockMap] = useState<Record<string, number>>({});
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
   const [paymentAccounts, setPaymentAccounts] = useState<PaymentAccount[]>([]);
@@ -269,7 +273,11 @@ export const POSBillingPage: React.FC = () => {
       const retailProds = prodList.filter(
         (p) => (p.itemType === 'RETAIL_PRODUCT' || p.itemType === 'BOTH') && p.isActive
       );
-      setProducts(retailProds);
+      setSaleBatches(batchList);
+      setProducts(retailProds.map(p => {
+        const next = orderedSaleBatches(batchList, p, bId)[0];
+        return { ...p, sellingPrice: next?.sellingPrice ?? 0, price: next?.sellingPrice ?? 0 };
+      }));
 
       const sMap: Record<string, number> = {};
       const todayStr = demoDate || new Date().toISOString().split('T')[0];
@@ -1526,9 +1534,11 @@ export const POSBillingPage: React.FC = () => {
   };
 
   // Financial Calculations
+  const batchQuotes = useMemo(() => quoteCart(cart, saleBatches, selectedBranchId), [cart, saleBatches, selectedBranchId]);
+  const lineGross = (ci: POSCartItem) => ci.type === 'PRODUCT' ? (batchQuotes.get(ci.cartInstanceId)?.gross ?? 0) : new Decimal(getCatalogueSellingPrice(ci.item)).times(ci.quantity).toNumber();
   const calculations = useMemo(() => {
     const grossSubtotal = roundCurrency(
-      cart.reduce((sum, ci) => sum + getCatalogueSellingPrice(ci.item) * ci.quantity, 0)
+      cart.reduce((sum, ci) => sum + lineGross(ci), 0)
     );
 
     let calculatedDiscount = 0;
@@ -1543,14 +1553,14 @@ export const POSBillingPage: React.FC = () => {
     const branchTaxRate = (applyBranchTax && currentBranch?.taxEnabled) ? (currentBranch.taxRate || 0) : 0;
     let totalTax = 0;
 
-    const discountAllocations = cart.map(ci => grossSubtotal > 0 ? roundCurrency((getCatalogueSellingPrice(ci.item) * ci.quantity / grossSubtotal) * calculatedDiscount) : 0);
-    if (loadedBooking && cart.length > 0 && grossSubtotal > 0) {
-      const largest = cart.reduce((best, ci, index) => getCatalogueSellingPrice(ci.item) * ci.quantity > getCatalogueSellingPrice(cart[best].item) * cart[best].quantity ? index : best, 0);
+    const discountAllocations = cart.map(ci => grossSubtotal > 0 ? roundCurrency((lineGross(ci) / grossSubtotal) * calculatedDiscount) : 0);
+    if (cart.length > 0 && grossSubtotal > 0) {
+      const largest = cart.reduce((best, ci, index) => lineGross(ci) > lineGross(cart[best]) ? index : best, 0);
       discountAllocations[largest] = roundCurrency(discountAllocations[largest] + calculatedDiscount - discountAllocations.reduce((sum, value) => sum + value, 0));
     }
     const lineCalculations = cart.map((ci, index) => {
       const itemPrice = getCatalogueSellingPrice(ci.item);
-      const gross = roundCurrency(itemPrice * ci.quantity);
+      const gross = roundCurrency(lineGross(ci));
       const lineDisc = discountAllocations[index];
       const lineNet = roundCurrency(gross - lineDisc);
 
@@ -1558,7 +1568,7 @@ export const POSBillingPage: React.FC = () => {
         ? 0
         : loadedBooking
           ? (ci.bookingTaxRate ?? (ci.item.taxTreatment === 'EXEMPT' ? 0 : ci.item.taxTreatment === 'SPECIFIC_RULE' ? taxRules.find(r => r.id === getCatalogueTaxRuleId(ci.item))?.rate || 0 : branchTaxRate))
-          : branchTaxRate;
+          : (ci.item.taxTreatment === 'EXEMPT' ? 0 : ci.item.taxTreatment === 'SPECIFIC_RULE' ? taxRules.find(r => r.id === getCatalogueTaxRuleId(ci.item))?.rate || 0 : branchTaxRate);
       const lineTax = roundCurrency(lineNet * effectiveTaxRate);
       totalTax = roundCurrency(totalTax + lineTax);
 
@@ -1592,7 +1602,7 @@ export const POSBillingPage: React.FC = () => {
       remainingBillTotal: settlement.remainingBillTotal,
       lineCalculations,
     };
-  }, [cart, discountType, discountValue, tipAmount, currentBranch, applyBranchTax, loadedBooking, taxRules]);
+  }, [cart, batchQuotes, discountType, discountValue, tipAmount, currentBranch, applyBranchTax, loadedBooking, taxRules]);
   const hasBookingChanges = loadedBooking ? bookingCartChanged(loadedBooking, cart, discountType, discountValue) : false;
 
   // Check if booking quote differs from canonical cart subtotal
@@ -1636,7 +1646,7 @@ export const POSBillingPage: React.FC = () => {
     setCart((prev) =>
       prev.map((ci) => {
         if (!loadedBooking && ci.type === 'PACKAGE' && (!ci.assignedStaff || ci.assignedStaff.length === 0)) {
-          const totalLineAmount = getCatalogueSellingPrice(ci.item) * ci.quantity;
+          const totalLineAmount = lineGross(ci);
           return {
             ...ci,
             staffId: 'house',
@@ -1856,8 +1866,11 @@ export const POSBillingPage: React.FC = () => {
       }
 
       // Sanitize cart items so lines without assigned staff fallback cleanly to 'house' (No Staff / Salon)
+      if (cart.some(ci => ci.type === 'PRODUCT' && !batchQuotes.get(ci.cartInstanceId)?.complete)) {
+        throw new Error('Insufficient priced stock. Refresh the catalogue before checkout.');
+      }
       const sanitizedCart = cart.map((ci) => {
-        const lineTotal = getCatalogueSellingPrice(ci.item) * ci.quantity;
+        const lineTotal = lineGross(ci);
         const validAssigned = (ci.assignedStaff || []).filter(
           (as) => as.staffId && as.staffId !== 'unassigned'
         );
@@ -1893,6 +1906,7 @@ export const POSBillingPage: React.FC = () => {
         const primary = finalAssignedStaff[0];
         return {
           ...ci,
+          item: ci.type === 'PRODUCT' ? { ...ci.item, batchQuote: batchQuotes.get(ci.cartInstanceId)?.allocations } : ci.item,
           staffId: primary.staffId,
           staffName: finalAssignedStaff.map((s) => s.staffName).join(', '),
           staffCommissionRate: primary.staffCommissionRate || 0,
@@ -2200,7 +2214,10 @@ export const POSBillingPage: React.FC = () => {
                     </div>
 
                     <span className="font-mono font-bold text-slate-900 w-18 text-right text-xs">
-                      {formatCurrency(getCatalogueSellingPrice(ci.item) * ci.quantity)}
+                      {formatCurrency(lineGross(ci))}
+                      {ci.type === 'PRODUCT' && <span className="block text-[10px] font-normal text-slate-500">
+                        {batchQuotes.get(ci.cartInstanceId)?.allocations.map(a => <span key={a.batchId} className="block">{a.quantity} × {formatCurrency(a.sellingPrice)}</span>)}
+                      </span>}
                     </span>
 
                     <Button
@@ -2324,7 +2341,7 @@ export const POSBillingPage: React.FC = () => {
                     {ci.assignedStaff && ci.assignedStaff.length > 0 && (
                       <div className="space-y-1 bg-white p-1 rounded-md border border-slate-200">
                         {ci.assignedStaff.map((st) => {
-                          const lineTotalAmount = getCatalogueSellingPrice(ci.item) * ci.quantity;
+                          const lineTotalAmount = lineGross(ci);
                           const currentAmount = st.allocatedAmount ?? (ci.assignedStaff?.length === 1 ? lineTotalAmount : Math.round(lineTotalAmount / (ci.assignedStaff?.length || 1)));
 
                           return (

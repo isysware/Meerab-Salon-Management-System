@@ -1,10 +1,12 @@
 import prisma from '../../config/prisma.js';
 import { forbidden } from '../../lib/AppError.js';
-import { dateOnly } from '../../lib/dates.js';
+import { dateOnly, toTimeString, ymd } from '../../lib/dates.js';
 import { round2, toDec } from '../../lib/money.js';
 import { resolveReportContext, formatReportResponse } from '../../lib/reportRange.js';
 import { loadCollectionEvents, payoutEvents } from './collectionEvents.js';
 import { loadStaffLoanMovements, STAFF_LOAN_CATEGORY } from './staffLoanMovements.js';
+
+export const SUPPLIER_PAYMENT_CATEGORY = 'Supplier/Vendor Payment — Inventory Cash Outflow';
 
 const n = value => round2(value ?? 0).toNumber();
 const sum = (rows, field) => rows.reduce((total, row) => total.plus(row[field] ?? 0), toDec(0));
@@ -25,7 +27,7 @@ export async function detailedExpensesReport(actor, query = {}) {
   const ctx = await resolveReportContext(actor, query, 'PAYMENT_DATE');
   const scope = ctx.branchId ? { branchId: ctx.branchId } : {};
   const admin = ['SUPER_ADMIN', 'ADMIN'].includes(actor.role);
-  const [expenses, branches, categories, payments, slips, commissions] = await Promise.all([
+  const [expenses, branches, categories, payments, slips, commissions, rawSupplierPayments, paymentAccounts] = await Promise.all([
     prisma.expense.findMany({ where: { ...scope, expenseDate: { gte: dateOnly(ctx.fromStr), lte: dateOnly(ctx.toStr) },
       ...(actor.role === 'ACCOUNTANT' ? { OR: [{ paidByUserId: actor.id }, { createdByUserId: actor.id }] } : {}) } }),
     prisma.branch.findMany({ where: ctx.branchId ? { id: ctx.branchId } : {}, select: { id: true, name: true } }),
@@ -34,8 +36,24 @@ export async function detailedExpensesReport(actor, query = {}) {
     admin ? prisma.payslip.findMany({ where: { run: { ...scope, finalizedAt: { lte: ctx.toDate },
       OR: [{ cancelledAt: null }, { cancelledAt: { gt: ctx.toDate } }] } }, include: { run: true } }) : [],
     admin ? loadCollectionEvents(scope, null, ctx.toStr) : [],
+    prisma.supplierPayment.findMany({
+      where: {
+        ...scope,
+        OR: [
+          { paymentDate: { gte: dateOnly(ctx.fromStr), lte: dateOnly(ctx.toStr) } },
+          { reversalDate: { gte: dateOnly(ctx.fromStr), lte: dateOnly(ctx.toStr) } },
+          { reversedAt: { gte: ctx.fromDate, lte: ctx.toDate } },
+        ],
+        ...(actor.role === 'ACCOUNTANT' ? { paidById: actor.id } : {}),
+      },
+      include: {
+        supplier: { select: { id: true, name: true } },
+      },
+    }),
+    prisma.paymentAccount.findMany({ select: { id: true, name: true } }),
   ]);
   const names = new Map(branches.map(b => [b.id, b.name]));
+  const accountNames = new Map(paymentAccounts.map(a => [a.id, a.name]));
   const loans = admin ? await loadStaffLoanMovements(scope, ctx.fromDate, ctx.toDate) : [];
   const rawRows = expenses.map(e => ({
     ...e, date: e.expenseDate.toISOString().slice(0, 10), branchName: names.get(e.branchId) || 'Branch',
@@ -60,6 +78,74 @@ export async function detailedExpensesReport(actor, query = {}) {
       isReversalRecord: p.reversal, reversalReason: p.reversalReason || '', reversedByName: p.reversedByName || '',
     });
   }
+  for (const sp of rawSupplierPayments) {
+    const spDate = ymd(sp.paymentDate);
+    const supplierName = sp.supplier?.name || 'Supplier';
+    const accName = sp.paymentAccountId ? accountNames.get(sp.paymentAccountId) : null;
+    const allocations = Array.isArray(sp.allocations) ? sp.allocations : [];
+    const purchaseRef = sp.reference || allocations[0]?.invoiceNumber || '';
+    if (spDate && spDate >= ctx.fromStr && spDate <= ctx.toStr) {
+      rawRows.push({
+        id: `sp-${sp.id}`,
+        voucherNumber: sp.paymentNumber,
+        date: spDate,
+        time: sp.createdAt ? toTimeString(sp.createdAt) : '',
+        branchId: sp.branchId,
+        branchName: names.get(sp.branchId) || 'Branch',
+        category: SUPPLIER_PAYMENT_CATEGORY,
+        title: `Supplier Payment — ${supplierName}`,
+        payee: supplierName,
+        description: `Supplier payment to ${supplierName} (${sp.paymentNumber}${purchaseRef ? ` · Ref: ${purchaseRef}` : ''}${sp.notes ? ` · ${sp.notes}` : ''})`,
+        sourceType: 'SUPPLIER_PAYMENT',
+        amount: n(sp.amount),
+        paidAmount: n(sp.amount),
+        paymentSource: sp.method === 'CASH' ? 'CASH_DRAWER' : 'ONLINE_ACCOUNT',
+        paymentAccountId: sp.paymentAccountId || null,
+        paymentAccountName: accName || (sp.method === 'CASH' ? 'Cash Drawer' : 'Online Account'),
+        status: 'POSTED',
+        externalReference: purchaseRef,
+        notes: sp.notes || '',
+        createdByUserId: sp.paidById,
+        createdByName: sp.paidByName,
+        paidByName: sp.paidByName,
+        isReversalRecord: false,
+        reversalReason: '',
+        reversedByName: '',
+      });
+    }
+    if (sp.reversedAt) {
+      const revDate = ymd(sp.reversalDate) || toDateString(sp.reversedAt);
+      if (revDate >= ctx.fromStr && revDate <= ctx.toStr) {
+        rawRows.push({
+          id: `sp-${sp.id}-rev`,
+          voucherNumber: `${sp.paymentNumber}-REV`,
+          date: revDate,
+          time: toTimeString(sp.reversedAt),
+          branchId: sp.branchId,
+          branchName: names.get(sp.branchId) || 'Branch',
+          category: SUPPLIER_PAYMENT_CATEGORY,
+          title: `Reversal: Supplier Payment — ${supplierName}`,
+          payee: supplierName,
+          description: `Reversal of supplier payment ${sp.paymentNumber} to ${supplierName}${sp.reversalReason ? ` · Reason: ${sp.reversalReason}` : ''}`,
+          sourceType: 'SUPPLIER_PAYMENT',
+          amount: -n(sp.amount),
+          paidAmount: -n(sp.amount),
+          paymentSource: sp.method === 'CASH' ? 'CASH_DRAWER' : 'ONLINE_ACCOUNT',
+          paymentAccountId: sp.paymentAccountId || null,
+          paymentAccountName: accName || (sp.method === 'CASH' ? 'Cash Drawer' : 'Online Account'),
+          status: 'REVERSED',
+          externalReference: purchaseRef,
+          notes: sp.notes || '',
+          createdByUserId: sp.reversedById || sp.paidById,
+          createdByName: sp.reversedByName || sp.paidByName,
+          paidByName: sp.reversedByName || sp.paidByName,
+          isReversalRecord: true,
+          reversalReason: sp.reversalReason || '',
+          reversedByName: sp.reversedByName || '',
+        });
+      }
+    }
+  }
   const search = query.search?.trim().toLowerCase();
   for (const m of loans) rawRows.push({
     id: m.id, voucherNumber: m.reference, date: m.date, time: '', branchId: m.branchId,
@@ -82,8 +168,9 @@ export async function detailedExpensesReport(actor, query = {}) {
   const cash = sum(rows.filter(r => r.paymentSource === 'CASH_DRAWER'), 'paidAmount');
   const online = sum(rows.filter(r => r.paymentSource !== 'CASH_DRAWER'), 'paidAmount');
   const total = cash.plus(online);
-  const operatingRows = rows.filter(r => r.sourceType !== 'STAFF_LOAN');
+  const operatingRows = rows.filter(r => r.sourceType !== 'STAFF_LOAN' && r.sourceType !== 'SUPPLIER_PAYMENT');
   const nonOperatingCashOutflow = n(sum(rows.filter(r => r.sourceType === 'STAFF_LOAN'), 'paidAmount'));
+  const supplierPayments = n(sum(rows.filter(r => r.sourceType === 'SUPPLIER_PAYMENT'), 'paidAmount'));
   const categoryNames = [...new Set(rows.map(r => r.category))];
   const accountIds = [...new Set(rows.filter(r => r.paymentSource === 'ONLINE_ACCOUNT').map(r => r.paymentAccountId || 'online'))];
   const onlineAccounts = accountIds.map(id => {
@@ -98,7 +185,8 @@ export async function detailedExpensesReport(actor, query = {}) {
     kpis: { totalExpenses: n(sum(operatingRows, 'paidAmount')),
       cashExpenses: n(sum(operatingRows.filter(r => r.paymentSource === 'CASH_DRAWER'), 'paidAmount')),
       onlineExpenses: n(sum(operatingRows.filter(r => r.paymentSource !== 'CASH_DRAWER'), 'paidAmount')),
-      nonOperatingCashOutflow, totalCashOutflow: n(total), totalVouchersCount: rows.length,
+      nonOperatingCashOutflow, supplierPayments, supplierCashOutflow: supplierPayments,
+      totalCashOutflow: n(total), totalVouchersCount: rows.length,
       totalPostedAmount: n(sum(operatingRows.filter(r => r.status === 'POSTED'), 'paidAmount')),
       totalReversedAmount: n(sum(operatingRows.filter(r => r.status === 'REVERSED'), 'paidAmount').negated()),
       postedCount: rows.filter(r => r.status === 'POSTED').length, reversedCount: rows.filter(r => r.status === 'REVERSED').length,
@@ -109,6 +197,6 @@ export async function detailedExpensesReport(actor, query = {}) {
     liabilities: admin ? { unpaidSalaries: n(salaryPayable), unpaidCommissions: n(commissionPayable) } : undefined,
     tenderBreakdown: { totalCash: n(cash), totalOnline: n(online), grandTotal: n(total), onlineAccounts },
     categoryBreakdown: categoryNames.map(categoryName => ({ categoryName, amount: n(sum(rows.filter(r => r.category === categoryName), 'paidAmount')) })),
-    totals: { amount: n(total), cash: n(cash), online: n(online), operatingExpenses: n(sum(operatingRows, 'paidAmount')), nonOperatingCashOutflow },
+    totals: { amount: n(total), cash: n(cash), online: n(online), operatingExpenses: n(sum(operatingRows, 'paidAmount')), nonOperatingCashOutflow, supplierPayments, supplierCashOutflow: supplierPayments, totalCashOutflow: n(total) },
   });
 }

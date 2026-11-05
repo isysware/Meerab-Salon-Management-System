@@ -277,7 +277,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   const utcRange = { gte: ctx.fromDate, lte: ctx.toDate };
   const branchFilter = ctx.branchId ? { branchId: ctx.branchId } : {};
 
-  const [branches, staffMembers, users, invoices, duesPayments, refunds, expenses, payrollRuns, commissionEvents, inventoryLosses, retailCogsAgg, consumableUsageAgg, returnedCogsAgg] = await Promise.all([
+  const [branches, staffMembers, users, invoices, duesPayments, refunds, expenses, payrollRuns, commissionEvents, inventoryLosses, retailCogsAgg, consumableUsageAgg, returnedCogsAgg, supplierPayments] = await Promise.all([
     prisma.branch.findMany({ select: { id: true, name: true, city: true } }),
     prisma.staff.findMany({ select: { id: true, name: true, employeeCode: true, branchId: true } }),
     prisma.user.findMany({ select: { id: true, name: true, role: true, branchId: true } }),
@@ -505,6 +505,21 @@ export const incomeExpenseReport = async (actor, query = {}) => {
           },
           _sum: { totalCost: true },
         }),
+    // 10. Supplier / Vendor Payments (Inventory Cash Outflows)
+    prisma.supplierPayment.findMany({
+      where: {
+        ...branchFilter,
+        OR: [
+          { paymentDate: dateRange },
+          { reversalDate: dateRange },
+          { reversedAt: utcRange },
+        ],
+        ...(actor.role === 'ACCOUNTANT' ? { paidById: actor.id } : {}),
+      },
+      include: {
+        supplier: { select: { id: true, name: true } },
+      },
+    }),
   ]);
 
   const branchMap = new Map(branches.map((b) => [b.id, b.name]));
@@ -882,16 +897,87 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     }
   }
 
-  // Sort chronologically descending
-  rawRows.sort((a, b) => {
-    const dDiff = (b.date || '').localeCompare(a.date || '');
-    if (dDiff !== 0) return dDiff;
-    return (b.reference || '').localeCompare(a.reference || '');
-  });
+  // 10. Supplier Payments -> Inventory Cash Outflow (Balance Sheet liability settlement / upfront purchases)
+  for (const sp of supplierPayments) {
+    const spDate = ymd(sp.paymentDate);
+    const supplierName = sp.supplier?.name || 'Supplier';
+    const amountVal = n(toDec(sp.amount));
+    const allocations = Array.isArray(sp.allocations) ? sp.allocations : [];
+    const purchaseRef = sp.reference || allocations[0]?.invoiceNumber || '';
+    if (spDate && spDate >= ctx.fromStr && spDate <= ctx.toStr) {
+      rawRows.push({
+        id: `sp-${sp.id}`,
+        date: spDate,
+        type: 'SUPPLIER_PAYMENT',
+        category: 'Supplier/Vendor Payment — Inventory Cash Outflow',
+        source: 'Supplier Payment',
+        reference: sp.paymentNumber,
+        invoiceNumber: sp.paymentNumber,
+        customerName: supplierName,
+        branchId: sp.branchId,
+        branchName: branchMap.get(sp.branchId) || 'Branch',
+        userOrPayee: sp.paidByName ? `${supplierName} (Paid by ${sp.paidByName})` : supplierName,
+        description: `Supplier payment to ${supplierName} (${sp.paymentNumber}${purchaseRef ? ` · Ref: ${purchaseRef}` : ''}${sp.notes ? ` · ${sp.notes}` : ''})`,
+        serviceAmount: 0,
+        tax: 0,
+        totalBill: amountVal,
+        tipAmount: 0,
+        collectedService: 0,
+        collectedTax: 0,
+        totalReceived: -amountVal,
+        remainingDues: 0,
+        income: 0,
+        expense: 0,
+        paid: 0,
+        cashFlow: -amountVal,
+        collectionAmount: 0,
+        discount: 0,
+        remaining: 0,
+        paymentMethod: sp.method === 'CASH' ? 'CASH' : 'ONLINE',
+        status: 'POSTED',
+      });
+    }
+    if (sp.reversedAt) {
+      const revDate = ymd(sp.reversalDate) || toDateString(sp.reversedAt);
+      if (revDate >= ctx.fromStr && revDate <= ctx.toStr) {
+        rawRows.push({
+          id: `sp-${sp.id}-rev`,
+          date: revDate,
+          type: 'SUPPLIER_PAYMENT',
+          category: 'Supplier/Vendor Payment — Inventory Cash Outflow',
+          source: 'Supplier Payment',
+          reference: `${sp.paymentNumber}-REV`,
+          invoiceNumber: `${sp.paymentNumber}-REV`,
+          customerName: supplierName,
+          branchId: sp.branchId,
+          branchName: branchMap.get(sp.branchId) || 'Branch',
+          userOrPayee: sp.reversedByName ? `Reversal: ${supplierName} (By ${sp.reversedByName})` : `Reversal: ${supplierName}`,
+          description: `Reversal of supplier payment ${sp.paymentNumber} to ${supplierName}${sp.reversalReason ? ` · Reason: ${sp.reversalReason}` : ''}`,
+          serviceAmount: 0,
+          tax: 0,
+          totalBill: -amountVal,
+          tipAmount: 0,
+          collectedService: 0,
+          collectedTax: 0,
+          totalReceived: amountVal,
+          remainingDues: 0,
+          income: 0,
+          expense: 0,
+          paid: 0,
+          cashFlow: amountVal,
+          collectionAmount: 0,
+          discount: 0,
+          remaining: 0,
+          paymentMethod: sp.method === 'CASH' ? 'CASH' : 'ONLINE',
+          status: 'REVERSED',
+        });
+      }
+    }
+  }
 
-  // Apply filters
   // Settlement events affect custody and liabilities, never recognized income or expense.
-  const movementWhere = { ...branchFilter, createdAt: utcRange, sourceModule: { in: ['POS', 'INVENTORY', 'BOOKING'] }, type: { in: ['SUPPLIER_PAYMENT', 'REVERSAL', 'BOOKING_ADVANCE', 'BOOKING_REFUND'] }, ...(actor.role === 'ACCOUNTANT' ? { userId: actor.id } : {}) };
+  // Note: Supplier payments are handled directly above from SupplierPayment model to avoid duplication.
+  const movementWhere = { ...branchFilter, createdAt: utcRange, sourceModule: { in: ['POS', 'BOOKING'] }, type: { in: ['BOOKING_ADVANCE', 'BOOKING_REFUND'] }, ...(actor.role === 'ACCOUNTANT' ? { userId: actor.id } : {}) };
   const [cashSettlements, onlineSettlements] = await Promise.all([
     prisma.drawerMovement.findMany({ where: movementWhere }),
     prisma.accountMovement.findMany({ where: movementWhere }),
@@ -974,6 +1060,12 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     return true;
   });
 
+  filteredRows.sort((a, b) => {
+    const dDiff = (b.date || '').localeCompare(a.date || '');
+    if (dDiff !== 0) return dDiff;
+    return (b.reference || '').localeCompare(a.reference || '');
+  });
+
   // Calculate KPIs and Totals across filtered rows
   let totalIncome = toDec(0);
   let totalRecognizedIncome = toDec(0);
@@ -1043,8 +1135,10 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   const settlementCashFlow = filteredRows.reduce((sum, row) => sum.plus(row.cashFlow || 0), toDec(0));
   const staffLoanCashOutflow = filteredRows.filter(r => r.source === 'Staff Loan')
     .reduce((sum, row) => sum.minus(row.cashFlow || 0), toDec(0));
-  // Non-customer settlements move cash without becoming operating expenses.
-  const nonOperatingCashOutflows = filteredRows.filter(r => r.type === 'SETTLEMENT' && !['POS', 'BOOKING'].includes(r.source))
+  const supplierCashOutflow = filteredRows.filter(r => r.type === 'SUPPLIER_PAYMENT')
+    .reduce((sum, row) => sum.minus(row.cashFlow || 0), toDec(0));
+  // Non-customer settlements and supplier inventory outflows move cash without becoming operating expenses.
+  const nonOperatingCashOutflows = filteredRows.filter(r => (r.type === 'SETTLEMENT' && !['POS', 'BOOKING'].includes(r.source)) || r.type === 'SUPPLIER_PAYMENT')
     .reduce((sum, row) => sum.minus(row.cashFlow || 0), toDec(0));
   const totalCollections = filteredRows.reduce((sum, row) => row.type === 'SETTLEMENT' && ['POS', 'BOOKING'].includes(row.source)
     ? sum.plus(row.cashFlow || 0) : sum, totalPaidIncome);
@@ -1072,6 +1166,8 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     ...(['ADMIN', 'SUPER_ADMIN'].includes(actor.role)
       ? { staffLoanReceivable: await currentStaffLoanReceivable(branchFilter) } : {}),
     staffLoanCashOutflow: n(staffLoanCashOutflow),
+    supplierPayments: n(supplierCashOutflow),
+    supplierCashOutflow: n(supplierCashOutflow),
     totalCollectedIncome: n(totalIncome),
     totalRecognizedIncome: n(totalRecognizedIncome),
     totalCollectedTax: n(totalCollectedTax),
@@ -1100,6 +1196,8 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     accruedSalaryExpenses: n(accruedSalaryExpenses),
     customerCollections: n(totalCollections),
     staffLoanCashOutflow: n(staffLoanCashOutflow),
+    supplierPayments: n(supplierCashOutflow),
+    supplierCashOutflow: n(supplierCashOutflow),
     nonOperatingCashOutflows: n(nonOperatingCashOutflows),
     netCashMovement: n(totalPaid),
     tipAmount: n(filteredRows.reduce((sum, row) => sum.plus(row.tipAmount || 0), toDec(0))),

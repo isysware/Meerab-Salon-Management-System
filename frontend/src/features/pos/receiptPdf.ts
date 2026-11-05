@@ -57,8 +57,8 @@ export function generateThermalReceiptHtml(invoice: Invoice, branch: Branch | nu
   const methodSummary = getPaymentMethodSummary(invoice);
 
   const itemsHtml = lines.map((li) => {
-    const qtyText = li.quantity > 1 ? ` (${li.quantity}x @ ${formatPkr(li.unitPrice)})` : '';
-    const lineTotal = formatPkr(li.total || (li.unitPrice * li.quantity));
+    const qtyText = !li.batchAllocations?.length && li.quantity > 1 ? ` (${li.quantity}x @ ${formatPkr(li.unitPrice)})` : '';
+    const lineTotal = formatPkr(li.total || (li.netSales == null ? li.unitPrice * li.quantity : li.netSales + (li.discountAllocated ?? 0)));
     const stylistText = li.staffName
       ? `<div style="font-size: 9px; color: #222; padding-left: 3px;">Stylist: ${escapeHtml(li.staffName)}</div>`
       : '';
@@ -76,6 +76,7 @@ export function generateThermalReceiptHtml(invoice: Invoice, branch: Branch | nu
           <div style="font-weight: bold; font-size: 10.5px;">${escapeHtml(li.name)}${qtyText}</div>
           ${stylistText}
           ${compsHtml}
+          ${(li.batchAllocations || []).map(a => `<div>${a.quantity} x ${formatPkr(a.sellingPrice)}</div>`).join('')}
         </td>
         <td style="padding: 1.5px 0; vertical-align: top; text-align: center; font-size: 10px; width: 12%;">
           ${li.quantity}
@@ -310,8 +311,11 @@ export async function generateReceiptPdf(
     pdf.text(itemName.length > 25 ? `${itemName.substring(0, 23)}..` : itemName, leftMargin, y);
     pdf.setFont('courier', 'normal');
     pdf.text(String(li.quantity), 51, y, { align: 'center' });
-    pdf.text(formatPkr(li.total || (li.unitPrice * li.quantity)), rightMargin, y, { align: 'right' }); y += 3;
+    pdf.text(formatPkr(li.total || (li.netSales == null ? li.unitPrice * li.quantity : li.netSales + (li.discountAllocated ?? 0))), rightMargin, y, { align: 'right' }); y += 3;
     if (li.staffName) { pdf.setFontSize(6.5); pdf.text(`  Stylist: ${li.staffName}`, leftMargin, y); y += 2.8; }
+    li.batchAllocations?.forEach(a => {
+      pdf.setFontSize(6.5); pdf.text(`  ${a.quantity} x ${formatPkr(a.sellingPrice)}`, leftMargin, y); y += 2.8;
+    });
     const comps = li.packageComponentsSnapshot || li.packageComponents || [];
     comps.forEach((c) => {
       pdf.setFontSize(6.2); pdf.text(`  • ${c.serviceName}${c.staffName ? ` (${c.staffName})` : ''}`, leftMargin, y); y += 2.6;

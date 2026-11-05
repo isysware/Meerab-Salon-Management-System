@@ -188,6 +188,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
   }, [reportData]);
 
   const customerCollections = reportData?.totals.customerCollections ?? reportData?.totals.collections ?? 0;
+  const supplierCashOutflow = reportData?.totals.supplierPayments ?? reportData?.totals.supplierCashOutflow ?? reportData?.kpis.supplierPayments ?? reportData?.kpis.supplierCashOutflow ?? 0;
   const nonOperatingCashOutflows = reportData?.totals.nonOperatingCashOutflows ?? reportData?.kpis.staffLoanCashOutflow ?? 0;
 
   // Export handlers
@@ -200,6 +201,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       ['COGS (Separate Accounting Information)', formatPKR(reportData.kpis.cogs ?? 0)],
       ['Total Customer Collections (Net of Customer Refunds; Incl. Tax and Tips)', formatPKR(customerCollections)],
       ['Staff Loan Cash Outflow (Net of Reversals)', formatPKR(reportData.kpis.staffLoanCashOutflow ?? 0)],
+      ['Supplier / Vendor Payments — Inventory Cash Outflow', formatPKR(supplierCashOutflow)],
       ['Non-Operating Cash Outflows (Net of Reversals)', formatPKR(nonOperatingCashOutflows)],
       ['Net Cash Movement', formatPKR(signedPaid)],
       ['Customer Invoice Total (Unique Invoices)', formatPKR(totalBillSum)],
@@ -292,6 +294,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       ['COGS (Separate Accounting Information)', formatPKR(reportData.kpis.cogs ?? 0)],
       ['Total Customer Collections (Net of Customer Refunds; Incl. Tax and Tips)', formatPKR(customerCollections)],
       ['Staff Loan Cash Outflow (Net of Reversals)', formatPKR(reportData.kpis.staffLoanCashOutflow ?? 0)],
+      ['Supplier / Vendor Payments — Inventory Cash Outflow', formatPKR(supplierCashOutflow)],
       ['Non-Operating Cash Outflows (Net of Reversals)', formatPKR(nonOperatingCashOutflows)],
       ['Net Cash Movement', formatPKR(signedPaid)],
       ['Customer Invoice Total (Unique Invoices)', formatPKR(totalBillSum)],
@@ -389,6 +392,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
       ['COGS (Separate Accounting Information)', formatPKR(reportData.kpis.cogs ?? 0)],
       ['Total Customer Collections (Net of Customer Refunds; Incl. Tax and Tips)', formatPKR(customerCollections)],
       ['Staff Loan Cash Outflow (Net of Reversals)', formatPKR(reportData.kpis.staffLoanCashOutflow ?? 0)],
+      ['Supplier / Vendor Payments — Inventory Cash Outflow', formatPKR(supplierCashOutflow)],
       ['Non-Operating Cash Outflows (Net of Reversals)', formatPKR(nonOperatingCashOutflows)],
       ['Net Cash Movement', formatPKR(signedPaid)],
       ['Customer Invoice Total (Unique Invoices)', formatPKR(totalBillSum)],
@@ -728,6 +732,11 @@ export const IncomeExpenseReportPage: React.FC = () => {
               <span className="text-[11px] text-[#78616C] font-medium mt-1 block leading-tight">
                 Actual Paid Operating Expenses
               </span>
+              {supplierCashOutflow > 0 && (
+                <span className="block text-[10px] text-amber-700 font-medium mt-0.5">
+                  Supplier Outflow: PKR {formatPKR(supplierCashOutflow)}
+                </span>
+              )}
             </div>
           </div>
 
@@ -1154,6 +1163,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
                   </td>
                   <td colSpan={2} className="py-3 px-4"></td>
                 </tr>
+                <tr><td colSpan={5} className="py-3 px-4 text-right">Supplier / Vendor Payments — Inventory Cash Outflow (Net of Reversals)</td><td colSpan={2} className="py-3 px-4 text-right font-mono text-amber-700 font-medium">-{formatPKR(supplierCashOutflow)}</td><td colSpan={2} /></tr>
                 <tr><td colSpan={5} className="py-3 px-4 text-right">Non-Operating Cash Outflows (Net of Reversals)</td><td colSpan={2} className="py-3 px-4 text-right font-mono">{formatPKR(nonOperatingCashOutflows)}</td><td colSpan={2} /></tr>
                 <tr><td colSpan={5} className="py-3 px-4 text-right font-semibold">Net Cash Movement</td><td colSpan={2} className="py-3 px-4 text-right font-mono font-semibold">{formatPKR(signedPaid)}</td><td colSpan={2} /></tr>
                 {reportData?.kpis.staffLoanReceivable !== undefined && <tr><td colSpan={5} className="py-3 px-4 text-right">Staff Loan Receivable (Current Branch Balance)</td><td colSpan={2} className="py-3 px-4 text-right font-mono">{formatPKR(reportData.kpis.staffLoanReceivable)}</td><td colSpan={2} /></tr>}

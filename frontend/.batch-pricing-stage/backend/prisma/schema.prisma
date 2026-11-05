@@ -1,0 +1,2281 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-1.0.x", "rhel-openssl-3.0.x", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ENUMS
+// ═══════════════════════════════════════════════════════════════════
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  ACCOUNTANT
+  STAFF
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIAL
+  PAID
+}
+
+enum InvoiceLifecycle {
+  ACTIVE
+  PARTIALLY_REFUNDED
+  REFUNDED
+  VOIDED
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN
+  IN_SERVICE
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum BillingStatus {
+  UNBILLED
+  BILLED
+}
+
+enum DrawerStatus {
+  OPEN
+  SETTLEMENT_PENDING
+  SETTLED
+}
+
+enum MovementDirection {
+  IN
+  OUT
+}
+
+enum DrawerMovementType {
+  BOOKING_ADVANCE
+  BOOKING_REFUND
+  OPENING_FLOAT
+  CASH_SALE
+  CASH_TIP
+  DUES_COLLECTION
+  CASH_REFUND
+  EXPENSE
+  EXPENSE_REVERSAL
+  PAYROLL_PAYOUT
+  SALARY_ADVANCE
+  COMMISSION_PAYOUT
+  TIP_PAYOUT
+  SUPPLIER_PAYMENT
+  SUPPLIER_REFUND
+  TRANSFER_IN
+  TRANSFER_OUT
+  SETTLEMENT_OUT
+  SETTLEMENT_IN
+  VARIANCE_ADJUSTMENT
+  ADJUSTMENT
+  REVERSAL
+}
+
+enum AccountMovementType {
+  BOOKING_ADVANCE
+  BOOKING_REFUND
+  OPENING_FLOAT
+  CASH_SALE
+  CASH_TIP
+  DUES_COLLECTION
+  CASH_REFUND
+  EXPENSE
+  EXPENSE_REVERSAL
+  PAYROLL_PAYOUT
+  SALARY_ADVANCE
+  COMMISSION_PAYOUT
+  TIP_PAYOUT
+  SUPPLIER_PAYMENT
+  SUPPLIER_REFUND
+  TRANSFER_IN
+  TRANSFER_OUT
+  SETTLEMENT_OUT
+  SETTLEMENT_IN
+  VARIANCE_ADJUSTMENT
+  ADJUSTMENT
+  REVERSAL
+}
+
+enum PaymentAccountType {
+  BANK
+  EASYPAISA
+  JAZZCASH
+  OTHER
+}
+
+enum TaxTreatment {
+  BRANCH_DEFAULT
+  SPECIFIC_RULE
+  EXEMPT
+}
+
+enum ItemType {
+  RETAIL_PRODUCT
+  SALON_CONSUMABLE
+  BOTH
+}
+
+enum BatchStatus {
+  VALID
+  QUARANTINED
+}
+
+enum StockMovementType {
+  OPENING_STOCK
+  PURCHASE_IN
+  SALES_RETURN_IN
+  SUPPLIER_REFUND_RESTOCK
+  POS_RETURN_IN
+  POSITIVE_ADJUSTMENT
+  BRANCH_TRANSFER_IN
+  POS_SALE_OUT
+  SALON_CONSUMPTION_OUT
+  SUPPLIER_RETURN_OUT
+  EXPIRED_OUT
+  DAMAGED_OUT
+  INTERNAL_USE_OUT
+  PROMOTIONAL_OUT
+  NEGATIVE_ADJUSTMENT
+  BRANCH_TRANSFER_OUT
+}
+
+enum SupplierLedgerType {
+  OPENING_BALANCE
+  PURCHASE_CREDIT
+  PURCHASE_BILL
+  SUPPLIER_PAYMENT
+  PURCHASE_RETURN
+  SUPPLIER_REFUND
+  APPROVED_ADJUSTMENT
+}
+
+enum PaymentMethod {
+  CASH
+  ONLINE_ACCOUNT
+}
+
+enum PurchasePaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+}
+
+enum ExpenseStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+enum ExpensePaymentMethod {
+  CASH
+  ONLINE_ACCOUNT
+}
+
+enum SettlementStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  HALF_DAY
+  PAID_LEAVE
+  UNPAID_LEAVE
+  HOLIDAY
+  MISSING_PUNCH
+  OFF_DAY
+}
+
+enum AttendanceSource {
+  MANUAL
+  IMPORT
+  BIOMETRIC
+}
+
+enum PunchType {
+  IN
+  OUT
+}
+
+enum LeaveType {
+  PAID
+  UNPAID
+}
+
+enum LeaveStatus {
+  ACTIVE
+  CANCELLED
+}
+
+enum OvertimeStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum CompensationType {
+  MONTHLY_SALARY
+  DAILY_SALARY
+  MONTHLY_PLUS_COMMISSION
+  DAILY_PLUS_COMMISSION
+  COMMISSION_ONLY
+}
+
+enum ProrationMethod {
+  CALENDAR_DAYS
+  WORKING_DAYS
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  FINALIZED
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+enum CommissionRunStatus {
+  DRAFT
+  FINALIZED
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+enum TipStatus {
+  UNALLOCATED
+  PARTIALLY_ALLOCATED
+  FULLY_ALLOCATED
+}
+
+enum TipAllocationType {
+  DIRECT
+  POOLED_EQUAL
+  POOLED_CUSTOM
+}
+
+enum RefundType {
+  REFUND
+  VOID
+}
+
+enum RestockType {
+  RESALABLE
+  DAMAGED
+  NONE
+}
+
+enum CommissionEventType {
+  EARN
+  REVERSAL
+}
+
+enum CustomerSource {
+  WALK_IN
+  REFERRAL
+  SOCIAL_MEDIA
+  OTHER
+  INSTAGRAM
+  FACEBOOK
+  TIKTOK
+  GOOGLE
+  WORD_OF_MOUTH
+  INFLUENCER
+  RETURNING
+}
+
+enum LineType {
+  CUSTOM_SERVICE
+  SERVICE
+  PACKAGE
+  PRODUCT
+}
+
+enum DeviceType {
+  BIOMETRIC_ATTENDANCE
+  POS_PRINTER
+  BARCODE_SCANNER
+  PAYMENT_TERMINAL
+  CASH_DRAWER
+}
+
+enum DeviceConnectionType {
+  ETHERNET_LAN
+  WIFI
+  USB
+  SERIAL_COM
+  BLUETOOTH
+  CLOUD_API
+}
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+  SYNCING
+  ERROR
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 0 — Base/Shared Models
+// ═══════════════════════════════════════════════════════════════════
+
+model Sequence {
+  id         String @id @default(uuid())
+  branchCode String
+  prefix     String
+  year       Int
+  lastValue  Int    @default(0)
+
+  @@unique([branchCode, prefix, year])
+  @@map("Sequence")
+}
+
+model IdempotencyKey {
+  key          String   @id
+  userId       String
+  route        String
+  statusCode   Int      @default(200)
+  responseJson String
+  requestHash  String?
+  createdAt    DateTime @default(now())
+
+  @@map("IdempotencyKey")
+}
+
+model AuditEvent {
+  id        String   @id @default(uuid())
+  branchId  String?
+  userId    String
+  userName  String
+  action    String
+  entity    String
+  entityId  String?
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  @@index([branchId])
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("AuditEvent")
+}
+
+// Key/value system settings (e.g. businessDate used as "today" for demos)
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("SystemSetting")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 1 — Authentication
+// ═══════════════════════════════════════════════════════════════════
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  plainPassword String?
+  role         Role
+  branchId     String?
+  staffId      String?  @unique
+  title        String?
+  phone        String?
+  avatarUrl    String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  branch        Branch?              @relation(fields: [branchId], references: [id])
+  staff         Staff?               @relation(fields: [staffId], references: [id])
+  refreshTokens RefreshToken[]
+  resetTokens   PasswordResetToken[]
+
+  @@index([role])
+  @@index([branchId])
+  @@map("User")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("RefreshToken")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("PasswordResetToken")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 2 — Branches
+// ═══════════════════════════════════════════════════════════════════
+
+model Branch {
+  id                    String   @id @default(uuid())
+  name                  String
+  code                  String   @unique
+  address               String
+  city                  String
+  phone                 String
+  email                 String?
+  timezone              String   @default("Asia/Karachi")
+  currency              String   @default("PKR")
+  taxEnabled            Boolean  @default(false)
+  taxRate               Decimal  @default(0) @db.Decimal(6, 5)
+  defaultTaxRuleId      String?
+  openingCashFloat      Decimal  @default(0) @db.Decimal(14, 2)
+  taxRegistrationNumber String?
+  taxAuthority          String?
+  assignedAdminId       String?
+  logoUrl               String?  @db.Text
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  users        User[]
+  sharedTaxRules TaxRule[] @relation("TaxBranches")
+  sharedPaymentAccounts PaymentAccount[] @relation("PaymentBranches")
+  taxRules     TaxRule[]
+  paymentAccts PaymentAccount[]
+  staff        Staff[]
+  devices      Device[]
+
+  @@map("Branch")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 4 — Settings (Tax Rules, Payment Accounts, Expense Categories, Payroll Policy)
+// ═══════════════════════════════════════════════════════════════════
+
+model TaxRule {
+  branches Branch[] @relation("TaxBranches")
+  id              String   @id @default(uuid())
+  branchId        String
+  name            String
+  rate            Decimal  @db.Decimal(6, 5)
+  description     String?
+  isActive        Boolean  @default(true)
+  isBranchDefault Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@index([branchId])
+  @@map("TaxRule")
+}
+
+// currentBalance is NEVER stored — it is openingBalance + Σ AccountMovement (IN − OUT)
+model PaymentAccount {
+  branches Branch[] @relation("PaymentBranches")
+  id                String             @id @default(uuid())
+  branchId          String
+  name              String
+  accountType       PaymentAccountType
+  providerName      String
+  accountHolder     String
+  accountIdentifier String?
+  openingBalance    Decimal            @default(0) @db.Decimal(14, 2)
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  branch           Branch            @relation(fields: [branchId], references: [id])
+  accountMovements AccountMovement[]
+
+  @@index([branchId])
+  @@map("PaymentAccount")
+}
+
+model ExpenseCategory {
+  id          String   @id @default(uuid())
+  branchId    String
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([branchId, name])
+  @@index([branchId])
+  @@map("ExpenseCategory")
+}
+
+model PayrollPolicy {
+  id                             String          @id @default(uuid())
+  branchId                       String          @unique
+  monthlyAbsenceDivisor          String          @default("30") // '26' | '30' | 'CALENDAR_DAYS' | 'WORKING_DAYS'
+  customDivisorDays              Int?
+  dailyStaffPaidLeaveEligibility Boolean         @default(true)
+  nonWorkedWeeklyOffPaid         Boolean         @default(false)
+  nonWorkedHolidayPaid           Boolean         @default(true)
+  prorationMethod                ProrationMethod @default(CALENDAR_DAYS)
+  updatedByUserId                String
+  updatedAt                      DateTime        @updatedAt
+
+  @@map("PayrollPolicy")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 5 — Staff
+// ═══════════════════════════════════════════════════════════════════
+
+model Staff {
+  id                         String           @id @default(uuid())
+  employeeCode               String
+  branchId                   String
+  name                       String
+  phone                      String
+  email                      String?
+  designation                String
+  roleTitle                  String
+  joiningDate                DateTime         @db.Date
+  compensationType           CompensationType
+  baseSalary                 Decimal          @default(0) @db.Decimal(14, 2)
+  dailySalaryRate            Decimal          @default(0) @db.Decimal(14, 2)
+  commissionRate             Decimal          @default(0) @db.Decimal(5, 2) // percent 0–100
+  overtimeHourlyRate         Decimal          @default(0) @db.Decimal(14, 2)
+  effectiveDate              DateTime         @db.Date
+  requiresCompensationReview Boolean          @default(false)
+  startTime                  String           @default("09:00")
+  endTime                    String           @default("18:00")
+  lateGraceMinutes           Int              @default(15)
+  earlyGraceMinutes          Int              @default(15)
+  isOvernightShift           Boolean          @default(false)
+  allowedLeaveDays           Int              @default(12)
+  leaveAllowancePeriod       String           @default("YEARLY") // 'MONTHLY' | 'YEARLY'
+  lateInDeduction            Json
+  earlyExitDeduction         Json
+  payrollDivisor             Int              @default(30)
+  combinationPolicy          String           @default("BOTH") // 'BOTH' | 'HIGHEST_ONLY'
+  specialties                String[]
+  avatarUrl                  String?
+  hasPortalAccess            Boolean          @default(false)
+  exitDate                   DateTime?        @db.Date // last employed day (set on deactivation)
+  isActive                   Boolean          @default(true)
+  createdAt                  DateTime         @default(now())
+  updatedAt                  DateTime         @updatedAt
+
+  branch              Branch                     @relation(fields: [branchId], references: [id])
+  user                User?
+  compensationHistory StaffCompensationHistory[]
+
+  @@unique([branchId, employeeCode])
+  @@index([branchId])
+  @@map("Staff")
+}
+
+model StaffCompensationHistory {
+  id            String   @id @default(uuid())
+  staffId       String
+  snapshot      Json
+  effectiveDate DateTime @db.Date
+  changedBy     String
+  createdAt     DateTime @default(now())
+
+  staff Staff @relation(fields: [staffId], references: [id])
+
+  @@index([staffId])
+  @@map("StaffCompensationHistory")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 6 — Catalogue (Services & Packages)
+// ═══════════════════════════════════════════════════════════════════
+
+model ServiceCategory {
+  id       String    @id @default(uuid())
+  branchId String
+  name     String
+  isActive Boolean   @default(true)
+  services Service[]
+
+  @@unique([branchId, name])
+  @@index([branchId])
+  @@map("ServiceCategory")
+}
+
+model Service {
+  id                String       @id @default(uuid())
+  branchId          String
+  categoryId        String
+  code              String
+  name              String
+  description       String?
+  durationMinutes   Int
+  price             Decimal      @db.Decimal(14, 2)
+  taxTreatment      TaxTreatment @default(BRANCH_DEFAULT)
+  specificTaxRuleId String?
+  isActive          Boolean      @default(true)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  category   ServiceCategory    @relation(fields: [categoryId], references: [id])
+  components PackageComponent[]
+
+  @@unique([branchId, code])
+  @@index([branchId])
+  @@map("Service")
+}
+
+model Package {
+  id                String       @id @default(uuid())
+  branchId          String
+  code              String
+  name              String
+  description       String?
+  price             Decimal      @db.Decimal(14, 2)
+  taxTreatment      TaxTreatment @default(BRANCH_DEFAULT)
+  specificTaxRuleId String?
+  isActive          Boolean      @default(true)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  components PackageComponent[]
+
+  @@unique([branchId, code])
+  @@index([branchId])
+  @@map("Package")
+}
+
+model PackageComponent {
+  id                   String  @id @default(uuid())
+  packageId            String
+  serviceId            String
+  quantity             Int     @default(1)
+  allocationPercentage Decimal @db.Decimal(5, 2)
+  sortOrder            Int     @default(0)
+
+  package Package @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [serviceId], references: [id])
+
+  @@index([packageId])
+  @@map("PackageComponent")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 7 — Clients
+// ═══════════════════════════════════════════════════════════════════
+
+model Client {
+  id              String          @id @default(uuid())
+  branchId        String
+  name            String
+  phone           String
+  phoneNormalized String
+  email           String?
+  source          CustomerSource?
+  sourceDetails   String?
+  loyaltyPoints   Int             @default(0)
+  notes           String?
+  isArchived      Boolean         @default(false)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@unique([branchId, phoneNormalized])
+  @@index([branchId])
+  @@map("Client")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 8 — Appointments
+// ═══════════════════════════════════════════════════════════════════
+// An appointment is a QUOTE + schedule reservation only: no sale, commission or stock movement
+// happens until the POS invoice is posted (spec §2).
+
+model Appointment {
+  id                    String            @id @default(uuid())
+  appointmentNumber     String            @unique
+  branchId              String
+  clientId              String?
+  clientName            String
+  clientPhone           String
+  clientEmail           String?
+  customerSource        CustomerSource?
+  customerSourceDetails String?
+  date                  DateTime          @db.Date
+  startTime             String // 'hh:mm AM' (same format the frontend uses)
+  endTime               String
+  durationMinutes       Int
+  price                 Decimal           @db.Decimal(14, 2)
+  status                AppointmentStatus @default(PENDING)
+  billingStatus         BillingStatus     @default(UNBILLED)
+  linkedInvoiceId       String?
+  linkedInvoiceNumber   String?
+  notes                 String?
+  createdById           String?
+  createdByName         String?
+  updatedById           String?
+  updatedByName         String?
+  confirmedById         String?
+  confirmedByName       String?
+  confirmedAt           DateTime?
+  cancelledById         String?
+  cancelledByName       String?
+  cancelledAt           DateTime?
+  cancelReason          String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  items       AppointmentItem[]
+  reschedules AppointmentReschedule[]
+
+  @@index([branchId, date])
+  @@index([branchId, status])
+  @@index([clientId])
+  @@map("Appointment")
+}
+
+model AppointmentItem {
+  id              String   @id @default(uuid())
+  appointmentId   String
+  lineInstanceId  String
+  sortOrder       Int      @default(0)
+  type            LineType
+  itemId          String
+  code            String
+  name            String
+  durationMinutes Int
+  unitPrice       Decimal  @db.Decimal(14, 2)
+  staffId         String
+  staffName       String
+  startTime       String
+  endTime         String
+
+  appointment Appointment                   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  components  AppointmentPackageComponent[]
+
+  @@index([appointmentId])
+  @@index([staffId])
+  @@map("AppointmentItem")
+}
+
+model AppointmentPackageComponent {
+  id                   String  @id @default(uuid())
+  appointmentItemId    String
+  componentInstanceId  String
+  sortOrder            Int     @default(0)
+  serviceId            String
+  serviceCode          String
+  serviceName          String
+  durationMinutes      Int
+  allocationPercentage Decimal @db.Decimal(5, 2)
+  staffId              String
+  staffName            String
+  startTime            String
+  endTime              String
+
+  appointmentItem AppointmentItem @relation(fields: [appointmentItemId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentItemId])
+  @@index([staffId])
+  @@map("AppointmentPackageComponent")
+}
+
+model AppointmentReschedule {
+  id                String   @id @default(uuid())
+  appointmentId     String
+  previousDate      DateTime @db.Date
+  previousStartTime String
+  previousEndTime   String
+  newDate           DateTime @db.Date
+  newStartTime      String
+  newEndTime        String
+  reason            String?
+  byUserId          String
+  byName            String
+  at                DateTime @default(now())
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId])
+  @@map("AppointmentReschedule")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 9 — Cash Drawers & Payment Account Ledger
+// ═══════════════════════════════════════════════════════════════════
+// Cash custody holders: one VAULT (branch safe, admin custody) per branch + one DRAWER per cash
+// handler. Balances are NEVER stored — expected cash = Σ IN − Σ OUT of DrawerMovement.
+
+enum CashHolderKind {
+  DRAWER
+  VAULT
+}
+
+model CashDrawer {
+  id                String         @id @default(uuid())
+  kind              CashHolderKind @default(DRAWER)
+  branchId          String
+  custodianUserId   String? // null for the branch vault
+  custodianName     String
+  date              DateTime       @db.Date // business date the drawer was opened
+  status            DrawerStatus   @default(OPEN)
+  lastCountedCash   Decimal?       @db.Decimal(14, 2)
+  lastCountedAt     DateTime?
+  lastVariance      Decimal?       @db.Decimal(14, 2)
+  closedAt          DateTime?
+  settledAt         DateTime?
+  successorDrawerId String?
+  createdAt         DateTime       @default(now())
+
+  movements   DrawerMovement[]
+  settlements Settlement[]
+
+  @@index([branchId, kind])
+  @@index([custodianUserId, status])
+  @@map("CashDrawer")
+}
+
+model DrawerMovement {
+  id           String             @id @default(uuid())
+  drawerId     String
+  branchId     String
+  type         DrawerMovementType
+  direction    MovementDirection
+  amount       Decimal            @db.Decimal(14, 2)
+  sourceModule String // POS | EXPENSE | SETTLEMENT | TRANSFER | PAYROLL | …
+  sourceId     String?
+  reference    String? // human document number (INV-…, EXP-…)
+  description  String?
+  userId       String
+  userName     String
+  createdAt    DateTime           @default(now())
+
+  drawer CashDrawer @relation(fields: [drawerId], references: [id])
+
+  @@index([drawerId, createdAt])
+  @@index([branchId, createdAt])
+  @@index([sourceModule, sourceId])
+  @@map("DrawerMovement")
+}
+
+model AccountMovement {
+  id           String              @id @default(uuid())
+  accountId    String
+  branchId     String
+  type         AccountMovementType
+  direction    MovementDirection
+  amount       Decimal             @db.Decimal(14, 2)
+  sourceModule String
+  sourceId     String?
+  reference    String?
+  description  String?
+  userId       String
+  userName     String
+  createdAt    DateTime            @default(now())
+
+  account PaymentAccount @relation(fields: [accountId], references: [id])
+
+  @@index([accountId, createdAt])
+  @@index([branchId, createdAt])
+  @@index([sourceModule, sourceId])
+  @@map("AccountMovement")
+}
+
+model CashTransfer {
+  id                  String   @id @default(uuid())
+  transferNumber      String   @unique
+  branchId            String
+  fromSource          String   @default("BRANCH_VAULT")
+  fromDrawerId        String
+  toDrawerId          String
+  toCustodianUserId   String
+  toCustodianName     String
+  amount              Decimal  @db.Decimal(14, 2)
+  notes               String?
+  transferredByUserId String
+  transferredByName   String
+  createdAt           DateTime @default(now())
+
+  @@index([branchId])
+  @@map("CashTransfer")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 10 — Inventory & Suppliers
+// ═══════════════════════════════════════════════════════════════════
+// Items are company-wide (branchAvailability); stock lives in branch batches (cost layers).
+// Quantity only changes through StockMovement rows. InventoryBatch.remainingQuantity is a
+// row-locked cache maintained in the SAME transaction as the movement (reconciled by tests).
+
+enum PurchasePaymentMethod {
+  CASH
+  ONLINE
+  CREDIT
+  PARTIAL
+}
+
+enum SupplierRefundTreatment {
+  REDUCE_PAYABLE
+  SUPPLIER_CREDIT
+  CASH_REFUND
+  ONLINE_REFUND
+}
+
+model InventoryItem {
+  id                  String       @id @default(uuid())
+  sku                 String       @unique
+  barcode             String?
+  name                String
+  category            String
+  description         String?
+  brand               String?
+  imageUrl            String?
+  itemType            ItemType
+  defaultPurchaseCost Decimal      @default(0) @db.Decimal(14, 2)
+  sellingPrice        Decimal      @default(0) @db.Decimal(14, 2)
+  purchaseUnit        String       @default("PIECE")
+  issueUnit           String       @default("PIECE")
+  unitConversionRatio Decimal?     @db.Decimal(14, 4)
+  taxTreatment        TaxTreatment @default(BRANCH_DEFAULT)
+  specificTaxRuleId   String?
+  minStockLevel       Decimal      @default(0) @db.Decimal(14, 4)
+  trackBatch          Boolean      @default(true)
+  trackExpiry         Boolean      @default(false)
+  nearExpiryAlertDays Int          @default(60)
+  branchAvailability  String[] // branch ids or ['ALL']
+  isActive            Boolean      @default(true)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  batches   InventoryBatch[]
+  movements StockMovement[]
+
+  @@map("InventoryItem")
+}
+
+model InventoryBatch {
+  id                String      @id @default(uuid())
+  itemId            String
+  branchId          String
+  batchNumber       String
+  purchaseId        String?
+  purchaseNumber    String?
+  supplierId        String?
+  supplierName      String?
+  receivedDate      DateTime    @db.Date
+  mfgDate           DateTime?   @db.Date
+  expiryDate        DateTime?   @db.Date
+  initialQuantity   Decimal     @db.Decimal(14, 4)
+  remainingQuantity Decimal     @db.Decimal(14, 4)
+  sellingPrice      Decimal?    @db.Decimal(14, 2) // immutable receipt price; null during expansion only
+  priceSource       String?     // STOCK_IN or LEGACY_MASTER
+  unitCost          Decimal     @db.Decimal(14, 4) // historical landed unit cost — immutable
+  status            BatchStatus @default(VALID) // VALID | QUARANTINED (EXPIRED/NEAR_EXPIRY/EXHAUSTED are derived)
+  quarantinedReason String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  item      InventoryItem   @relation(fields: [itemId], references: [id])
+  movements StockMovement[]
+
+  @@index([itemId, branchId])
+  @@index([branchId, expiryDate])
+  @@map("InventoryBatch")
+}
+
+model StockMovement {
+  id                    String            @id @default(uuid())
+  movementNumber        String            @unique
+  branchId              String
+  itemId                String
+  batchId               String?
+  movementType          StockMovementType
+  direction             MovementDirection
+  quantity              Decimal           @db.Decimal(14, 4) // always positive; direction gives the sign
+  unitCost              Decimal           @db.Decimal(14, 4)
+  totalCost             Decimal           @db.Decimal(14, 2)
+  sourceReferenceType   String // PURCHASE | INVOICE | SETTLEMENT | MANUAL_OUT | RETURN | OPENING
+  sourceReferenceId     String
+  sourceReferenceNumber String
+  reason                String
+  notes                 String?
+  userId                String
+  userName              String
+  createdAt             DateTime          @default(now())
+
+  item  InventoryItem   @relation(fields: [itemId], references: [id])
+  batch InventoryBatch? @relation(fields: [batchId], references: [id])
+
+  @@index([branchId, createdAt])
+  @@index([itemId, branchId])
+  @@index([sourceReferenceType, sourceReferenceId])
+  @@map("StockMovement")
+}
+
+model Supplier {
+  id             String   @id @default(uuid())
+  supplierCode   String   @unique
+  name           String
+  companyName    String?
+  phone          String
+  email          String?
+  contactPerson  String?
+  address        String?
+  taxNumber      String?
+  notes          String?
+  branchId       String // a branch id or 'ALL'
+  openingPayable Decimal  @default(0) @db.Decimal(14, 2)
+  isActive       Boolean  @default(true)
+  createdById    String
+  createdByName  String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  ledger    SupplierLedger[]
+  purchases Purchase[]
+  payments  SupplierPayment[]
+  returns   SupplierReturn[]
+
+  @@index([branchId])
+  @@map("Supplier")
+}
+
+// Payable ledger: credit increases what we owe, debit reduces it. Payable = Σ credit − Σ debit.
+model SupplierLedger {
+  id              String             @id @default(uuid())
+  supplierId      String
+  branchId        String
+  date            DateTime           @db.Date
+  entryType       SupplierLedgerType
+  referenceType   String // PURCHASE | PAYMENT | RETURN | ADJUSTMENT | OPENING
+  referenceId     String
+  referenceNumber String
+  description     String
+  debit           Decimal            @default(0) @db.Decimal(14, 2)
+  credit          Decimal            @default(0) @db.Decimal(14, 2)
+  userId          String
+  userName        String
+  createdAt       DateTime           @default(now())
+
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([supplierId, createdAt])
+  @@index([branchId])
+  @@map("SupplierLedger")
+}
+
+model Purchase {
+  id                    String                @id @default(uuid())
+  purchaseNumber        String                @unique
+  branchId              String
+  supplierId            String
+  supplierName          String
+  purchaseDate          DateTime              @db.Date
+  supplierInvoiceNumber String?
+  notes                 String?
+  subtotal              Decimal               @db.Decimal(14, 2)
+  discount              Decimal               @default(0) @db.Decimal(14, 2)
+  netAmount             Decimal               @db.Decimal(14, 2)
+  paidAmount            Decimal               @default(0) @db.Decimal(14, 2)
+  balanceDue            Decimal               @db.Decimal(14, 2)
+  paymentMethod         PurchasePaymentMethod
+  paymentStatus         PurchasePaymentStatus
+  paymentAccountId      String?
+  cashDrawerId          String?
+  status                String                @default("POSTED")
+  createdById           String
+  createdByName         String
+  createdAt             DateTime              @default(now())
+
+  supplier Supplier       @relation(fields: [supplierId], references: [id])
+  lines    PurchaseLine[]
+
+  @@index([branchId, purchaseDate])
+  @@map("Purchase")
+}
+
+model PurchaseLine {
+  id               String    @id @default(uuid())
+  purchaseId       String
+  sortOrder        Int       @default(0)
+  itemId           String
+  itemName         String
+  itemSku          String
+  quantity         Decimal   @db.Decimal(14, 4)
+  unitPurchaseCost Decimal   @db.Decimal(14, 2)
+  lineDiscount     Decimal   @default(0) @db.Decimal(14, 2)
+  lineTotal        Decimal   @db.Decimal(14, 2)
+  landedUnitCost   Decimal   @db.Decimal(14, 4)
+  batchNumber      String
+  expiryDate       DateTime? @db.Date
+  mfgDate          DateTime? @db.Date
+  batchId          String
+
+  purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseId])
+  @@map("PurchaseLine")
+}
+
+model SupplierPayment {
+  id               String   @id @default(uuid())
+  paymentNumber    String   @unique
+  supplierId       String
+  branchId         String
+  paymentDate      DateTime @db.Date
+  amount           Decimal  @db.Decimal(14, 2)
+  method           String // CASH | ONLINE
+  paymentAccountId String?
+  cashDrawerId     String?
+  reference        String?
+  notes            String?
+  paidById         String
+  paidByName       String
+  createdAt        DateTime @default(now())
+  allocations      Json     @default("[]")
+  reversedAt       DateTime?
+  reversedById     String?
+  reversedByName   String?
+  reversalReason   String?
+  reversalDate     DateTime? @db.Date
+
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+
+  @@index([supplierId])
+  @@index([branchId])
+  @@map("SupplierPayment")
+}
+
+model SupplierReturn {
+  id               String                  @id @default(uuid())
+  returnNumber     String                  @unique
+  branchId         String
+  supplierId       String
+  purchaseId       String?
+  purchaseNumber   String?
+  returnDate       DateTime                @db.Date
+  totalAmount      Decimal                 @db.Decimal(14, 2)
+  refundTreatment  SupplierRefundTreatment
+  paymentAccountId String?
+  cashDrawerId     String?
+  reason           String
+  notes            String?
+  createdById      String
+  createdByName    String
+  createdAt        DateTime                @default(now())
+
+  supplier Supplier             @relation(fields: [supplierId], references: [id])
+  lines    SupplierReturnLine[]
+
+  @@index([branchId])
+  @@map("SupplierReturn")
+}
+
+model SupplierReturnLine {
+  id          String  @id @default(uuid())
+  returnId    String
+  itemId      String
+  itemName    String
+  itemSku     String
+  batchId     String
+  batchNumber String
+  quantity    Decimal @db.Decimal(14, 4)
+  unitCost    Decimal @db.Decimal(14, 4)
+  totalCost   Decimal @db.Decimal(14, 2)
+
+  return SupplierReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+
+  @@index([returnId])
+  @@map("SupplierReturnLine")
+}
+
+model StockSettlement {
+  id               String    @id @default(uuid())
+  settlementNumber String    @unique
+  branchId         String
+  countDate        DateTime  @db.Date
+  notes            String?
+  status           String    @default("POSTED")
+  createdById      String
+  createdByName    String
+  approvedById     String?
+  approvedByName   String?
+  createdAt        DateTime  @default(now())
+  postedAt         DateTime?
+
+  lines StockSettlementLine[]
+
+  @@index([branchId])
+  @@map("StockSettlement")
+}
+
+model StockSettlementLine {
+  id              String  @id @default(uuid())
+  settlementId    String
+  itemId          String
+  itemName        String
+  itemSku         String
+  batchId         String?
+  batchNumber     String?
+  systemQuantity  Decimal @db.Decimal(14, 4)
+  countedQuantity Decimal @db.Decimal(14, 4)
+  difference      Decimal @db.Decimal(14, 4)
+  unitCost        Decimal @db.Decimal(14, 4)
+  costImpact      Decimal @db.Decimal(14, 2)
+  reason          String
+  notes           String?
+
+  settlement StockSettlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+
+  @@index([settlementId])
+  @@map("StockSettlementLine")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 11 — POS & Invoices
+// ═══════════════════════════════════════════════════════════════════
+// Invoices are immutable snapshots (names, prices, discounts, tax rate, staff, commission rate,
+// package weights, cost layers). Corrections happen through dated refund/void events (spec §12).
+
+model Invoice {
+  bookingId             String?          @unique
+  booking               Booking?         @relation(fields: [bookingId], references: [id])
+  advanceAdjusted       Decimal          @default(0) @db.Decimal(14, 2)
+  id                    String           @id @default(uuid())
+  invoiceNumber         String           @unique
+  branchId              String
+  appointmentId         String?          @unique
+  date                  DateTime         @db.Date
+  time                  String
+  clientId              String?
+  clientName            String
+  clientPhone           String
+  customerSource        CustomerSource?
+  customerSourceDetails String?
+  staffId               String? // primary (first line) stylist
+  staffName             String?
+  subtotal              Decimal          @db.Decimal(14, 2) // gross before discount
+  discount              Decimal          @default(0) @db.Decimal(14, 2)
+  discountType          String? // FIXED | PERCENTAGE
+  discountValue         Decimal?         @db.Decimal(14, 2)
+  netSales              Decimal          @db.Decimal(14, 2) // after discount, excl. tax & tip
+  tax                   Decimal          @default(0) @db.Decimal(14, 2)
+  tip                   Decimal          @default(0) @db.Decimal(14, 2)
+  total                 Decimal          @db.Decimal(14, 2) // netSales + tax + tip
+  paymentMethod         String           @default("CASH") // CASH | ONLINE_ACCOUNT | SPLIT
+  status                InvoiceStatus    @default(UNPAID) // bill payment state (tax incl., tip excl.)
+  lifecycle             InvoiceLifecycle @default(ACTIVE)
+  amountPaid            Decimal          @default(0) @db.Decimal(14, 2) // all receipts incl. tips
+  amountDue             Decimal          @db.Decimal(14, 2) // outstanding bill (excl. tip)
+  processedByUserId     String
+  processedByName       String
+  idempotencyKey        String?
+  notes                 String?
+  createdAt             DateTime         @default(now())
+
+  lines    InvoiceLine[]
+  payments InvoicePayment[]
+  refunds  InvoiceRefund[]
+
+  @@index([branchId, date])
+  @@index([clientId])
+  @@index([branchId, status])
+  @@map("Invoice")
+}
+
+model InvoiceLine {
+  id                  String       @id @default(uuid())
+  invoiceId           String
+  sortOrder           Int          @default(0)
+  type                LineType
+  itemId              String?
+  code                String?
+  name                String
+  staffId             String
+  staffName           String
+  staffCommissionRate Decimal      @default(0) @db.Decimal(5, 2) // percent snapshot
+  quantity            Decimal      @db.Decimal(14, 4)
+  unitPrice           Decimal      @db.Decimal(14, 2)
+  discountAllocated   Decimal      @default(0) @db.Decimal(14, 2)
+  netSales            Decimal      @db.Decimal(14, 2)
+  taxTreatment        TaxTreatment
+  taxRate             Decimal      @db.Decimal(6, 5)
+  tax                 Decimal      @db.Decimal(14, 2)
+  total               Decimal      @db.Decimal(14, 2)
+  cogsAmount          Decimal?     @db.Decimal(14, 2)
+  unitCostSnapshot    Decimal?     @db.Decimal(14, 4)
+
+  invoice    Invoice                @relation(fields: [invoiceId], references: [id])
+  components InvoiceLineComponent[]
+  batches    InvoiceLineBatch[]
+
+  @@index([invoiceId])
+  @@index([staffId])
+  @@map("InvoiceLine")
+}
+
+model InvoiceLineComponent {
+  id                   String  @id @default(uuid())
+  lineId               String
+  sortOrder            Int     @default(0)
+  serviceId            String
+  serviceCode          String
+  serviceName          String
+  quantity             Int     @default(1)
+  staffId              String
+  staffName            String
+  allocationPercentage Decimal @db.Decimal(5, 2)
+  allocatedAmount      Decimal @db.Decimal(14, 2)
+  staffCommissionRate  Decimal @default(0) @db.Decimal(5, 2)
+
+  line InvoiceLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+
+  @@index([lineId])
+  @@index([staffId])
+  @@map("InvoiceLineComponent")
+}
+
+// Cost layers consumed by a product line (COGS = Σ qty × unitCost).
+model InvoiceLineBatch {
+  id          String  @id @default(uuid())
+  lineId      String
+  batchId     String
+  batchNumber String
+  qty         Decimal @db.Decimal(14, 4)
+  unitCost    Decimal @db.Decimal(14, 4)
+  sortOrder Int @default(0)
+  sellingPrice Decimal? @db.Decimal(14, 2)
+  discountAllocated Decimal? @db.Decimal(14, 2)
+  taxAllocated Decimal? @db.Decimal(14, 2)
+
+  line InvoiceLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+
+  @@index([lineId])
+  @@map("InvoiceLineBatch")
+}
+
+model InvoicePayment {
+  id                  String        @id @default(uuid())
+  receiptNumber       String?       @unique
+  invoiceId           String
+  branchId            String
+  date                DateTime      @db.Date
+  time                String
+  amount              Decimal       @db.Decimal(14, 2)
+  billAmountAllocated Decimal       @db.Decimal(14, 2)
+  tipAmountAllocated  Decimal       @default(0) @db.Decimal(14, 2)
+  method              PaymentMethod
+  paymentAccountId    String?
+  paymentAccountName  String?
+  drawerId            String?
+  cashTendered        Decimal?      @db.Decimal(14, 2)
+  changeReturned      Decimal?      @db.Decimal(14, 2)
+  previousBalance     Decimal?      @db.Decimal(14, 2)
+  remainingBalance    Decimal?      @db.Decimal(14, 2)
+  kind                String        @default("POS") // POS | DUES_COLLECTION
+  processedByUserId   String
+  processedByName     String
+  notes               String?
+  createdAt           DateTime      @default(now())
+  reversedAt          DateTime?
+  reversedById        String?
+  reversedByName      String?
+  reversalReason      String?
+  reversalDate        DateTime? @db.Date
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+  @@index([branchId, date])
+  @@map("InvoicePayment")
+}
+
+// Commission is a dated event stream: EARN on posting, REVERSAL on refund (spec §4).
+model CommissionEvent {
+  id              String              @id @default(uuid())
+  branchId        String
+  staffId         String
+  invoiceId       String
+  invoiceNumber   String
+  lineId          String
+  componentId     String?
+  type            CommissionEventType
+  attributedNet   Decimal             @db.Decimal(14, 2)
+  rate            Decimal             @db.Decimal(5, 2) // percent snapshot
+  amount          Decimal             @db.Decimal(14, 2)
+  eventDate       DateTime            @db.Date
+  consumedByRunId String?
+  createdAt       DateTime            @default(now())
+
+  @@index([branchId, staffId, eventDate])
+  @@index([invoiceId])
+  @@map("CommissionEvent")
+}
+
+model InvoiceRefund {
+  id                  String         @id @default(uuid())
+  refundNumber        String         @unique
+  invoiceId           String
+  type                RefundType
+  refundDate          DateTime       @db.Date
+  netReversed         Decimal        @db.Decimal(14, 2)
+  taxReversed         Decimal        @db.Decimal(14, 2)
+  tipReversed         Decimal        @default(0) @db.Decimal(14, 2)
+  cashOut             Decimal        @default(0) @db.Decimal(14, 2)
+  receivableCancelled Decimal        @default(0) @db.Decimal(14, 2)
+  method              PaymentMethod?
+  accountId           String?
+  drawerId            String?
+  reason              String
+  byUserId            String
+  byName              String
+  createdAt           DateTime       @default(now())
+
+  invoice Invoice      @relation(fields: [invoiceId], references: [id])
+  lines   RefundLine[]
+
+  @@index([invoiceId])
+  @@map("InvoiceRefund")
+}
+
+model RefundLine {
+  id       String      @id @default(uuid())
+  refundId String
+  lineId   String
+  quantity Decimal     @db.Decimal(14, 4)
+  net      Decimal     @db.Decimal(14, 2)
+  tax      Decimal     @db.Decimal(14, 2)
+  restock  RestockType @default(NONE)
+
+  refund InvoiceRefund @relation(fields: [refundId], references: [id], onDelete: Cascade)
+
+  @@index([refundId])
+  @@map("RefundLine")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 12 — Expenses
+// ═══════════════════════════════════════════════════════════════════
+
+model Expense {
+  id                       String        @id @default(uuid())
+  voucherNumber            String        @unique // DFT-… while draft, EXP-… once posted, REV-… for reversal records
+  branchId                 String
+  expenseDate              DateTime      @db.Date
+  time                     String
+  title                    String
+  payee                    String
+  description              String?
+  category                 String        // category name (as the UI uses it)
+  amount                   Decimal       @db.Decimal(14, 2)
+  paymentSource            String        // CASH_DRAWER | ONLINE_ACCOUNT
+  paymentAccountId         String?
+  paymentAccountName       String?
+  status                   ExpenseStatus @default(DRAFT)
+  externalReference        String?
+  notes                    String?
+  idempotencyKey           String?
+  createdByUserId          String
+  createdByName            String
+  paidByUserId             String?
+  paidByName               String?
+  paidFromDrawerId         String?
+  isReversalRecord         Boolean       @default(false)
+  reversalOfVoucherNumber  String?
+  reversalVoucherNumber    String?
+  reversalReason           String?
+  reversedByUserId         String?
+  reversedByName           String?
+  reversedAt               DateTime?
+  receivingDrawerId        String?
+  receivingCustodianUserId String?
+  receivingCustodianName   String?
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+
+  @@index([branchId, expenseDate])
+  @@index([branchId, status])
+  @@map("Expense")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 13 — Settlements & Custody
+// ═══════════════════════════════════════════════════════════════════
+
+model Settlement {
+  id                         String           @id @default(uuid())
+  settlementNumber           String           @unique
+  branchId                   String
+  drawerId                   String
+  date                       DateTime         @db.Date
+  time                       String
+  expectedCash               Decimal          @db.Decimal(14, 2)
+  countedCash                Decimal          @db.Decimal(14, 2)
+  variance                   Decimal          @db.Decimal(14, 2)
+  varianceExplanation        String?
+  handoverAmount             Decimal          @db.Decimal(14, 2)
+  retainedFloat              Decimal          @default(0) @db.Decimal(14, 2)
+  destinationVaultId         String?
+  destinationVaultName       String?
+  denominationBreakdown      Json?
+  submittedByUserId          String
+  submittedByName            String
+  submittedByRole            String
+  submittedAt                DateTime?
+  receivedByUserId           String?
+  receivedByName             String?
+  reviewedAt                 DateTime?
+  rejectionReason            String?
+  status                     SettlementStatus @default(DRAFT)
+  notes                      String?
+  varianceAdjustmentRecordId String?
+  successorDrawerId          String?
+  createdAt                  DateTime         @default(now())
+  updatedAt                  DateTime         @updatedAt
+
+  drawer CashDrawer @relation(fields: [drawerId], references: [id])
+
+  @@index([branchId, status])
+  @@index([drawerId])
+  @@map("Settlement")
+}
+
+model CashVarianceAdjustment {
+  id               String   @id @default(uuid())
+  adjustmentNumber String   @unique
+  settlementId     String
+  settlementNumber String
+  branchId         String
+  date             DateTime @db.Date
+  time             String
+  varianceAmount   Decimal  @db.Decimal(14, 2) // + overage, − shortage
+  explanation      String
+  approvedByUserId String
+  approvedByName   String
+  createdAt        DateTime @default(now())
+
+  @@index([settlementId])
+  @@map("CashVarianceAdjustment")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 14 — Attendance & Leave
+// ═══════════════════════════════════════════════════════════════════
+
+model AttendanceRecord {
+  id                  String           @id @default(uuid())
+  branchId            String
+  staffId             String
+  workDate            DateTime         @db.Date
+  checkIn             String           // '09:05 AM' | 'LEAVE' | 'ABSENT'
+  checkOut            String?
+  scheduledHours      Decimal          @default(0) @db.Decimal(6, 2)
+  workedHours         Decimal          @default(0) @db.Decimal(6, 2)
+  status              String           // PRESENT | ABSENT | PAID_LEAVE | UNPAID_LEAVE | MISSING_PUNCH | …
+  source              AttendanceSource @default(MANUAL)
+  isLate              Boolean          @default(false)
+  lateMinutes         Int              @default(0)
+  isEarlyExit         Boolean          @default(false)
+  earlyExitMinutes    Int              @default(0)
+  isMissingPunch      Boolean          @default(false)
+  isOvernightShift    Boolean          @default(false)
+  rawEventRef         String?
+  calculationSnapshot Json?
+  notes               String?
+  leaveId             String?
+  isFinalized         Boolean          @default(false)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  punches     AttendancePunch[]
+  corrections AttendanceCorrection[]
+
+  @@unique([staffId, workDate])
+  @@index([branchId, workDate])
+  @@map("AttendanceRecord")
+}
+
+model AttendancePunch {
+  id        String           @id @default(uuid())
+  recordId  String
+  type      String           // CHECK_IN | CHECK_OUT
+  timestamp String
+  source    AttendanceSource @default(MANUAL)
+  deviceId  String?
+  createdAt DateTime         @default(now())
+
+  record AttendanceRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+
+  @@index([recordId])
+  @@map("AttendancePunch")
+}
+
+model AttendanceCorrection {
+  id             String   @id @default(uuid())
+  recordId       String
+  beforeSnapshot Json
+  afterSnapshot  Json
+  reason         String
+  editedByUserId String
+  editedByName   String
+  editedAt       DateTime @default(now())
+
+  record AttendanceRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+
+  @@index([recordId])
+  @@map("AttendanceCorrection")
+}
+
+model LeaveRecord {
+  id                 String    @id @default(uuid())
+  leaveNumber        String    @unique
+  branchId           String
+  staffId            String
+  startDate          DateTime  @db.Date
+  endDate            DateTime  @db.Date
+  totalDays          Int
+  type               LeaveType
+  reason             String
+  status             String    @default("APPROVED") // APPROVED | CANCELLED
+  createdByUserId    String
+  createdByName      String
+  createdAt          DateTime  @default(now())
+  cancelledAt        DateTime?
+  cancelledByUserId  String?
+  cancelledByName    String?
+  cancellationReason String?
+
+  @@index([branchId, staffId])
+  @@map("LeaveRecord")
+}
+
+
+
+
+model BranchHoliday {
+  id       String   @id @default(uuid())
+  branchId String
+  date     DateTime @db.Date
+  title    String
+
+  @@unique([branchId, date])
+  @@index([branchId])
+  @@map("BranchHoliday")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 15 — Overtime
+// ═══════════════════════════════════════════════════════════════════
+
+model OvertimeRecord {
+  id                 String         @id @default(uuid())
+  overtimeNumber     String         @unique
+  branchId           String
+  staffId            String
+  workDate           DateTime       @db.Date
+  minutes            Int
+  approvedMinutes    Int            @default(0)
+  hourlyRate         Decimal?       @db.Decimal(14, 2) // snapshot at approval
+  amount             Decimal?       @db.Decimal(14, 2)
+  rateMultiplier     Decimal        @default(1) @db.Decimal(4, 2)
+  reason             String
+  notes              String?
+  status             OvertimeStatus @default(SUBMITTED)
+  enteredByUserId    String
+  enteredByName      String
+  enteredAt          DateTime       @default(now())
+  approvedByUserId   String?
+  approvedByName     String?
+  approvedAt         DateTime?
+  rejectedByUserId   String?
+  rejectedByName     String?
+  rejectedAt         DateTime?
+  rejectionReason    String?
+  cancelledByUserId  String?
+  cancelledByName    String?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  payrollRunId       String?
+
+  @@index([branchId, staffId])
+  @@index([branchId, workDate])
+  @@map("OvertimeRecord")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 16 — Payroll
+// ═══════════════════════════════════════════════════════════════════
+
+// Payroll: DRAFT previews are recalculated freely; FINALIZED runs freeze immutable payslip snapshots,
+// lock consumed overtime and recognise the salary liability. Payments move money; reversals restore it.
+model PayrollRun {
+  id                 String           @id @default(uuid())
+  payrollNumber      String           @default("DRAFT")
+  branchId           String
+  month              String           // YYYY-MM
+  status             PayrollRunStatus @default(DRAFT)
+  policySnapshot     Json
+  generatedAt        DateTime         @default(now())
+  generatedByUserId  String
+  generatedByName    String
+  finalizedAt        DateTime?
+  finalizedByUserId  String?
+  finalizedByName    String?
+  cancelledAt        DateTime?
+  cancelledByUserId  String?
+  cancelledByName    String?
+  cancellationReason String?
+  notes              String?
+
+  payslips Payslip[]
+  payments PayrollPayment[]
+
+  @@index([branchId, month])
+  @@map("PayrollRun")
+}
+
+model Payslip {
+  id            String  @id @default(uuid())
+  runId         String
+  payslipNumber String  @default("DRAFT")
+  staffId       String
+  snapshot      Json    // full PayslipRecord calculation (frontend shape)
+  netPayable    Decimal @db.Decimal(18, 4)
+  grossPayable  Decimal @db.Decimal(18, 4)
+
+  run      PayrollRun       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  payments PayrollPayment[]
+  commissionStatements CommissionStatement[]
+
+  @@unique([runId, staffId])
+  @@index([staffId])
+  @@map("Payslip")
+}
+
+model PayrollPayment {
+  id                String    @id @default(uuid())
+  paymentNumber     String    @unique
+  runId             String
+  payslipId         String
+  staffId           String
+  staffName         String
+  branchId          String
+  amount            Decimal   @db.Decimal(14, 2)
+  commissionAmount  Decimal   @default(0) @db.Decimal(14, 2)
+  requestKey        String?   @unique
+  method            String    // CASH | ONLINE
+  cashDrawerId      String?
+  onlineAccountId   String?
+  onlineAccountName String?
+  reference         String    @default("")
+  notes             String?
+  status            String    @default("COMPLETED") // COMPLETED | REVERSED
+  paidAt            DateTime  @default(now())
+  paidByUserId      String
+  paidByName        String
+  reversedAt        DateTime?
+  reversedByUserId  String?
+  reversedByName    String?
+  reversalReason    String?
+
+  run     PayrollRun @relation(fields: [runId], references: [id])
+  payslip Payslip    @relation(fields: [payslipId], references: [id])
+  commissionPayments CommissionPayment[]
+
+  @@index([runId])
+  @@index([staffId])
+  @@map("PayrollPayment")
+}
+
+// Recurring monthly allowances (transport, food, etc.) added to every payslip while active.
+model StaffAllowance {
+  id              String   @id @default(uuid())
+  branchId        String
+  staffId         String
+  name            String
+  amount          Decimal  @db.Decimal(14, 2)
+  isActive        Boolean  @default(true)
+  createdByUserId String
+  createdByName   String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([staffId])
+  @@map("StaffAllowance")
+}
+
+// One-off payroll lines for one staff member and month (bonus, extra allowance, fine/other deduction).
+// Editable until the month's payroll is finalized; then locked to that run.
+model PayrollAdjustment {
+  id                String    @id @default(uuid())
+  branchId          String
+  staffId           String
+  month             String    // YYYY-MM
+  type              String    // ALLOWANCE | BONUS | DEDUCTION
+  title             String
+  amount            Decimal   @db.Decimal(14, 2)
+  notes             String?
+  status            String    @default("ACTIVE") // ACTIVE | CANCELLED
+  payrollRunId      String?   // locked by a finalized run
+  createdByUserId   String
+  createdByName     String
+  createdAt         DateTime  @default(now())
+  cancelledAt       DateTime?
+  cancelledByUserId String?
+  cancelledByName   String?
+
+  @@index([branchId, month])
+  @@index([staffId])
+  @@map("PayrollAdjustment")
+}
+
+// Salary advance: money paid to staff early (custody receivable, not an expense) and recovered
+// through payroll deductions. Balance = amount − Σ ACTIVE recoveries.
+model SalaryAdvance {
+  id                String    @id @default(uuid())
+  advanceNumber     String    @unique
+  branchId          String
+  staffId           String
+  staffName         String
+  amount            Decimal   @db.Decimal(14, 2)
+  recoveryPerMonth  Decimal   @db.Decimal(14, 2)
+  startMonth        String    // first payroll month (YYYY-MM) to recover from
+  method            String    // CASH | ONLINE
+  cashDrawerId      String?
+  onlineAccountId   String?
+  onlineAccountName String?
+  reason            String
+  status            String    @default("ACTIVE") // ACTIVE | RECOVERED | REVERSED
+  issuedAt          DateTime  @default(now())
+  issueDate         DateTime  @db.Date
+  issuedByUserId    String
+  issuedByName      String
+  reversedAt        DateTime?
+  reversedByUserId  String?
+  reversedByName    String?
+  reversalReason    String?
+
+  recoveries AdvanceRecovery[]
+
+  @@index([branchId, staffId])
+  @@map("SalaryAdvance")
+}
+
+// A payroll deduction that recovers part of an advance. RELEASED when its run is cancelled.
+model AdvanceRecovery {
+  id           String   @id @default(uuid())
+  advanceId    String
+  payrollRunId String
+  staffId      String
+  month        String
+  amount       Decimal  @db.Decimal(14, 2)
+  status       String   @default("ACTIVE") // ACTIVE | RELEASED
+  createdAt    DateTime @default(now())
+
+  advance SalaryAdvance @relation(fields: [advanceId], references: [id])
+
+  @@index([advanceId])
+  @@index([payrollRunId])
+  @@map("AdvanceRecovery")
+}
+
+// Commission runs consume dated CommissionEvent rows (EARN/REVERSAL) — never re-derived from invoices.
+model CommissionRun {
+  id                 String              @id @default(uuid())
+  commissionNumber   String              @default("DRAFT")
+  branchId           String
+  startDate          DateTime            @db.Date
+  endDate            DateTime            @db.Date
+  status             CommissionRunStatus @default(DRAFT)
+  generatedAt        DateTime            @default(now())
+  generatedByUserId  String
+  generatedByName    String
+  finalizedAt        DateTime?
+  finalizedByUserId  String?
+  finalizedByName    String?
+  cancelledAt        DateTime?
+  cancelledByUserId  String?
+  cancelledByName    String?
+  cancellationReason String?
+
+  statements CommissionStatement[]
+  payments   CommissionPayment[]
+
+  @@index([branchId])
+  @@map("CommissionRun")
+}
+
+model CommissionStatement {
+  id              String  @id @default(uuid())
+  runId           String
+  statementNumber String  @default("DRAFT")
+  staffId         String
+  snapshot        Json    // CommissionStatementRecord calculation (frontend shape incl. line items)
+  netPayable      Decimal @db.Decimal(14, 2)
+  payrollPayslipId String?
+  payrollPayslip Payslip? @relation(fields: [payrollPayslipId], references: [id])
+
+  run      CommissionRun       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  payments CommissionPayment[]
+
+  @@unique([runId, staffId])
+  @@index([staffId])
+  @@map("CommissionStatement")
+}
+
+model CommissionPayment {
+  id                String    @id @default(uuid())
+  paymentNumber     String    @unique
+  runId             String
+  statementId       String
+  staffId           String
+  staffName         String
+  branchId          String
+  amount            Decimal   @db.Decimal(14, 2)
+  payrollPaymentId  String?
+  requestKey        String?   @unique
+  method            String
+  cashDrawerId      String?
+  onlineAccountId   String?
+  onlineAccountName String?
+  reference         String    @default("")
+  notes             String?
+  status            String    @default("COMPLETED")
+  paidAt            DateTime  @default(now())
+  paidByUserId      String
+  paidByName        String
+  reversedAt        DateTime?
+  reversedByUserId  String?
+  reversedByName    String?
+  reversalReason    String?
+
+  run       CommissionRun       @relation(fields: [runId], references: [id])
+  statement CommissionStatement @relation(fields: [statementId], references: [id])
+  payrollPayment PayrollPayment? @relation(fields: [payrollPaymentId], references: [id])
+
+  @@index([runId])
+  @@index([staffId])
+  @@map("CommissionPayment")
+}
+
+
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 17 — Commission
+// ═══════════════════════════════════════════════════════════════════
+
+
+
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 18 — Tips
+// ═══════════════════════════════════════════════════════════════════
+
+model TipReceipt {
+  id                 String        @id @default(uuid())
+  receiptNumber      String        @unique
+  branchId           String
+  invoiceId          String
+  invoiceNumber      String
+  paymentId          String        @unique
+  collectionDate     DateTime      @db.Date
+  collectionTime     String
+  clientName         String
+  method             PaymentMethod
+  paymentAccountId   String?
+  paymentAccountName String?
+  cashDrawerId       String?
+  collectedByUserId  String
+  collectedByName    String
+  collectedAmount    Decimal       @db.Decimal(14, 2)
+  directStaffId      String?
+  directStaffName    String?
+  allocatedAmount    Decimal       @default(0) @db.Decimal(14, 2)
+  unallocatedAmount  Decimal       @db.Decimal(14, 2)
+  status             TipStatus     @default(UNALLOCATED)
+  createdAt          DateTime      @default(now())
+
+  allocations TipAllocation[]
+
+  @@index([branchId, collectionDate])
+  @@index([invoiceId])
+  @@map("TipReceipt")
+}
+
+// Tips are staff liability (never income). Allocation binds a receipt to staff (no money moves);
+// payouts move money; reversals are dated events that restore the liability.
+model TipAllocation {
+  id                String    @id @default(uuid())
+  allocationNumber  String    @unique
+  branchId          String
+  receiptId         String
+  staffId           String
+  staffName         String
+  amount            Decimal   @db.Decimal(14, 2)
+  allocationType    TipAllocationType
+  allocationDate    DateTime  @db.Date
+  allocationTime    String
+  allocatedByUserId String
+  allocatedByName   String
+  status            String    @default("UNPAID") // UNPAID | PARTIALLY_PAID | PAID | CANCELLED
+  cancelledAt       DateTime?
+  cancellationDate  DateTime? @db.Date
+  cancelledByUserId String?
+  cancelledByName   String?
+  cancelReason      String?
+  notes             String?
+  createdAt         DateTime  @default(now())
+
+  receipt TipReceipt  @relation(fields: [receiptId], references: [id])
+  payouts TipPayout[]
+
+  @@index([receiptId])
+  @@index([staffId])
+  @@index([branchId, allocationDate])
+  @@map("TipAllocation")
+}
+
+model TipPayout {
+  id                        String    @id @default(uuid())
+  payoutNumber              String    @unique
+  branchId                  String
+  allocationId              String
+  staffId                   String
+  staffName                 String
+  amount                    Decimal   @db.Decimal(14, 2)
+  method                    String    // CASH | ONLINE
+  cashDrawerId              String?
+  onlineAccountId           String?
+  onlineAccountName         String?
+  payoutDate                DateTime  @db.Date
+  payoutTime                String
+  paidByUserId              String
+  paidByName                String
+  status                    String    @default("COMPLETED") // COMPLETED | REVERSED
+  reversalReason            String?
+  reversedAt                DateTime?
+  reversalDate              DateTime? @db.Date
+  reversedByUserId          String?
+  reversedByName            String?
+  reversalReceivingDrawerId String?
+  reference                 String?
+  notes                     String?
+  createdAt                 DateTime  @default(now())
+
+  allocation TipAllocation @relation(fields: [allocationId], references: [id])
+
+  @@index([staffId])
+  @@index([branchId, payoutDate])
+  @@map("TipPayout")
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// STEP 23 — Device Integration (Hardware & Terminals)
+// ═══════════════════════════════════════════════════════════════════
+
+model Device {
+  id               String               @id @default(uuid())
+  branchId         String
+  name             String
+  deviceType       DeviceType
+  brand            String
+  model            String
+  serialNumber     String?
+  connectionType   DeviceConnectionType @default(ETHERNET_LAN)
+  ipAddress        String?
+  port             Int?
+  macAddress       String?
+  baudRate         Int?
+  communicationKey String?
+  status           DeviceStatus         @default(OFFLINE)
+  isActive         Boolean              @default(true)
+  lastPingAt       DateTime?
+  lastSyncAt       DateTime?
+  lastSyncStatus   String?
+  config           Json?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  branch Branch      @relation(fields: [branchId], references: [id])
+  logs   DeviceLog[]
+
+  @@index([branchId])
+  @@index([deviceType])
+  @@index([status])
+  @@map("Device")
+}
+
+model DeviceLog {
+  id        String   @id @default(uuid())
+  deviceId  String
+  branchId  String
+  eventType String   // HEARTBEAT | PUNCH_SYNC | PRINT_JOB | TEST_PING | ERROR | CONFIG_UPDATE
+  status    String   // SUCCESS | FAILED | WARNING
+  message   String
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@index([branchId, createdAt])
+  @@map("DeviceLog")
+}
+
+enum BookingType {
+  BRIDAL
+  GROOM
+}
+
+enum BookingStatus {
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Booking {
+  id                  String @id @default(uuid())
+  bookingNumber       String @unique
+  branchId            String
+  clientId            String
+  clientName          String
+  clientPhone         String
+  type                BookingType
+  eventDate           DateTime @db.Date
+  serviceTime         String
+  endTime             String
+  durationMinutes     Int
+  assignedStaffId     String?
+  assignedStaffName   String?
+  notes               String?
+  specialRequirements String?
+  status              BookingStatus @default(CONFIRMED)
+  revision            Int @default(1)
+  subtotal            Decimal @db.Decimal(14, 2)
+  discountType        String @default("FIXED")
+  discountValue       Decimal @default(0) @db.Decimal(14, 2)
+  discount            Decimal @default(0) @db.Decimal(14, 2)
+  taxAmount           Decimal @default(0) @db.Decimal(14, 2)
+  totalAmount         Decimal @db.Decimal(14, 2)
+  cancellationCharge  Decimal @default(0) @db.Decimal(14, 2)
+  cancellationReason  String?
+  createdById         String
+  createdByName       String
+  updatedById         String?
+  updatedByName       String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  items               BookingItem[]
+  payments            BookingPayment[]
+  history             BookingHistory[]
+  invoice             Invoice?
+
+  @@index([branchId, eventDate])
+  @@index([branchId, status])
+  @@index([clientId])
+}
+
+model BookingItem {
+  id              String @id @default(uuid())
+  bookingId       String
+  booking         Booking @relation(fields: [bookingId], references: [id])
+  lineInstanceId  String
+  sortOrder       Int
+  type            LineType
+  itemId          String?
+  code            String?
+  name            String
+  description     String?
+  quantity        Int @default(1)
+  durationMinutes Int
+  unitPrice       Decimal @db.Decimal(14, 2)
+  taxTreatment    TaxTreatment @default(BRANCH_DEFAULT)
+  taxRate         Decimal @db.Decimal(6, 5)
+  staffId         String?
+  staffName       String?
+  startTime       String
+  endTime         String
+  components      Json @default("[]")
+
+  @@unique([bookingId, lineInstanceId])
+  @@index([bookingId])
+  @@index([staffId])
+}
+
+model BookingPayment {
+  id                 String @id @default(uuid())
+  receiptNumber      String @unique
+  bookingId          String
+  booking            Booking @relation(fields: [bookingId], references: [id])
+  branchId           String
+  isRefund           Boolean @default(false)
+  amount             Decimal @db.Decimal(14, 2)
+  date               DateTime @db.Date
+  time               String
+  method             String
+  paymentAccountId   String?
+  paymentAccountName String?
+  drawerId           String?
+  movementId         String @unique
+  reference          String?
+  notes              String?
+  processedByUserId  String
+  processedByName    String
+  createdAt          DateTime @default(now())
+
+  @@index([bookingId])
+  @@index([branchId, date])
+}
+
+model BookingHistory {
+  id         String @id @default(uuid())
+  bookingId  String
+  booking    Booking @relation(fields: [bookingId], references: [id])
+  type       String
+  before     Json?
+  after      Json?
+  reason     String?
+  userId     String
+  userName   String
+  createdAt  DateTime @default(now())
+
+  @@index([bookingId, createdAt])
+}

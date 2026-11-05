@@ -17,6 +17,7 @@ export function incomeExpenseEntryType(row: IncomeExpenseReportRow): string {
   if (row.type === 'COMMISSION_EXPENSE') return 'Commission';
   if (row.source === 'Staff Loan') return 'Staff Loan';
   if (row.source === 'Sales Refund') return 'Refund';
+  if (row.type === 'SUPPLIER_PAYMENT' || row.source === 'Supplier Payment') return 'Supplier Payment';
   if (row.type === 'SETTLEMENT') return 'Settlement';
   return row.type === 'INCOME' ? 'Income' : 'Expense';
 }
@@ -36,8 +37,14 @@ export function incomeExpenseInvoiceTotal(rows: IncomeExpenseReportRow[]): numbe
 export function incomeExpenseCollectionSummary(income: number, rows: IncomeExpenseReportRow[]) {
   const paid = rows.filter(row => ['OPERATING_EXPENSE', 'SALARY_EXPENSE', 'COMMISSION_EXPENSE'].includes(row.type))
     .reduce((sum, row) => sum.plus(row.status === 'ACCRUED' ? 0 : row.cashFlow !== undefined ? -row.cashFlow : row.paid ?? 0), new Decimal(0));
-  return { paidOperatingExpenses: paid.toDecimalPlaces(2).toNumber(),
-    surplus: new Decimal(income).minus(paid).toDecimalPlaces(2).toNumber() };
+  const supplierPaid = rows.filter(row => row.type === 'SUPPLIER_PAYMENT' || row.category === 'Supplier/Vendor Payment — Inventory Cash Outflow')
+    .reduce((sum, row) => sum.plus(row.cashFlow !== undefined ? -row.cashFlow : row.paid ?? 0), new Decimal(0));
+  return {
+    paidOperatingExpenses: paid.toDecimalPlaces(2).toNumber(),
+    supplierCashOutflow: supplierPaid.toDecimalPlaces(2).toNumber(),
+    totalCashOutflows: paid.plus(supplierPaid).toDecimalPlaces(2).toNumber(),
+    surplus: new Decimal(income).minus(paid).toDecimalPlaces(2).toNumber(),
+  };
 }
 
 /** Signed money moved for this row; cumulative invoice receipts must not repeat dues collections. */

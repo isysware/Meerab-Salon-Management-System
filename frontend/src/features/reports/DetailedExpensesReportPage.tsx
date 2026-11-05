@@ -23,6 +23,7 @@ import {
   RotateCcw,
   Banknote,
   Search,
+  Truck,
 } from 'lucide-react';
 
 const selectClass =
@@ -142,6 +143,7 @@ export const DetailedExpensesReportPage: React.FC = () => {
       ['Basis', 'Actual paid expenses; unpaid liabilities shown separately'],
       ...(reportData.liabilities ? [['Unpaid Salaries (branch, period end)', formatPKR(reportData.liabilities.unpaidSalaries)], ['Unpaid Commissions (branch, period end)', formatPKR(reportData.liabilities.unpaidCommissions)]] as [string, string][] : []),
       ['Paid Operating Expenses', formatPKR(reportData.kpis.totalExpenses)],
+      ['Supplier / Vendor Payments — Inventory Cash Outflow', formatPKR(reportData.kpis.supplierPayments ?? 0)],
       ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.nonOperatingCashOutflow ?? 0)],
       ['Total Cash Outflow', formatPKR(reportData.kpis.totalCashOutflow ?? reportData.totals.amount)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
@@ -186,6 +188,7 @@ export const DetailedExpensesReportPage: React.FC = () => {
     const meta: [string, string][] = [
       ['Report', 'Detailed Expenses Report'],
       ['Paid Operating Expenses', formatPKR(reportData.kpis.totalExpenses)],
+      ['Supplier / Vendor Payments — Inventory Cash Outflow', formatPKR(reportData.kpis.supplierPayments ?? 0)],
       ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.nonOperatingCashOutflow ?? 0)],
       ['Total Cash Outflow', formatPKR(reportData.kpis.totalCashOutflow ?? reportData.totals.amount)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
@@ -232,6 +235,7 @@ export const DetailedExpensesReportPage: React.FC = () => {
     }
     const meta: [string, string][] = [
       ['Paid Operating Expenses', formatPKR(reportData.kpis.totalExpenses)],
+      ['Supplier / Vendor Payments — Inventory Cash Outflow', formatPKR(reportData.kpis.supplierPayments ?? 0)],
       ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.nonOperatingCashOutflow ?? 0)],
       ['Total Cash Outflow', formatPKR(reportData.kpis.totalCashOutflow ?? reportData.totals.amount)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
@@ -394,7 +398,7 @@ export const DetailedExpensesReportPage: React.FC = () => {
 
       {/* ── 3. KPI SUMMARY METRICS: PURE WHITE FROSTED GLASS CARDS (when filtered) ── */}
       {hasFiltered && reportData && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {/* Net Operating Expenses */}
           <div className="p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
             <div className="flex items-center justify-between relative z-10">
@@ -413,6 +417,26 @@ export const DetailedExpensesReportPage: React.FC = () => {
                 Paid operating expenses (excludes staff loans)
               </span>
               <span className="text-xs text-[#78616C] font-medium mt-1 block">Staff loans — non-operating: PKR {formatPKR(reportData.kpis.nonOperatingCashOutflow ?? 0)}</span>
+            </div>
+          </div>
+
+          {/* Supplier Payments (Cash Outflow) */}
+          <div className="p-5 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 relative overflow-hidden group">
+            <div className="flex items-center justify-between relative z-10">
+              <div className="w-8 h-8 rounded-xl bg-white/90 shadow-2xs border border-white/80 flex items-center justify-center text-amber-600">
+                <Truck className="w-4 h-4" />
+              </div>
+              <span className="bg-amber-50 text-amber-700 shadow-2xs border border-white/60 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                Supplier Outflow
+              </span>
+            </div>
+            <div className="mt-3 relative z-10">
+              <span className="text-2xl sm:text-3xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">
+                PKR {formatPKR(reportData.kpis.supplierPayments ?? 0)}
+              </span>
+              <span className="text-xs text-[#78616C] font-medium mt-1 block">
+                Supplier / Vendor inventory payments
+              </span>
             </div>
           </div>
 
@@ -671,23 +695,43 @@ export const DetailedExpensesReportPage: React.FC = () => {
 
               {/* Integrated Table Footer */}
               <tfoot className="bg-[#FAF8F9]/80 border-t border-white/80 font-sans text-xs">
-                {/* Row 1: TOTALS (PKR) */}
+                {/* Row 1: Net Paid Operating Expenses */}
                 <tr className="border-b border-white/60">
                   <td colSpan={9} className="py-3.5 px-4 text-right font-bold text-slate-800 tracking-wide">
-                    NET PAID EXPENSES (PKR)
+                    NET PAID OPERATING EXPENSES (PKR)
                   </td>
                   <td className="py-3.5 px-4 text-right font-mono tabular-nums font-bold text-slate-900">
-                    PKR {formatPKR((kpis as any).totalExpenses ?? (kpis as any).totalPostedAmount ?? reportData?.totals?.amount ?? 0)}
+                    PKR {formatPKR((kpis as any).totalExpenses ?? (kpis as any).totalPostedAmount ?? reportData?.totals?.operatingExpenses ?? 0)}
                   </td>
                 </tr>
 
-                {/* Row 2: Net Operating Disbursements */}
-                <tr>
+                {/* Row 2: Supplier Payments (Inventory Outflows) */}
+                <tr className="border-b border-white/60">
                   <td colSpan={9} className="py-3 px-4 text-right font-semibold text-slate-700">
-                    Staff Loan Disbursements - Non-Operating (Net of Reversals)
+                    Supplier / Vendor Payments — Inventory Cash Outflow (Net of Reversals)
                   </td>
-                  <td className="py-3 px-4 text-right font-mono tabular-nums font-extrabold text-[#B82E69] text-sm">
+                  <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-amber-700">
+                    PKR {formatPKR(reportData?.kpis.supplierPayments ?? 0)}
+                  </td>
+                </tr>
+
+                {/* Row 3: Staff Loan Disbursements */}
+                <tr className="border-b border-white/60">
+                  <td colSpan={9} className="py-3 px-4 text-right font-semibold text-slate-700">
+                    Staff Loan Disbursements — Non-Operating (Net of Reversals)
+                  </td>
+                  <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-slate-700 text-sm">
                     PKR {formatPKR(reportData?.kpis.nonOperatingCashOutflow ?? 0)}
+                  </td>
+                </tr>
+
+                {/* Row 4: Total Cash Outflows */}
+                <tr>
+                  <td colSpan={9} className="py-3.5 px-4 text-right font-extrabold text-slate-900 text-sm">
+                    TOTAL CASH OUTFLOWS (PKR)
+                  </td>
+                  <td className="py-3.5 px-4 text-right font-mono tabular-nums font-extrabold text-[#B82E69] text-base">
+                    PKR {formatPKR(reportData?.kpis.totalCashOutflow ?? reportData?.totals?.amount ?? 0)}
                   </td>
                 </tr>
               </tfoot>

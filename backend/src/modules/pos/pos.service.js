@@ -16,7 +16,8 @@ import { assertInvoiceAccess, resolveReadBranch, resolveWriteBranch } from '../.
 import { dateOnly, getBusinessDate, toTimeString } from '../../lib/dates.js';
 import { round2, splitWithRemainder, toDec } from '../../lib/money.js';
 import { nextSequence } from '../../lib/sequence.js';
-import { consumeStock } from '../../lib/stock.js';
+import { pricePicks, assertBatchQuote, allocateBatchAmounts } from '../../lib/batchPricing.js';
+import { pickBatches, postStockMovement } from '../../lib/stock.js';
 import { normalizePhoneDigits } from '../../lib/phone.js';
 import { formatMinutesToTime, parseTimeToMinutes } from '../../lib/calculations/attendanceCalculations.js';
 import { isCompensationEligibleForCommission } from '../../lib/calculations/commissionCalculations.js';
@@ -189,6 +190,10 @@ export const postInvoice = async (input, actor, idempotencyKey, request) => {
   if (actor.role === 'STAFF') throw forbidden('FORBIDDEN', 'Access Denied: Staff members cannot perform POS billing or cash collections.');
   const branchId = resolveWriteBranch(actor, input.branchId, 'Access Denied: Cannot perform operations for another branch.');
 
+  if (!branchId) throw forbidden('BRANCH_REQUIRED', 'A branch assignment is required.');
+  for (const c of input.cartItems) {
+    if (!Number.isInteger(c.quantity) || c.quantity <= 0) throw badRequest('INVALID_QUANTITY', 'Cart quantities must be positive whole numbers.');
+  }
   return paymentPosting(actor, request, async (tx) => {
     const branch = await tx.branch.findUnique({ where: { id: branchId } });
     if (!branch?.isActive) throw badRequest('BRANCH_INACTIVE', `Branch '${branchId}' is invalid or deactivated.`);
@@ -250,6 +255,27 @@ export const postInvoice = async (input, actor, idempotencyKey, request) => {
     const commissionRate = (s) => (s && s.id !== 'house' && isCompensationEligibleForCommission(s.compensationType) ? toDec(s.commissionRate) : toDec(0));
 
     // ── Build line drafts ──
+    // Lock products in stable order before quoting. Repeated cart rows share one allocation pool.
+    const productPicks = new Map();
+    for (const id of [...new Set(ids('PRODUCT'))].sort()) {
+      const rows = input.cartItems.filter(c => c.type === 'PRODUCT' && c.item.id === id);
+      const quantity = rows.reduce((sum, c) => sum + c.quantity, 0);
+      const picks = await pickBatches(tx, { itemId: id, branchId, quantity, businessDate: today });
+      let cursor = 0, used = toDec(0);
+      for (const row of rows) {
+        let need = toDec(row.quantity); const allocated = [];
+        while (need.greaterThan(0)) {
+          const p = picks[cursor], available = p.quantity.minus(used);
+          const take = Decimal.min(need, available);
+          allocated.push({ batch: p.batch, quantity: take });
+          need = need.minus(take); used = used.plus(take);
+          if (used.equals(p.quantity)) { cursor++; used = toDec(0); }
+        }
+        const priced = pricePicks(allocated);
+        assertBatchQuote(priced, row.item.batchQuote);
+        productPicks.set(row, priced);
+      }
+    }
     const drafts = input.cartItems.map((c) => {
       if (booking && c.bookingLineId) {
         const saved = booking.items.find(i => i.lineInstanceId === c.bookingLineId);
@@ -277,15 +303,16 @@ export const postInvoice = async (input, actor, idempotencyKey, request) => {
         }
         if (catalogue.itemType === 'SALON_CONSUMABLE') throw badRequest('NOT_FOR_SALE', `'${catalogue.name}' is a salon consumable and cannot be sold.`);
       }
-      const price = toDec(c.type === 'PRODUCT' ? catalogue.sellingPrice : catalogue.price);
-      if (!round2(c.item.price ?? c.item.sellingPrice ?? 0).equals(round2(price))) {
+      const picks = productPicks.get(c);
+      const price = picks ? picks[0].sellingPrice : toDec(catalogue.price);
+      if (!picks && !round2(c.item.price ?? c.item.sellingPrice ?? 0).equals(round2(price))) {
         throw conflict('PRICE_OUTDATED', `Cart price quote for '${catalogue.name}' is outdated. Please refresh your cart.`);
       }
       const staff = requireStaff(c.staffId, catalogue.name);
       const taxRate = input.applyTax === false
         ? toDec(0)
         : resolveTaxRate(catalogue.taxTreatment, catalogue.specificTaxRuleId, branch, rules);
-      return { c, catalogue, staff, unitPrice: price, gross: round2(price.times(c.quantity)), taxRate };
+      return { c, catalogue, staff, unitPrice: price, picks, gross: picks ? round2(picks.reduce((sum, p) => sum.plus(p.gross), toDec(0))) : round2(price.times(c.quantity)), taxRate };
     });
     if (!drafts.length) throw badRequest('EMPTY_CART', 'Cannot post invoice with an empty cart.');
 
@@ -525,14 +552,17 @@ export const postInvoice = async (input, actor, idempotencyKey, request) => {
         }
       }
       if (d.c.type === 'PRODUCT') {
-        const movements = await consumeStock(tx, {
-          itemId: d.catalogue.id, branchId, branchCode: branch.code, quantity: d.c.quantity, businessDate: today,
-          movementType: 'POS_SALE_OUT', source: { type: 'INVOICE', id: invoice.id, number: invoiceNumber }, reason: 'POS Retail Product Sale', actor,
-        });
         let cogs = toDec(0);
-        for (const m of movements) {
-          const batch = await tx.inventoryBatch.findUnique({ where: { id: m.batchId } });
-          await tx.invoiceLineBatch.create({ data: { lineId: line.id, batchId: m.batchId, batchNumber: batch.batchNumber, qty: m.quantity, unitCost: m.unitCost } });
+        const allocations = allocateBatchAmounts(d.picks, d.discount, d.tax);
+        for (const [sortOrder, p] of allocations.entries()) {
+          const m = await postStockMovement(tx, {
+            itemId: d.catalogue.id, branchId, branchCode: branch.code, batch: p.batch, quantity: p.quantity, unitCost: p.batch.unitCost,
+            movementType: 'POS_SALE_OUT', sourceReferenceType: 'INVOICE', sourceReferenceId: invoice.id,
+            sourceReferenceNumber: invoiceNumber, reason: 'POS Retail Product Sale', actor,
+          });
+          await tx.invoiceLineBatch.create({ data: { lineId: line.id, batchId: p.batch.id, batchNumber: p.batch.batchNumber,
+            qty: p.quantity, unitCost: m.unitCost, sortOrder, sellingPrice: p.sellingPrice,
+            discountAllocated: p.discountAllocated, taxAllocated: p.taxAllocated } });
           cogs = cogs.plus(m.totalCost);
         }
         await tx.invoiceLine.update({
