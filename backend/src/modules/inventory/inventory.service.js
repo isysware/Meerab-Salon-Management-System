@@ -15,7 +15,7 @@ import { assertBranchAccess, resolveReadBranch, resolveWriteBranch } from '../..
 import { dateOnly, getBusinessDate, startOfDay, endOfDay } from '../../lib/dates.js';
 import { round2, toDec } from '../../lib/money.js';
 import { nextSequence } from '../../lib/sequence.js';
-import { consumeStock, postStockMovement, qty } from '../../lib/stock.js';
+import { consumeStock, postStockMovement, previewBatchPicks, reverseStockMovement, qty } from '../../lib/stock.js';
 import { getActiveDrawer, postCashMovement, postAccountMovement } from '../cash/cash.service.js';
 import {
   toItemDTO, toBatchDTO, deriveBatchStatus, toSupplierDTO, toLedgerEntryDTO, toPurchaseDTO,
@@ -570,6 +570,14 @@ export const createPurchase = async (input, actor, request) => {
           expiryDate: batch.expiryDate, mfgDate: batch.mfgDate, batchId: batch.id,
         },
       });
+
+      // Synchronize authorized selling-price update if explicitly specified on stock-in
+      if (l.sellingPrice !== undefined && Number(l.sellingPrice) > 0 && l.item.itemType !== 'SALON_CONSUMABLE') {
+        await tx.inventoryItem.update({
+          where: { id: l.item.id },
+          data: { sellingPrice: round2(l.sellingPrice) },
+        });
+      }
     }
 
     const ledgerBase = { supplierId: supplier.id, branchId, date: purchaseDate, referenceType: 'PURCHASE', referenceId: purchase.id, referenceNumber: purchaseNumber, userId: actor.id, userName: actor.name };
@@ -730,16 +738,53 @@ export const manualStockOut = async (input, actor) => {
     const item = await tx.inventoryItem.findUnique({ where: { id: input.itemId } });
     if (!item || !item.isActive) throw badRequest('ITEM_INVALID', `Item '${input.itemId}' is invalid.`);
     const ref = await nextSequence(tx, branch.code, 'MSO');
+
+    const deptTag = input.department ? `[Dept: ${input.department}] ` : '';
+    const respTag = input.responsibleStaffName ? `[Responsible: ${input.responsibleStaffName}] ` : '';
+    const fullNotes = [deptTag + respTag, input.notes].filter(Boolean).join(' ').trim() || null;
+
     const movements = await consumeStock(tx, {
       itemId: item.id, branchId, branchCode: branch.code, quantity: input.quantity, businessDate: await getBusinessDate(tx),
       movementType, source: { type: 'MANUAL_OUT', id: ref, number: ref }, reason: input.reason || movementType,
-      notes: input.notes, actor, batchId: input.batchId,
+      notes: fullNotes, actor, batchId: input.batchId,
     });
-    await audit(tx, actor, 'STOCK_OUT_POSTED', 'StockMovement', movements[0].id, branchId, { ref, movementType, quantity: input.quantity });
+    await audit(tx, actor, 'STOCK_OUT_POSTED', 'StockMovement', movements[0].id, branchId, {
+      ref, movementType, quantity: input.quantity, department: input.department, responsibleStaff: input.responsibleStaffName,
+    });
     const rows = await tx.stockMovement.findMany({ where: { id: { in: movements.map((m) => m.id) } }, include: { item: true, batch: true }, orderBy: { createdAt: 'asc' } });
     // Contract returns one movement; when FEFO split across layers the rest are attached.
     const [first, ...rest] = rows.map(toMovementDTO);
     return rest.length ? { ...first, splitMovements: rest } : first;
+  });
+};
+
+export const consumptionPreview = async (actor, query) => {
+  const branchId = resolveReadBranch(actor, query.branchId);
+  const today = await getBusinessDate();
+  return previewBatchPicks(prisma, {
+    itemId: query.itemId,
+    branchId,
+    quantity: query.quantity,
+    businessDate: today,
+    allowExpired: query.reasonType === 'EXPIRED',
+    batchId: query.batchId,
+  });
+};
+
+export const reverseMovement = async (actor, movementId, input) => {
+  return prisma.$transaction(async (tx) => {
+    const movement = await reverseStockMovement(tx, {
+      movementId,
+      reason: input.reason,
+      actor,
+      branchId: resolveWriteBranch(actor),
+    });
+    await audit(tx, actor, 'STOCK_MOVEMENT_REVERSED', 'StockMovement', movement.id, movement.branchId, {
+      originalMovementId: movementId,
+      quantity: movement.quantity.toNumber(),
+      reason: input.reason,
+    });
+    return toMovementDTO(movement);
   });
 };
 

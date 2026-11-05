@@ -177,8 +177,8 @@ export const InventoryItemsPage: React.FC = () => {
 
     items.forEach((it) => {
       const stock = stockMap[it.id]?.currentStock ?? 0;
-      const cost = it.defaultPurchaseCost || 0;
-      totalStockValuation += stock * cost;
+      const val = stockMap[it.id]?.valuation ?? (stock * (it.defaultPurchaseCost || 0));
+      totalStockValuation += val;
 
       if (stock <= 0) {
         outOfStockCount++;
@@ -516,7 +516,7 @@ export const InventoryItemsPage: React.FC = () => {
               <tbody className="divide-y divide-slate-100/80">
                 {filteredItems.map((item, idx) => {
                   const currentStock = stockMap[item.id]?.currentStock ?? 0;
-                  const valuation = currentStock * (item.defaultPurchaseCost || 0);
+                  const valuation = stockMap[item.id]?.valuation ?? (currentStock * (item.defaultPurchaseCost || 0));
                   const isOut = currentStock <= 0;
                   const isLow = currentStock > 0 && currentStock <= item.minStockLevel;
 

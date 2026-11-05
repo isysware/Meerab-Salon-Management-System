@@ -118,6 +118,7 @@ import {
   COGSReportRecord,
   COGSReportSummary,
   ItemType,
+  ConsumptionPreview,
   CreatePurchaseInput,
   CreateInventoryItemInput,
   PaySupplierInput,
@@ -766,6 +767,21 @@ export interface SalonServiceContract {
   ): Promise<StockMovement[]>;
   createManualStockOut(
     input: CreateManualStockOutInput,
+    actor?: User
+  ): Promise<StockMovement>;
+  getConsumptionPreview(
+    params: {
+      itemId: string;
+      branchId: string;
+      quantity: number;
+      batchId?: string;
+      reasonType?: string;
+    },
+    actor?: User
+  ): Promise<ConsumptionPreview>;
+  reverseStockMovement(
+    movementId: string,
+    reason: string,
     actor?: User
   ): Promise<StockMovement>;
 

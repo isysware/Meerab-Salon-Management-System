@@ -129,6 +129,7 @@ import {
   CreateSupplierReturnInput,
   CreateManualStockOutInput,
   CreateStockSettlementInput,
+  ConsumptionPreview,
   SalesInvoicesReport,
   DetailedIncomeReport,
   DetailedIncomeReportQuery,
@@ -11717,41 +11718,38 @@ class MockSalonService implements SalonServiceContract {
       let batchId = line.batchId;
       const batchNumber = line.batchNumber || nextReference(clonedStore, 'BAT');
 
-      // Check for existing batch with same batchNumber and item
-      let existingBatch = clonedStore.inventoryBatches.find(
-        (b) => b.itemId === line.itemId && b.branchId === branchId && b.batchNumber === batchNumber
-      );
+      // Every purchase receipt creates a separate immutable cost layer/batch (never merge or overwrite unitCostSnapshot)
+      const newBatch: InventoryBatch = {
+        id: `batch-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
+        itemId: line.itemId,
+        itemName: line.itemName,
+        itemSku: line.itemSku,
+        branchId,
+        batchNumber,
+        purchaseId: newPurchase.id,
+        purchaseNumber: newPurchase.purchaseNumber,
+        supplierId: supplier.id,
+        supplierName: supplier.name,
+        receivedDate: newPurchase.purchaseDate,
+        expiryDate: line.expiryDate,
+        mfgDate: line.mfgDate,
+        initialQuantity: line.quantity,
+        remainingQuantity: line.quantity,
+        unitCostSnapshot: line.unitPurchaseCost,
+        status: 'VALID',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      clonedStore.inventoryBatches.push(newBatch);
+      batchId = newBatch.id;
 
-      if (existingBatch) {
-        existingBatch.remainingQuantity = roundCurrency(existingBatch.remainingQuantity + line.quantity);
-        existingBatch.unitCostSnapshot = roundCurrency(line.unitPurchaseCost);
-        existingBatch.status = 'VALID';
-        existingBatch.updatedAt = nowIso;
-        batchId = existingBatch.id;
-      } else {
-        const newBatch: InventoryBatch = {
-          id: `batch-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
-          itemId: line.itemId,
-          itemName: line.itemName,
-          itemSku: line.itemSku,
-          branchId,
-          batchNumber,
-          purchaseId: newPurchase.id,
-          purchaseNumber: newPurchase.purchaseNumber,
-          supplierId: supplier.id,
-          supplierName: supplier.name,
-          receivedDate: newPurchase.purchaseDate,
-          expiryDate: line.expiryDate,
-          mfgDate: line.mfgDate,
-          initialQuantity: line.quantity,
-          remainingQuantity: line.quantity,
-          unitCostSnapshot: line.unitPurchaseCost,
-          status: 'VALID',
-          createdAt: nowIso,
-          updatedAt: nowIso,
-        };
-        clonedStore.inventoryBatches.push(newBatch);
-        batchId = newBatch.id;
+      // Synchronize authorized selling-price update if explicitly specified on stock-in
+      if (line.sellingPrice !== undefined && Number(line.sellingPrice) > 0) {
+        const targetItem = clonedStore.inventoryItems.find((it) => it.id === line.itemId);
+        if (targetItem && targetItem.itemType !== 'SALON_CONSUMABLE') {
+          targetItem.sellingPrice = roundCurrency(line.sellingPrice);
+          targetItem.updatedAt = nowIso;
+        }
       }
 
       line.batchId = batchId;
@@ -12187,40 +12185,6 @@ class MockSalonService implements SalonServiceContract {
       throw new Error(`Item '${input.itemId}' is invalid.`);
     }
 
-    let chosenBatch: InventoryBatch | undefined;
-    if (input.batchId) {
-      chosenBatch = (clonedStore.inventoryBatches || []).find(
-        (b) => b.id === input.batchId && b.branchId === branchId
-      );
-      if (!chosenBatch || chosenBatch.remainingQuantity < input.quantity) {
-        throw new Error(
-          `Insufficient quantity in batch '${chosenBatch?.batchNumber || input.batchId}'. Remaining: ${chosenBatch?.remainingQuantity || 0}, Requested: ${input.quantity}.`
-        );
-      }
-    } else {
-      // Find batches with remaining quantity
-      const batches = (clonedStore.inventoryBatches || [])
-        .filter((b) => b.itemId === item.id && b.branchId === branchId && b.remainingQuantity > 0)
-        .sort((a, b) => (a.expiryDate || '9999').localeCompare(b.expiryDate || '9999'));
-
-      const totalStock = batches.reduce((sum, b) => sum + b.remainingQuantity, 0);
-      if (totalStock < input.quantity) {
-        throw new Error(`Insufficient stock in branch for '${item.name}'. Available: ${totalStock}, Requested: ${input.quantity}.`);
-      }
-      chosenBatch = batches[0];
-    }
-
-    const unitCostSnapshot = chosenBatch ? chosenBatch.unitCostSnapshot : item.defaultPurchaseCost;
-    const totalCostImpact = roundCurrency(input.quantity * unitCostSnapshot);
-
-    if (chosenBatch) {
-      chosenBatch.remainingQuantity = roundCurrency(chosenBatch.remainingQuantity - input.quantity);
-      if (chosenBatch.remainingQuantity === 0) {
-        chosenBatch.status = 'EXHAUSTED';
-      }
-      chosenBatch.updatedAt = new Date().toISOString();
-    }
-
     let movementType: StockMovementType = 'SALON_CONSUMPTION_OUT';
     const rType: string = (input.reasonType || (input as any).reason || '') as string;
     switch (rType) {
@@ -12249,42 +12213,250 @@ class MockSalonService implements SalonServiceContract {
         movementType = 'NEGATIVE_ADJUSTMENT';
     }
 
+    const deptTag = input.department ? `[Dept: ${input.department}] ` : '';
+    const respTag = input.responsibleStaffName ? `[Responsible: ${input.responsibleStaffName}] ` : '';
+    const fullNotes = [deptTag + respTag, input.notes].filter(Boolean).join(' ').trim() || undefined;
+
+    let picks: Array<{ batch: InventoryBatch; quantity: number }> = [];
+    if (input.batchId) {
+      const chosenBatch = (clonedStore.inventoryBatches || []).find(
+        (b) => b.id === input.batchId && b.branchId === branchId
+      );
+      if (!chosenBatch || chosenBatch.remainingQuantity < input.quantity) {
+        throw new Error(
+          `Insufficient quantity in batch '${chosenBatch?.batchNumber || input.batchId}'. Remaining: ${chosenBatch?.remainingQuantity || 0}, Requested: ${input.quantity}.`
+        );
+      }
+      picks = [{ batch: chosenBatch, quantity: input.quantity }];
+    } else {
+      const isFefo = Boolean(item.trackExpiry);
+      const batches = (clonedStore.inventoryBatches || [])
+        .filter((b) => b.itemId === item.id && b.branchId === branchId && b.remainingQuantity > 0 && (movementType === 'EXPIRED_OUT' || b.status !== 'EXPIRED'))
+        .sort((a, b) => {
+          if (isFefo) {
+            const ea = a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity;
+            const eb = b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity;
+            if (ea !== eb) return ea - eb;
+          }
+          const ra = a.receivedDate ? new Date(a.receivedDate).getTime() : 0;
+          const rb = b.receivedDate ? new Date(b.receivedDate).getTime() : 0;
+          if (ra !== rb) return ra - rb;
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        });
+
+      const totalStock = batches.reduce((sum, b) => sum + b.remainingQuantity, 0);
+      if (totalStock < input.quantity) {
+        throw new Error(`Insufficient stock in branch for '${item.name}'. Available: ${totalStock}, Requested: ${input.quantity}.`);
+      }
+
+      let remaining = input.quantity;
+      for (const b of batches) {
+        if (remaining <= 0) break;
+        const take = Math.min(b.remainingQuantity, remaining);
+        picks.push({ batch: b, quantity: take });
+        remaining = roundCurrency(remaining - take);
+      }
+    }
+
+    if (!clonedStore.stockMovements) clonedStore.stockMovements = [];
+    if (!clonedStore.movementSequenceCounters) clonedStore.movementSequenceCounters = {};
+
+    let firstMovement: StockMovement | null = null;
+    const nowIso = new Date().toISOString();
+
+    for (const pick of picks) {
+      const smCount = (clonedStore.movementSequenceCounters[`${branch.code}-2026`] || 0) + 1;
+      clonedStore.movementSequenceCounters[`${branch.code}-2026`] = smCount;
+      const movementNumber = nextReference(clonedStore, 'SM');
+
+      pick.batch.remainingQuantity = roundCurrency(pick.batch.remainingQuantity - pick.quantity);
+      if (pick.batch.remainingQuantity === 0) {
+        pick.batch.status = 'EXHAUSTED';
+      }
+      pick.batch.updatedAt = nowIso;
+
+      const unitCost = pick.batch.unitCostSnapshot || item.defaultPurchaseCost || 0;
+      const totalCostImpact = roundCurrency(pick.quantity * unitCost);
+
+      const movement: StockMovement = {
+        id: `sm-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
+        movementNumber,
+        branchId,
+        itemId: item.id,
+        itemName: item.name,
+        itemSku: item.sku,
+        batchId: pick.batch.id,
+        batchNumber: pick.batch.batchNumber,
+        movementType,
+        direction: 'OUT',
+        quantity: pick.quantity,
+        unitCostSnapshot: unitCost,
+        totalCostImpact,
+        sourceReferenceType: 'MANUAL_OUT',
+        sourceReferenceId: movementNumber,
+        referenceId: movementNumber,
+        sourceReferenceNumber: movementNumber,
+        reason: input.reason || movementType,
+        notes: fullNotes,
+        createdById: authenticatedActor.id,
+        createdByName: authenticatedActor.name,
+        createdAt: nowIso,
+      };
+
+      clonedStore.stockMovements.unshift(movement);
+      if (!firstMovement) firstMovement = movement;
+    }
+
+    mockStorage.saveStore(clonedStore);
+    return { ...firstMovement! };
+  }
+
+  async getConsumptionPreview(
+    params: { itemId: string; branchId: string; quantity: number; batchId?: string; reasonType?: string },
+    actor?: User
+  ): Promise<ConsumptionPreview> {
+    const authenticatedActor = this.getAuthenticatedActor(actor);
+    const store = mockStorage.getStore();
+    const branchId = params.branchId === 'ALL' ? (authenticatedActor.branchId || 'b0000000-0000-0000-0000-000000000001') : params.branchId;
+    const item = (store.inventoryItems || []).find((i) => i.id === params.itemId);
+    if (!item) throw new Error(`Inventory item '${params.itemId}' not found.`);
+
+    if (params.batchId) {
+      const batch = (store.inventoryBatches || []).find((b) => b.id === params.batchId && b.branchId === branchId);
+      if (!batch) throw new Error(`Batch '${params.batchId}' not found.`);
+      const remaining = batch.remainingQuantity;
+      const take = Math.min(remaining, params.quantity);
+      const unitCost = batch.unitCostSnapshot || item.defaultPurchaseCost || 0;
+      const totalCost = roundCurrency(take * unitCost);
+      return {
+        availableStock: remaining,
+        requestedQuantity: params.quantity,
+        isFulfillable: remaining >= params.quantity,
+        costBreakdown: [
+          {
+            batchId: batch.id,
+            batchNumber: batch.batchNumber,
+            quantity: take,
+            unitCost,
+            totalCost,
+            expiryDate: batch.expiryDate,
+          },
+        ],
+        totalCost,
+      };
+    }
+
+    const isFefo = Boolean(item.trackExpiry);
+    const batches = (store.inventoryBatches || [])
+      .filter((b) => b.itemId === item.id && b.branchId === branchId && b.remainingQuantity > 0 && (params.reasonType === 'EXPIRED' || b.status !== 'EXPIRED'))
+      .sort((a, b) => {
+        if (isFefo) {
+          const ea = a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity;
+          const eb = b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity;
+          if (ea !== eb) return ea - eb;
+        }
+        const ra = a.receivedDate ? new Date(a.receivedDate).getTime() : 0;
+        const rb = b.receivedDate ? new Date(b.receivedDate).getTime() : 0;
+        if (ra !== rb) return ra - rb;
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      });
+
+    const availableStock = batches.reduce((sum, b) => sum + b.remainingQuantity, 0);
+    let remaining = params.quantity;
+    const breakdown: Array<{ batchId: string; batchNumber: string; quantity: number; unitCost: number; totalCost: number; expiryDate?: string }> = [];
+    let totalCost = 0;
+
+    for (const b of batches) {
+      if (remaining <= 0) break;
+      const take = Math.min(b.remainingQuantity, remaining);
+      const unitCost = b.unitCostSnapshot || item.defaultPurchaseCost || 0;
+      const lineCost = roundCurrency(take * unitCost);
+      breakdown.push({
+        batchId: b.id,
+        batchNumber: b.batchNumber,
+        quantity: take,
+        unitCost,
+        totalCost: lineCost,
+        expiryDate: b.expiryDate,
+      });
+      totalCost = roundCurrency(totalCost + lineCost);
+      remaining = roundCurrency(remaining - take);
+    }
+
+    return {
+      availableStock,
+      requestedQuantity: params.quantity,
+      isFulfillable: availableStock >= params.quantity,
+      costBreakdown: breakdown,
+      totalCost,
+    };
+  }
+
+  async reverseStockMovement(movementId: string, reason: string, actor?: User): Promise<StockMovement> {
+    const authenticatedActor = this.getAuthenticatedActor(actor);
+    if (authenticatedActor.role === 'STAFF' || authenticatedActor.role === 'ACCOUNTANT') {
+      throw new Error('Access Denied: Only administrators can reverse stock movements.');
+    }
+
+    const store = mockStorage.getStore();
+    const clonedStore: StorageSchema = JSON.parse(JSON.stringify(store));
+
+    const original = (clonedStore.stockMovements || []).find((m) => m.id === movementId);
+    if (!original) throw new Error(`Stock movement '${movementId}' not found.`);
+    if (original.direction !== 'OUT') throw new Error('Only outbound movements can be reversed.');
+    if (original.sourceReferenceType !== 'MANUAL_OUT' && !original.movementType.endsWith('_OUT')) {
+      throw new Error(`Cannot reverse movement of type '${original.sourceReferenceType}'.`);
+    }
+
+    const prior = (clonedStore.stockMovements || []).find(
+      (m) => m.sourceReferenceType === 'STOCK_MOVEMENT_REVERSAL' && m.sourceReferenceId === original.id
+    );
+    if (prior) throw new Error(`Movement '${original.movementNumber}' was already reversed under '${prior.movementNumber}'.`);
+
+    if (original.batchId) {
+      const batch = (clonedStore.inventoryBatches || []).find((b) => b.id === original.batchId);
+      if (batch) {
+        batch.remainingQuantity = roundCurrency(batch.remainingQuantity + original.quantity);
+        if (batch.status === 'EXHAUSTED') batch.status = 'VALID';
+        batch.updatedAt = new Date().toISOString();
+      }
+    }
+
+    const branch = clonedStore.branches.find((b) => b.id === original.branchId) || clonedStore.branches[0];
     if (!clonedStore.movementSequenceCounters) clonedStore.movementSequenceCounters = {};
     const smCount = (clonedStore.movementSequenceCounters[`${branch.code}-2026`] || 0) + 1;
     clonedStore.movementSequenceCounters[`${branch.code}-2026`] = smCount;
     const movementNumber = nextReference(clonedStore, 'SM');
     const nowIso = new Date().toISOString();
 
-    const movement: StockMovement = {
+    const compensating: StockMovement = {
       id: `sm-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`,
       movementNumber,
-      branchId,
-      itemId: item.id,
-      itemName: item.name,
-      itemSku: item.sku,
-      batchId: chosenBatch?.id,
-      batchNumber: chosenBatch?.batchNumber,
-      movementType,
-      direction: 'OUT',
-      quantity: input.quantity,
-      unitCostSnapshot,
-      totalCostImpact,
-      sourceReferenceType: 'MANUAL_OUT',
-      sourceReferenceId: movementNumber,
-      referenceId: movementNumber,
-      sourceReferenceNumber: movementNumber,
-      reason: input.reason || movementType,
-      notes: input.notes?.trim(),
+      branchId: original.branchId,
+      itemId: original.itemId,
+      itemName: original.itemName,
+      itemSku: original.itemSku,
+      batchId: original.batchId,
+      batchNumber: original.batchNumber,
+      movementType: 'POSITIVE_ADJUSTMENT',
+      direction: 'IN',
+      quantity: original.quantity,
+      unitCostSnapshot: original.unitCostSnapshot,
+      totalCostImpact: original.totalCostImpact,
+      sourceReferenceType: 'STOCK_MOVEMENT_REVERSAL',
+      sourceReferenceId: original.id,
+      referenceId: original.id,
+      sourceReferenceNumber: original.movementNumber,
+      reason: `Compensating reversal of ${original.movementNumber}: ${reason}`,
+      notes: `Original Reason: ${original.reason} | Reversal Reason: ${reason}`,
       createdById: authenticatedActor.id,
       createdByName: authenticatedActor.name,
       createdAt: nowIso,
     };
 
-    if (!clonedStore.stockMovements) clonedStore.stockMovements = [];
-    clonedStore.stockMovements.unshift(movement);
-
+    clonedStore.stockMovements.unshift(compensating);
     mockStorage.saveStore(clonedStore);
-    return { ...movement };
+    return { ...compensating };
   }
 
   // ======================================================================

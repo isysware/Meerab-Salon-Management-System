@@ -2450,6 +2450,7 @@ export const POSBillingPage: React.FC = () => {
                         const val = e.target.value;
                         setClientName(val);
                         if (val.trim()) setIsWalkIn(false);
+                        setPostingError(null);
                         setCustomerSearchQuery(val);
                         setShowCartClientDropdown(Boolean(val.trim().length >= 2));
                       }}
@@ -2471,6 +2472,7 @@ export const POSBillingPage: React.FC = () => {
                         const val = e.target.value;
                         setClientPhone(val);
                         if (val.trim()) setIsWalkIn(false);
+                        setPostingError(null);
                         setCustomerSearchQuery(val);
                         setShowCartClientDropdown(Boolean(val.trim().length >= 3));
                       }}
@@ -3460,6 +3462,7 @@ export const POSBillingPage: React.FC = () => {
                             onChange={(e) => {
                               setClientName(e.target.value);
                               setIsWalkIn(false);
+                              setPostingError(null);
                             }}
                             className="text-xs h-8 bg-white border-slate-200/90 rounded-xl font-medium focus:border-[#B82E69] shadow-2xs"
                           />
@@ -3472,6 +3475,7 @@ export const POSBillingPage: React.FC = () => {
                             onChange={(e) => {
                               setClientPhone(e.target.value);
                               setIsWalkIn(false);
+                              setPostingError(null);
                             }}
                             className="text-xs h-8 bg-white border-slate-200/90 rounded-xl font-mono font-medium focus:border-[#B82E69] shadow-2xs"
                           />

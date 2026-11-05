@@ -95,6 +95,7 @@ export const StockInPurchasesPage: React.FC = () => {
     itemId: string;
     quantity: number;
     unitPurchaseCost: number;
+    sellingPrice?: number;
     batchNumber: string;
     expiryDate?: string;
   }
@@ -288,6 +289,7 @@ export const StockInPurchasesPage: React.FC = () => {
           batchNumber: l.batchNumber,
           quantity: Number(l.quantity) || 1,
           unitPurchaseCost: Number(l.unitPurchaseCost) || 0,
+          sellingPrice: l.sellingPrice !== undefined && Number(l.sellingPrice) > 0 ? Number(l.sellingPrice) : undefined,
           expiryDate: l.expiryDate || undefined,
         })),
       };
@@ -821,17 +823,34 @@ export const StockInPurchasesPage: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="max-w-xs">
-                        <label htmlFor={'stock-in-expiry-' + idx} className="block text-[11px] font-semibold text-slate-600 mb-1">
-                          Expiry Date <span className="text-slate-400 font-normal">(Optional)</span>
-                        </label>
-                        <input
-                          id={'stock-in-expiry-' + idx}
-                          type="date"
-                          value={line.expiryDate || ''}
-                          onChange={(e) => handleUpdateLine(idx, { expiryDate: e.target.value || undefined })}
-                          className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:outline-hidden"
-                        />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <label htmlFor={'stock-in-expiry-' + idx} className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            Expiry Date <span className="text-slate-400 font-normal">(Optional)</span>
+                          </label>
+                          <input
+                            id={'stock-in-expiry-' + idx}
+                            type="date"
+                            value={line.expiryDate || ''}
+                            onChange={(e) => handleUpdateLine(idx, { expiryDate: e.target.value || undefined })}
+                            className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:outline-hidden"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor={'stock-in-sale-price-' + idx} className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            Update Sale Price <span className="text-slate-400 font-normal">(Optional — preserves current {item?.sellingPrice !== undefined ? `PKR ${item.sellingPrice}` : ''} if blank)</span>
+                          </label>
+                          <input
+                            id={'stock-in-sale-price-' + idx}
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder={item?.sellingPrice !== undefined ? `Current: PKR ${item.sellingPrice}` : 'Keep previous price'}
+                            value={line.sellingPrice !== undefined ? line.sellingPrice : ''}
+                            onChange={(e) => handleUpdateLine(idx, { sellingPrice: e.target.value ? Number(e.target.value) : undefined })}
+                            className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:outline-hidden font-mono"
+                          />
+                        </div>
                       </div>
 
                       {/* Stock Clarity Banner */}

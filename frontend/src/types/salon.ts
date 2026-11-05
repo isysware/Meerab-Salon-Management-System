@@ -599,6 +599,7 @@ export interface CreatePurchaseInput {
     quantity: number;
     unitPurchaseCost?: number;
     unitCost?: number;
+    sellingPrice?: number;
     lineDiscount?: number;
     batchNumber?: string;
     expiryDate?: string;
@@ -647,8 +648,28 @@ export interface CreateManualStockOutInput {
   batchId?: string;
   quantity: number;
   reasonType?: 'SALON_CONSUMPTION' | 'DAMAGE' | 'EXPIRED' | 'INTERNAL_USE' | 'PROMOTIONAL' | 'OTHER';
+  department?: string;
+  responsibleStaffId?: string;
+  responsibleStaffName?: string;
   reason: string;
   notes?: string;
+}
+
+export interface ConsumptionCostBreakdown {
+  batchId: string;
+  batchNumber: string;
+  quantity: number;
+  unitCost: number;
+  totalCost: number;
+  expiryDate?: string;
+}
+
+export interface ConsumptionPreview {
+  availableStock: number;
+  requestedQuantity: number;
+  isFulfillable: boolean;
+  costBreakdown: ConsumptionCostBreakdown[];
+  totalCost: number;
 }
 
 export interface CreateStockSettlementInput {

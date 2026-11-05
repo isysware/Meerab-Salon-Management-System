@@ -23,6 +23,7 @@ inventoryRoutes.post('/items',              authorize(...ADMINS), validate(v.cre
 inventoryRoutes.put('/items/:id',           authorize(...ADMINS), validate(v.updateItemSchema), c.updateItem);
 inventoryRoutes.post('/items/:id/archive',  authorize(...ADMINS), validate(v.archiveSchema), c.archiveItem);
 inventoryRoutes.get('/stock-levels',        validate(v.branchQuery, 'query'), c.stockLevels);
+inventoryRoutes.get('/consumption-preview', validate(v.consumptionPreviewQuery, 'query'), c.consumptionPreview);
 inventoryRoutes.get('/summary',             validate(v.branchQuery, 'query'), c.summary);
 inventoryRoutes.get('/cogs-report',         validate(v.cogsQuery, 'query'), c.cogs);
 inventoryRoutes.get('/batches',             validate(v.batchesQuery, 'query'), c.listBatches);
@@ -57,6 +58,7 @@ export const stockMovementRoutes = Router();
 stockMovementRoutes.use(authenticate, authorize(...BACK_OFFICE));
 stockMovementRoutes.get('/',            validate(v.movementsQuery, 'query'), c.listMovements);
 stockMovementRoutes.post('/manual-out', authorize(...ADMINS), idempotency, validate(v.stockOutSchema), c.stockOut);
+stockMovementRoutes.post('/:id/reverse', authorize(...ADMINS), idempotency, validate(v.reverseStockMovementSchema), c.reverseMovement);
 
 export const stockSettlementRoutes = Router();
 stockSettlementRoutes.use(authenticate, authorize(...ADMINS));

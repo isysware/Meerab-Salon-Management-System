@@ -356,7 +356,7 @@ export const StaffCommissionPage: React.FC = () => {
     if (!paymentTargetRun || !paymentTargetStatement) return;
 
     if (paymentForm.amount <= 0 || paymentForm.amount > paymentTargetStatement.outstandingAmount) {
-      const msg = `Payment amount must be between 1 and ${paymentTargetStatement.outstandingAmount.toLocaleString()}`;
+      const msg = `Payment amount must be between 0.01 and ${paymentTargetStatement.outstandingAmount.toLocaleString()}`;
       setFeedback({ type: 'error', message: msg });
       toast.error(msg);
       return;
@@ -1387,7 +1387,8 @@ export const StaffCommissionPage: React.FC = () => {
                 <label className="block text-slate-600 font-medium mb-1">Payment Amount (Rs.)</label>
                 <input
                   type="number"
-                  min="1"
+                  min="0.01"
+                  step="0.01"
                   max={paymentTargetStatement.outstandingAmount}
                   value={paymentForm.amount}
                   onChange={(e) => setPaymentForm({ ...paymentForm, amount: Number(e.target.value) })}

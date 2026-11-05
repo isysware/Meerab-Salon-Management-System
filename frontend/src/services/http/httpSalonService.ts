@@ -321,6 +321,8 @@ const liveMethods: SalonServiceContract = {
     return api.get<StockMovement[]>('/stock-movements', { ...branchQuery(branchId), ...(filter || {}) });
   },
   createManualStockOut: (input) => api.post<StockMovement>('/stock-movements/manual-out', input, newIdempotencyKey()),
+  getConsumptionPreview: (params) => api.get<ConsumptionPreview>('/inventory/consumption-preview', params),
+  reverseStockMovement: (movementId, reason) => api.post<StockMovement>(`/stock-movements/${movementId}/reverse`, { reason }, newIdempotencyKey()),
 
   getStockSettlements: (branchId) => api.get<StockSettlement[]>('/stock-settlements', branchQuery(branchId)),
   getStockSettlement: (id) => api.get<StockSettlement>(`/stock-settlements/${id}`),

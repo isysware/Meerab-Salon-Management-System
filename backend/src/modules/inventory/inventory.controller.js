@@ -39,9 +39,11 @@ export const getPurchase     = send((req) => s.getPurchase(req.user, req.params.
 export const createPurchase  = send((req) => s.createPurchase(req.body, req.user, postingRequest(req)), 201);
 export const listReturns     = send((req) => s.listReturns(req.user, req.query));
 export const createReturn    = send((req) => s.createReturn(req.body, req.user), 201);
-export const listMovements   = send((req) => s.listMovements(req.user, req.query));
-export const stockOut        = send((req) => s.manualStockOut(req.body, req.user), 201);
-export const listCounts      = send((req) => s.listStockSettlements(req.user, req.query));
+export const listMovements      = send((req) => s.listMovements(req.user, req.query));
+export const stockOut           = send((req) => s.manualStockOut(req.body, req.user), 201);
+export const consumptionPreview = send((req) => s.consumptionPreview(req.user, req.query));
+export const reverseMovement    = send((req) => s.reverseMovement(req.user, req.params.id, req.body), 201);
+export const listCounts         = send((req) => s.listStockSettlements(req.user, req.query));
 export const getCount        = send((req) => s.getStockSettlement(req.user, req.params.id));
 export const createCount     = send((req) => s.createStockSettlement(req.body, req.user), 201);
 

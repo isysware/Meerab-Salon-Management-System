@@ -79,16 +79,20 @@ export function getTodayInBranchTimezone(timeZone = 'Asia/Karachi'): string {
 }
 
 /**
- * Normalizes phone number into standard Pakistani digit string: '03001234567'
+ * Normalizes phone number into standard Pakistani digit string: '03001234567' / '(0376376478)'
  */
 export function normalizePhoneDigits(phone: string): string {
   if (!phone) return '';
   let digits = phone.replace(/\D/g, '');
-  if (digits.startsWith('92') && digits.length === 12) {
-    digits = '0' + digits.slice(2);
-  } else if (digits.startsWith('0092') && digits.length === 14) {
-    digits = '0' + digits.slice(4);
-  } else if (digits.length === 10 && digits.startsWith('3')) {
+  if (digits.startsWith('0092')) {
+    digits = digits.slice(4);
+  } else if (digits.startsWith('92') && digits.length >= 11) {
+    digits = digits.slice(2);
+  }
+  
+  if (digits.length === 10 && digits.startsWith('3')) {
+    digits = '0' + digits;
+  } else if (!digits.startsWith('0') && digits.length >= 9 && digits.length <= 11) {
     digits = '0' + digits;
   }
   return digits;
@@ -103,6 +107,12 @@ export function formatPhoneNumber(phone: string): string {
     const network = digits.slice(1, 4); // '300'
     const part1 = digits.slice(4, 7);   // '123'
     const part2 = digits.slice(7);      // '4567'
+    return `+92 (${network}) ${part1}-${part2}`;
+  }
+  if (digits.length === 10 && digits.startsWith('03')) {
+    const network = digits.slice(1, 4);
+    const part1 = digits.slice(4, 7);
+    const part2 = digits.slice(7);
     return `+92 (${network}) ${part1}-${part2}`;
   }
   return phone;

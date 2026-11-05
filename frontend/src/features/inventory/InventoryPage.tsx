@@ -20,6 +20,8 @@ import {
   Branch,
   PaymentAccount,
   CashDrawer,
+  StaffMember,
+  ConsumptionPreview,
   CreateInventoryItemInput,
   CreatePurchaseInput,
   PaySupplierInput,
@@ -82,6 +84,7 @@ import {
   CreditCard,
   Banknote,
   ShieldAlert,
+  RotateCcw,
   Edit,
   Trash2,
   Eye,
@@ -155,7 +158,7 @@ export const InventoryPage: React.FC = () => {
     setIsLoading(true);
     setActionError(null);
     try {
-      const [items, allItems, sups, purs, moves, stls, bts, accs, drawers] = await Promise.all([
+      const [items, allItems, sups, purs, moves, stls, bts, accs, drawers, staffs] = await Promise.all([
         salonService.getInventoryItems(bId, user),
         salonService.getInventoryItems('ALL', user),
         salonService.getSuppliers(bId, user),
@@ -165,6 +168,7 @@ export const InventoryPage: React.FC = () => {
         salonService.getInventoryBatches(bId, undefined, user),
         salonService.getPaymentAccounts(bId),
         salonService.getCashDrawers(bId),
+        salonService.getStaffMembers(bId || 'ALL', user).catch(() => []),
       ]);
 
       setInventoryItems(items);
@@ -175,6 +179,7 @@ export const InventoryPage: React.FC = () => {
       setSettlements(stls);
       setBatches(bts);
       setPaymentAccounts(accs);
+      setStaffList(staffs || []);
 
       // Find active drawer for current authenticated user
       const userDrawer = drawers.find((d) => d.status === 'OPEN' && d.custodianUserId === user.id) || null;
@@ -188,7 +193,7 @@ export const InventoryPage: React.FC = () => {
       let outCount = 0;
 
       for (const item of items) {
-        const itemBatches = bts.filter((b) => b.itemId === item.id && b.branchId === bId);
+        const itemBatches = bts.filter((b) => b.itemId === item.id && (bId === 'ALL' || b.branchId === bId));
         const currentQty = itemBatches.reduce((sum, b) => sum + (b.remainingQuantity || 0), 0);
         const itemVal = itemBatches.reduce((sum, b) => sum + (b.remainingQuantity || 0) * (b.unitCostSnapshot || item.defaultPurchaseCost), 0);
 
@@ -837,35 +842,91 @@ export const InventoryPage: React.FC = () => {
   // ----------------------------------------------------
   // MANUAL STOCK-OUT / SALON CONSUMPTION
   // ----------------------------------------------------
+  const [staffList, setStaffList] = useState<StaffMember[]>([]);
   const [isStockOutModalOpen, setIsStockOutModalOpen] = useState(false);
   const [stockOutItemId, setStockOutItemId] = useState<string>('');
   const [stockOutBatchId, setStockOutBatchId] = useState<string>('');
   const [stockOutQuantity, setStockOutQuantity] = useState<number>(1);
   const [stockOutReasonType, setStockOutReasonType] = useState<'SALON_CONSUMPTION' | 'DAMAGE' | 'EXPIRED' | 'INTERNAL_USE' | 'OTHER'>('SALON_CONSUMPTION');
+  const [stockOutDepartment, setStockOutDepartment] = useState<string>('Salon Service');
+  const [stockOutStaffId, setStockOutStaffId] = useState<string>('');
   const [stockOutNotes, setStockOutNotes] = useState<string>('');
+  const [stockOutPreview, setStockOutPreview] = useState<ConsumptionPreview | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState<boolean>(false);
+  const [isStockOutSubmitting, setIsStockOutSubmitting] = useState<boolean>(false);
 
-  const handleOpenStockOutModal = () => {
-    const defaultItem = inventoryItems[0];
-    setStockOutItemId(defaultItem?.id || '');
+  // Stock Movement Reversal State
+  const [isReverseModalOpen, setIsReverseModalOpen] = useState(false);
+  const [movementToReverse, setMovementToReverse] = useState<StockMovement | null>(null);
+  const [reversalReason, setReversalReason] = useState<string>('');
+  const [isReversing, setIsReversing] = useState<boolean>(false);
+
+  useEffect(() => {
+    let active = true;
+    if (!isStockOutModalOpen || !stockOutItemId || stockOutQuantity <= 0) {
+      setStockOutPreview(null);
+      return;
+    }
+    setIsPreviewLoading(true);
+    salonService
+      .getConsumptionPreview(
+        {
+          itemId: stockOutItemId,
+          branchId: selectedBranchId,
+          quantity: Number(stockOutQuantity),
+          batchId: stockOutBatchId || undefined,
+          reasonType: stockOutReasonType,
+        },
+        user
+      )
+      .then((prev) => {
+        if (active) setStockOutPreview(prev);
+      })
+      .catch(() => {
+        if (active) setStockOutPreview(null);
+      })
+      .finally(() => {
+        if (active) setIsPreviewLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [isStockOutModalOpen, stockOutItemId, stockOutQuantity, stockOutBatchId, stockOutReasonType, selectedBranchId, user]);
+
+  const handleOpenStockOutModal = (presetItemId?: string) => {
+    const targetItem = presetItemId ? inventoryItems.find((i) => i.id === presetItemId) : inventoryItems[0];
+    setStockOutItemId(targetItem?.id || '');
     setStockOutBatchId('');
     setStockOutQuantity(1);
     setStockOutReasonType('SALON_CONSUMPTION');
+    setStockOutDepartment('Salon Service');
+    setStockOutStaffId(staffList[0]?.id || '');
     setStockOutNotes('');
+    setStockOutPreview(null);
     setIsStockOutModalOpen(true);
   };
 
   const handleExecuteStockOut = async () => {
+    if (isStockOutSubmitting) return;
     try {
       setActionError(null);
       if (!stockOutItemId) throw new Error('Please select an item.');
       if (stockOutQuantity <= 0) throw new Error('Quantity must be greater than zero.');
+      if (stockOutPreview && !stockOutPreview.isFulfillable) {
+        throw new Error(`Insufficient stock for this deduction. Available: ${stockOutPreview.availableStock}, Requested: ${stockOutQuantity}`);
+      }
 
+      setIsStockOutSubmitting(true);
+      const chosenStaff = staffList.find((s) => s.id === stockOutStaffId);
       const input: CreateManualStockOutInput = {
         branchId: selectedBranchId,
         itemId: stockOutItemId,
         batchId: stockOutBatchId || undefined,
         quantity: Number(stockOutQuantity),
         reasonType: stockOutReasonType,
+        department: stockOutDepartment,
+        responsibleStaffId: stockOutStaffId || undefined,
+        responsibleStaffName: chosenStaff?.name || undefined,
         reason: stockOutReasonType,
         notes: stockOutNotes,
       };
@@ -880,6 +941,34 @@ export const InventoryPage: React.FC = () => {
       const errMsg = err.message || 'Failed to record manual stock out';
       setActionError(errMsg);
       toast.error(errMsg);
+    } finally {
+      setIsStockOutSubmitting(false);
+    }
+  };
+
+  const handleOpenReverseModal = (m: StockMovement) => {
+    setMovementToReverse(m);
+    setReversalReason('');
+    setIsReverseModalOpen(true);
+  };
+
+  const handleExecuteReverseMovement = async () => {
+    if (!movementToReverse || isReversing) return;
+    if (!reversalReason.trim() || reversalReason.trim().length < 3) {
+      toast.error('Please enter a valid reversal reason (at least 3 characters).');
+      return;
+    }
+    setIsReversing(true);
+    try {
+      await salonService.reverseStockMovement(movementToReverse.id, reversalReason.trim(), user);
+      toast.success(`Movement ${movementToReverse.movementNumber} reversed and stock restored.`);
+      setIsReverseModalOpen(false);
+      setMovementToReverse(null);
+      loadInventoryData(selectedBranchId);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to reverse stock movement.');
+    } finally {
+      setIsReversing(false);
     }
   };
 
@@ -1646,6 +1735,7 @@ export const InventoryPage: React.FC = () => {
                     <TableHead className="text-xs font-bold text-slate-700 text-right">Total Impact</TableHead>
                     <TableHead className="text-xs font-bold text-slate-700">Reference / Doc</TableHead>
                     <TableHead className="text-xs font-bold text-slate-700">Recorded By</TableHead>
+                    <TableHead className="text-xs font-bold text-slate-700 text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1688,12 +1778,26 @@ export const InventoryPage: React.FC = () => {
                           {m.referenceId || m.sourceReferenceId || '—'}
                         </TableCell>
                         <TableCell className="text-xs text-slate-700">{m.actorName || 'System'}</TableCell>
+                        <TableCell className="text-right">
+                          {m.direction === 'OUT' && (m.movementType === 'MANUAL_OUT' || m.movementType === 'SALON_CONSUMPTION' || m.movementType === 'INTERNAL_USE' || m.movementType === 'DAMAGE' || m.movementType === 'EXPIRED' || m.sourceReferenceType === 'MANUAL_OUT') && (
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              onClick={() => handleOpenReverseModal(m)}
+                              className="text-[10px] h-6 px-2 text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 cursor-pointer"
+                              title="Reverse this consumption / stock-out movement and restore inventory batch quantity"
+                            >
+                              <RotateCcw className="w-3 h-3 mr-1" />
+                              Reverse
+                            </Button>
+                          )}
+                        </TableCell>
                       </TableRow>
                     );
                   })}
                   {stockMovements.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center py-10 text-xs text-slate-400">
+                      <TableCell colSpan={10} className="text-center py-10 text-xs text-slate-400">
                         No stock movements logged yet.
                       </TableCell>
                     </TableRow>
@@ -2648,13 +2752,14 @@ export const InventoryPage: React.FC = () => {
       {/* MODAL: RECORD STOCK-OUT / SALON CONSUMPTION */}
       {/* ---------------------------------------------------- */}
       <Dialog open={isStockOutModalOpen} onOpenChange={setIsStockOutModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-base font-bold text-slate-900">
+            <DialogTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <ArrowDownRight className="w-4 h-4 text-rose-600" />
               Record Stock Out / Consumption
             </DialogTitle>
             <DialogDescription className="text-xs text-slate-500">
-              Deduct inventory units for in-house salon services, staff use, damage, or expiration.
+              Deduct inventory units for in-house salon services, internal use, damage, or expiration using FIFO/FEFO cost layers.
             </DialogDescription>
           </DialogHeader>
 
@@ -2675,35 +2780,153 @@ export const InventoryPage: React.FC = () => {
               </Select>
             </div>
 
-            <div>
-              <label className="text-xs font-semibold text-slate-700 block mb-1">Reason Type</label>
-              <Select
-                value={stockOutReasonType}
-                onValueChange={(val) => setStockOutReasonType(val as any)}
-              >
-                <SelectTrigger className="text-xs h-8">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="SALON_CONSUMPTION" className="text-xs">Salon In-House Consumption</SelectItem>
-                  <SelectItem value="DAMAGE" className="text-xs">Damaged / Broken in Salon</SelectItem>
-                  <SelectItem value="EXPIRED" className="text-xs">Expired Stock Write-Off</SelectItem>
-                  <SelectItem value="INTERNAL_USE" className="text-xs">Internal Cleaning / Testing</SelectItem>
-                  <SelectItem value="OTHER" className="text-xs">Other Reason</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">Department / Use Type</label>
+                <Select
+                  value={stockOutDepartment}
+                  onValueChange={(val) => {
+                    setStockOutDepartment(val);
+                    if (val === 'Damage') setStockOutReasonType('DAMAGE');
+                    else if (val === 'Expired') setStockOutReasonType('EXPIRED');
+                    else if (val === 'Internal Use') setStockOutReasonType('INTERNAL_USE');
+                    else setStockOutReasonType('SALON_CONSUMPTION');
+                  }}
+                >
+                  <SelectTrigger className="text-xs h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Salon Service" className="text-xs">Salon Service</SelectItem>
+                    <SelectItem value="Internal Use" className="text-xs">Internal Use / Cleaning</SelectItem>
+                    <SelectItem value="Damage" className="text-xs">Damage / Broken</SelectItem>
+                    <SelectItem value="Expired" className="text-xs">Expired Write-Off</SelectItem>
+                    <SelectItem value="Staff Testing" className="text-xs">Staff Training / Testing</SelectItem>
+                    <SelectItem value="Other" className="text-xs">Other Department</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">Responsible Staff Member</label>
+                <Select
+                  value={stockOutStaffId}
+                  onValueChange={(val) => setStockOutStaffId(val)}
+                >
+                  <SelectTrigger className="text-xs h-8">
+                    <SelectValue placeholder="Select staff member" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="house" className="text-xs">House / General Salon</SelectItem>
+                    {staffList.map((st) => (
+                      <SelectItem key={st.id} value={st.id} className="text-xs">
+                        {st.name} ({st.designation || st.role || 'Staff'})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
-            <div>
-              <label className="text-xs font-semibold text-slate-700 block mb-1">Quantity to Deduct *</label>
-              <Input
-                type="number"
-                min="1"
-                value={stockOutQuantity}
-                onChange={(e) => setStockOutQuantity(Number(e.target.value))}
-                className="text-xs h-8 font-mono font-bold"
-              />
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">Reason Code</label>
+                <Select
+                  value={stockOutReasonType}
+                  onValueChange={(val) => setStockOutReasonType(val as any)}
+                >
+                  <SelectTrigger className="text-xs h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="SALON_CONSUMPTION" className="text-xs">Salon Consumption</SelectItem>
+                    <SelectItem value="INTERNAL_USE" className="text-xs">Internal Use</SelectItem>
+                    <SelectItem value="DAMAGE" className="text-xs">Damage / Wastage</SelectItem>
+                    <SelectItem value="EXPIRED" className="text-xs">Expired Stock</SelectItem>
+                    <SelectItem value="OTHER" className="text-xs">Other Reason</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">Quantity to Deduct *</label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={stockOutQuantity}
+                  onChange={(e) => setStockOutQuantity(Math.max(1, Number(e.target.value)))}
+                  className="text-xs h-8 font-mono font-bold"
+                />
+              </div>
             </div>
+
+            {/* LIVE FIFO / FEFO COST PREVIEW & BREAKDOWN CARD */}
+            {isPreviewLoading ? (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-center gap-2 text-xs text-slate-500">
+                <span className="w-3.5 h-3.5 rounded-full border-2 border-slate-400 border-t-transparent animate-spin inline-block" />
+                <span>Calculating FIFO/FEFO cost layers...</span>
+              </div>
+            ) : stockOutPreview ? (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-[#9D2558]" />
+                    Cost Layer Allocation (FIFO / FEFO)
+                  </span>
+                  <Badge
+                    variant="neutral"
+                    className={`text-[10px] font-bold ${
+                      stockOutPreview.isFulfillable
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-rose-50 text-rose-700 border-rose-200'
+                    }`}
+                  >
+                    {stockOutPreview.isFulfillable ? 'Stock Available' : 'Insufficient Stock'}
+                  </Badge>
+                </div>
+
+                {!stockOutPreview.isFulfillable ? (
+                  <div className="p-2 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 text-[11px] font-semibold">
+                    Requested quantity ({stockOutQuantity}) exceeds available valid sellable stock ({stockOutPreview.availableStock} units).
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 pt-1">
+                    <div className="text-[11px] text-slate-600 flex items-center justify-between">
+                      <span>Available Valid Stock:</span>
+                      <strong className="font-mono text-slate-900">{stockOutPreview.availableStock} Units</strong>
+                    </div>
+                    <div className="text-[11px] text-slate-600 flex items-center justify-between">
+                      <span>Total Cost Impact (FIFO):</span>
+                      <strong className="font-mono text-slate-900 text-xs">{formatCurrency(stockOutPreview.totalCost)}</strong>
+                    </div>
+
+                    {stockOutPreview.costBreakdown && stockOutPreview.costBreakdown.length > 0 && (
+                      <div className="mt-2 border-t border-slate-200/80 pt-1.5 space-y-1">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                          Batches to Deduct ({stockOutPreview.costBreakdown.length})
+                        </span>
+                        {stockOutPreview.costBreakdown.map((layer, idx) => (
+                          <div key={idx} className="flex items-center justify-between p-1.5 bg-white rounded-lg border border-slate-200 text-[11px]">
+                            <div>
+                              <span className="font-bold text-slate-800 font-mono">{layer.batchNumber}</span>
+                              {layer.expiryDate && (
+                                <span className="text-[10px] text-slate-400 ml-1.5">
+                                  (Exp: {new Date(layer.expiryDate).toLocaleDateString()})
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-right font-mono">
+                              <span className="text-slate-600">{layer.quantity} × {formatCurrency(layer.unitCostSnapshot)} = </span>
+                              <strong className="text-slate-900">{formatCurrency(layer.costImpact)}</strong>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : null}
 
             <div>
               <label className="text-xs font-semibold text-slate-700 block mb-1">Audit Notes / Treatment Details</label>
@@ -2717,11 +2940,104 @@ export const InventoryPage: React.FC = () => {
           </div>
 
           <DialogFooter className="pt-2 border-t border-slate-100">
-            <Button variant="outline" size="sm" onClick={() => setIsStockOutModalOpen(false)} className="text-xs">
+            <Button variant="outline" size="sm" onClick={() => setIsStockOutModalOpen(false)} className="text-xs cursor-pointer">
               Cancel
             </Button>
-            <Button size="sm" onClick={handleExecuteStockOut} className="text-xs bg-[#9D2558] hover:bg-[#1B3FC5] text-white">
-              Post Stock-Out
+            <Button
+              size="sm"
+              disabled={isStockOutSubmitting || isPreviewLoading || (stockOutPreview ? !stockOutPreview.isFulfillable : false) || stockOutQuantity <= 0}
+              onClick={handleExecuteStockOut}
+              className="text-xs bg-[#9D2558] hover:bg-[#831e48] text-white cursor-pointer"
+            >
+              {isStockOutSubmitting ? (
+                <span className="w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin inline-block mr-1" />
+              ) : null}
+              Confirm Stock-Out
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------------------------------------------------- */}
+      {/* MODAL: REVERSE STOCK MOVEMENT */}
+      {/* ---------------------------------------------------- */}
+      <Dialog open={isReverseModalOpen} onOpenChange={setIsReverseModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <RotateCcw className="w-4 h-4 text-rose-600" />
+              Reverse Stock Movement
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500">
+              Restore stock quantity to its original batch with an audited compensating POSITIVE_ADJUSTMENT transaction.
+            </DialogDescription>
+          </DialogHeader>
+
+          {movementToReverse && (
+            <div className="space-y-3 py-2 text-xs">
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Movement #:</span>
+                  <span className="font-mono font-bold text-slate-800">{movementToReverse.movementNumber}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Item:</span>
+                  <span className="font-bold text-slate-900">{movementToReverse.itemName}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Quantity to Restore:</span>
+                  <span className="font-mono font-bold text-emerald-700">+{movementToReverse.quantity} Units</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Unit Cost Snapshot:</span>
+                  <span className="font-mono text-slate-700">{formatCurrency(movementToReverse.unitCostSnapshot || 0)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Cost Impact to Reverse:</span>
+                  <span className="font-mono font-bold text-slate-900">{formatCurrency(movementToReverse.totalCostImpact || 0)}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-700 block mb-1">
+                  Reason for Reversal * <span className="text-[10px] text-slate-400 font-normal">(Min 3 characters)</span>
+                </label>
+                <Input
+                  placeholder="e.g. Unused leftover product returned to shelf, or logged in error"
+                  value={reversalReason}
+                  onChange={(e) => setReversalReason(e.target.value)}
+                  className="text-xs h-8"
+                  autoFocus
+                />
+              </div>
+
+              <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-[11px] leading-snug">
+                Note: This creates an immutable compensating <strong>POSITIVE_ADJUSTMENT</strong> movement and restores the batch remaining quantity. Original movement logs are preserved.
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="pt-2 border-t border-slate-100">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsReverseModalOpen(false)}
+              className="text-xs cursor-pointer"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={isReversing || !reversalReason.trim() || reversalReason.trim().length < 3}
+              onClick={handleExecuteReverseMovement}
+              className="text-xs bg-rose-600 hover:bg-rose-700 text-white cursor-pointer"
+            >
+              {isReversing ? (
+                <span className="w-3.5 h-3.5 rounded-full border-2 border-white/40 border-t-white animate-spin inline-block mr-1" />
+              ) : (
+                <RotateCcw className="w-3.5 h-3.5 mr-1" />
+              )}
+              Confirm Reversal & Restore Stock
             </Button>
           </DialogFooter>
         </DialogContent>

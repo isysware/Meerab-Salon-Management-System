@@ -107,6 +107,7 @@ export const createPurchaseSchema = z.object({
     quantity:         positive('Quantity'),
     unitPurchaseCost: nonNeg('Unit purchase cost').optional(),
     unitCost:         nonNeg('Unit purchase cost').optional(),
+    sellingPrice:     nonNeg('Selling price').optional(),
     lineDiscount:     nonNeg('Line discount').optional(),
     batchNumber:      z.string().trim().optional(),
     expiryDate:       optYmd,
@@ -139,13 +140,28 @@ export const movementsQuery = z.object({
 });
 
 export const stockOutSchema = z.object({
+  branchId:             z.string().optional(),
+  itemId:               z.string().min(1),
+  batchId:              z.string().optional(),
+  quantity:             positive('Stock out quantity'),
+  reasonType:           z.string().optional(),
+  department:           z.string().optional(),
+  responsibleStaffId:   z.string().optional(),
+  responsibleStaffName: z.string().optional(),
+  reason:               z.string().trim().min(1, 'A stock-out reason is required.'),
+  notes:                z.string().trim().optional(),
+});
+
+export const consumptionPreviewQuery = z.object({
   branchId:   z.string().optional(),
-  itemId:     z.string().min(1),
+  itemId:     z.string().min(1, 'Item ID is required.'),
+  quantity:   positive('Quantity'),
   batchId:    z.string().optional(),
-  quantity:   positive('Stock out quantity'),
   reasonType: z.string().optional(),
-  reason:     z.string().trim().min(1, 'A stock-out reason is required.'),
-  notes:      z.string().trim().optional(),
+});
+
+export const reverseStockMovementSchema = z.object({
+  reason: z.string().trim().min(3, 'Reversal reason must be at least 3 characters.'),
 });
 
 export const stockSettlementSchema = z.object({
