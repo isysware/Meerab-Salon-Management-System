@@ -566,10 +566,20 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     const tipAmount = posPayments.reduce((sum, p) => sum.plus(tipsByPayment.get(p.id) || 0), toDec(0));
     const grossReceipt = posBillCollected.plus(tipAmount);
 
+    const totalBill = round2(net.plus(inv.tax || 0));
+    const balanceAfterInitial = round2(max0(totalBill.minus(posBillCollected)));
+    const firstPosPayment = posPayments[0];
+
     rawRows.push({
       id: `inv-${inv.id}`,
       invoiceId: inv.id,
-      invoiceBillTotal: n(net.plus(inv.tax || 0)),
+      recordType: 'ORIGINAL_INVOICE',
+      recordTypeLabel: 'Original Invoice',
+      paymentSequence: posBillCollected.gt(0) ? 1 : 0,
+      receiptNumber: firstPosPayment?.receiptNumber || null,
+      paymentAccountName: firstPosPayment?.paymentAccountName || null,
+      balanceAfterPayment: n(balanceAfterInitial),
+      invoiceBillTotal: n(totalBill),
       date: ymd(inv.date),
       type: 'INCOME',
       category: 'Sales & Services',
@@ -581,9 +591,10 @@ export const incomeExpenseReport = async (actor, query = {}) => {
       branchName: branchMap.get(inv.branchId) || 'Branch',
       userOrPayee: inv.processedByName || 'Staff',
       description: `Invoice ${inv.invoiceNumber} - ${inv.clientName || 'Walk-in'} (Gross: ${n(toDec(inv.subtotal))}, Disc: ${n(toDec(inv.discount))})`,
-      serviceAmount: n(net),
+      serviceAmount: n(collectedNet),
+      serviceCollection: n(collectedNet),
       tax: n(toDec(inv.tax || 0)),
-      totalBill: n(net.plus(inv.tax || 0)),
+      totalBill: n(totalBill),
       tipAmount: n(tipAmount),
       collectedService: n(collectedNet),
       collectedTax: n(collectedTax),
@@ -604,19 +615,33 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   // Dues Collections -> Incremental Collection-Based Income (Excl. Tax)
   for (const dp of (duesPayments || [])) {
     if (!dp.invoice) continue;
-    const earlierPayments = (dp.invoice.payments || []).filter((p) => p.createdAt < dp.createdAt && p.id !== dp.id);
+    const invBill = round2(toDec(dp.invoice.netSales).plus(dp.invoice.tax || 0));
+    const allInvPayments = (dp.invoice.payments || []).filter(p => !p.reversedAt).sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    const posPayments = allInvPayments.filter(p => p.kind === 'POS');
+    const hasInitialPayment = posPayments.length > 0 || toDec(dp.invoice.advanceAdjusted || 0).gt(0);
+    const earlierPayments = allInvPayments.filter((p) => new Date(p.createdAt) < new Date(dp.createdAt) && p.id !== dp.id);
+    const earlierDues = earlierPayments.filter(p => p.kind === 'DUES_COLLECTION');
+    const sequenceNum = hasInitialPayment ? 2 + earlierDues.length : 1 + earlierDues.length;
     const prevPaid = earlierPayments.reduce((s, p) => s.plus(toDec(p.billAmountAllocated)), toDec(dp.invoice.advanceAdjusted || 0));
-    const allocation = allocatePaymentToInvoice({ invoice: dp.invoice, paymentAmount: toDec(dp.billAmountAllocated), previousBillPaid: prevPaid });
-    const collectedNet = allocation.totalCollectedNet;
-    const collectedTax = allocation.totalCollectedTax;
+    const alloc = allocatePaymentToInvoice({ invoice: dp.invoice, paymentAmount: toDec(dp.billAmountAllocated), previousBillPaid: prevPaid });
+    const collectedNet = alloc.totalCollectedNet;
+    const collectedTax = alloc.totalCollectedTax;
     const billAmt = toDec(dp.billAmountAllocated);
     const tipAmount = tipsByPayment.get(dp.id) || toDec(0);
     const grossReceipt = billAmt.plus(tipAmount);
+    const totalPaidAfterThis = prevPaid.plus(billAmt);
+    const balanceAfterThis = round2(max0(invBill.minus(totalPaidAfterThis)));
 
     rawRows.push({
       id: `due-${dp.id}`,
       invoiceId: dp.invoice.id,
-      invoiceBillTotal: n(toDec(dp.invoice.netSales).plus(dp.invoice.tax || 0)),
+      recordType: 'SUBSEQUENT_PAYMENT',
+      recordTypeLabel: `Payment Receipt #${sequenceNum}`,
+      paymentSequence: sequenceNum,
+      receiptNumber: dp.receiptNumber || null,
+      paymentAccountName: dp.paymentAccountName || null,
+      balanceAfterPayment: n(balanceAfterThis),
+      invoiceBillTotal: n(invBill),
       date: ymd(dp.date),
       type: 'INCOME',
       category: 'Sales & Services',
@@ -627,24 +652,25 @@ export const incomeExpenseReport = async (actor, query = {}) => {
       branchId: dp.branchId,
       branchName: branchMap.get(dp.branchId) || 'Branch',
       userOrPayee: dp.processedByName || 'Staff',
-      description: `Dues Collection for Invoice ${dp.invoice.invoiceNumber} - ${dp.invoice.clientName || 'Customer'} (Net: ${n(collectedNet)}, Tax: ${n(collectedTax)})`,
+      description: `Payment Receipt #${sequenceNum} for Invoice ${dp.invoice.invoiceNumber} - ${dp.invoice.clientName || 'Customer'} (Net: ${n(collectedNet)}, Tax: ${n(collectedTax)})`,
       serviceAmount: n(collectedNet),
+      serviceCollection: n(collectedNet),
       tax: n(collectedTax),
-      totalBill: n(billAmt),
+      totalBill: 0,
       tipAmount: n(tipAmount),
       collectedService: n(collectedNet),
       collectedTax: n(collectedTax),
       totalReceived: n(grossReceipt),
-      remainingDues: n(toDec(dp.remainingBalance || 0)),
+      remainingDues: n(balanceAfterThis),
       income: n(collectedNet),
       recognizedIncome: 0,
       expense: 0,
       paid: n(grossReceipt),
       collectionAmount: n(grossReceipt),
       discount: 0,
-      remaining: n(toDec(dp.remainingBalance || 0)),
+      remaining: n(balanceAfterThis),
       paymentMethod: dp.method || 'CASH',
-      status: toDec(dp.remainingBalance || 0).isZero() ? 'PAID' : 'PARTIAL',
+      status: balanceAfterThis.isZero() ? 'PAID' : 'PARTIAL',
     });
   }
 
@@ -1192,6 +1218,14 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     .map(r => [r.invoiceId || r.invoiceNumber || r.reference, toDec(r.invoiceBillTotal ?? r.totalBill ?? 0)]));
   const customerInvoiceTotal = [...uniqueInvoiceBills.values()].reduce((sum, amount) => sum.plus(amount), toDec(0));
 
+  const invoiceContext = await loadInvoicePresentation({ ...branchFilter,
+    ...(actor.role === 'ACCOUNTANT' ? { processedByUserId: actor.id } : {}) },
+    [...new Set(filteredRows.filter(r => r.type === 'INCOME').map(r => r.invoiceId).filter(Boolean))], ctx.toStr);
+  const displayRows = groupLedgerInvoices(filteredRows, invoiceContext);
+  const totalOutstandingDues = displayRows
+    .filter(r => r.remainingDues !== null && r.remainingDues !== undefined)
+    .reduce((sum, r) => sum.plus(toDec(r.remainingDues)), toDec(0));
+
   const kpis = {
     ...(['ADMIN', 'SUPER_ADMIN'].includes(actor.role)
       ? { staffLoanReceivable: await currentStaffLoanReceivable(branchFilter) } : {}),
@@ -1202,7 +1236,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     totalRecognizedIncome: n(totalRecognizedIncome),
     totalCollectedTax: n(totalCollectedTax),
     totalCollections: n(totalCollections),
-    totalOutstandingDues: n(totalRemaining),
+    totalOutstandingDues: n(totalOutstandingDues),
     cogs: n(totalCogs),
     retailCogs: n(retailCogs),
     returnedCogs: n(returnedCogs),
@@ -1242,18 +1276,14 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     paid: n(totalPaid),
     collections: n(totalCollections),
     discount: n(totalDiscount),
-    remaining: n(totalRemaining),
-    totalOutstandingDues: n(totalRemaining),
+    remaining: n(totalOutstandingDues),
+    totalOutstandingDues: n(totalOutstandingDues),
     net: n(netOperatingPosition),
     revenueReversals: n(totalRevenueReversals),
     refundsPaid: n(totalRefundsPaid),
   };
 
-  const invoiceContext = await loadInvoicePresentation({ ...branchFilter,
-    ...(actor.role === 'ACCOUNTANT' ? { processedByUserId: actor.id } : {}) },
-    [...new Set(filteredRows.filter(r => r.type === 'INCOME').map(r => r.invoiceId).filter(Boolean))], ctx.toStr);
-  const displayRows = groupLedgerInvoices(filteredRows, invoiceContext);
-  return formatReportResponse({ ...ctx.meta, displayBasis: 'One invoice per display row. Amounts are selected-period events; original dates and bills are reference information. Outstanding and refund status are as of period end.' }, {
+  return formatReportResponse({ ...ctx.meta, displayBasis: 'Chronological cash collections and paid operating expenses. Shows actual service collection on each receipt and updated remaining dues.' }, {
     kpis,
     rows: filteredRows,
     displayRows,

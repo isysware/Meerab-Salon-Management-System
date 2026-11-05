@@ -21,6 +21,14 @@ export const isSubsequentPayment = (row: IncomeExpenseReportRow) =>
 export const isRefundRecord = (row: IncomeExpenseReportRow) =>
   row.recordType === 'REFUND_REVERSAL' || row.source === 'Sales Refund';
 
+export function incomeExpenseServiceCollection(row: IncomeExpenseReportRow): number {
+  if (row.type !== 'INCOME') return 0;
+  if (row.recordType === 'REFUND_REVERSAL' || row.source === 'Sales Refund') {
+    return -Math.abs(row.serviceCollection ?? row.collectedService ?? row.serviceAmount ?? 0);
+  }
+  return row.serviceCollection ?? row.collectedService ?? (isSubsequentPayment(row) ? (row.paid ?? 0) : (row.serviceAmount ?? 0));
+}
+
 export function incomeExpenseEntryType(row: IncomeExpenseReportRow): string {
   if (row.recordTypeLabel) return row.recordTypeLabel;
   if (row.recordType === 'ORIGINAL_INVOICE') return 'Original Invoice';

@@ -46,6 +46,8 @@ export function groupLedgerInvoices(rows, context) {
     const snapshot = context?.get(key);
 
     if (row.source === 'POS Invoice') {
+      const collectedServiceAmt = row.collectedService ?? (row.totalReceived > 0 ? (row.income ?? row.paid ?? 0) : 0);
+      const collectedTaxAmt = row.collectedTax ?? 0;
       result.push({
         ...row,
         id: row.id || `inv-${key}`,
@@ -58,17 +60,20 @@ export function groupLedgerInvoices(rows, context) {
         originalInvoiceDate: snapshot?.originalDate || row.date,
         customerName: snapshot?.invoice.clientName || row.customerName,
         branchId: snapshot?.invoice.branchId || row.branchId,
-        serviceAmount: snapshot?.originalNet ?? row.serviceAmount,
-        tax: snapshot?.originalTax ?? row.tax,
+        serviceCollection: collectedServiceAmt,
+        serviceAmount: collectedServiceAmt,
+        tax: collectedTaxAmt,
         totalBill: snapshot?.originalBill ?? row.invoiceBillTotal ?? row.totalBill,
         invoiceBillTotal: snapshot?.originalBill ?? row.invoiceBillTotal ?? row.totalBill,
         balanceAfterPayment: row.balanceAfterPayment,
         currentOutstanding: snapshot?.outstanding ?? row.currentOutstanding ?? row.remainingDues ?? 0,
-        remainingDues: snapshot?.outstanding ?? row.remainingDues ?? 0,
+        remainingDues: row.balanceAfterPayment !== undefined ? row.balanceAfterPayment : (snapshot?.outstanding ?? row.remainingDues ?? 0),
         status: snapshot ? (snapshot.lifecycle === 'ACTIVE' ? snapshot.status : snapshot.lifecycle) : row.status,
         refundHistory: snapshot?.refundHistory || [],
       });
     } else if (row.source === 'POS Dues Collection') {
+      const collectedServiceAmt = row.collectedService ?? row.paid ?? row.totalReceived ?? 0;
+      const collectedTaxAmt = row.collectedTax ?? 0;
       result.push({
         ...row,
         id: row.id,
@@ -80,16 +85,19 @@ export function groupLedgerInvoices(rows, context) {
         originalInvoiceDate: snapshot?.originalDate || row.originalInvoiceDate,
         customerName: snapshot?.invoice.clientName || row.customerName,
         branchId: snapshot?.invoice.branchId || row.branchId,
-        serviceAmount: 0,
-        tax: 0,
+        serviceCollection: collectedServiceAmt,
+        serviceAmount: collectedServiceAmt,
+        tax: collectedTaxAmt,
         totalBill: 0,
         invoiceBillTotal: snapshot?.originalBill ?? row.invoiceBillTotal,
         balanceAfterPayment: row.balanceAfterPayment,
         currentOutstanding: snapshot?.outstanding ?? row.currentOutstanding ?? 0,
-        remainingDues: snapshot?.outstanding ?? row.remainingDues ?? 0,
+        remainingDues: row.balanceAfterPayment !== undefined ? row.balanceAfterPayment : (snapshot?.outstanding ?? row.remainingDues ?? 0),
         status: snapshot ? (snapshot.lifecycle === 'ACTIVE' ? snapshot.status : snapshot.lifecycle) : row.status,
       });
     } else if (row.source === 'Sales Refund') {
+      const refService = -Math.abs(row.collectedService ?? row.serviceAmount ?? 0);
+      const refTax = -Math.abs(row.collectedTax ?? row.tax ?? 0);
       result.push({
         ...row,
         id: row.id,
@@ -100,12 +108,51 @@ export function groupLedgerInvoices(rows, context) {
         invoiceNumber: snapshot?.invoice.invoiceNumber || row.invoiceNumber,
         customerName: snapshot?.invoice.clientName || row.customerName || 'Client Refund',
         branchId: snapshot?.invoice.branchId || row.branchId,
+        serviceCollection: refService,
+        serviceAmount: refService,
+        tax: refTax,
+        totalBill: -Math.abs(row.totalBill ?? 0),
         currentOutstanding: snapshot?.outstanding ?? 0,
         remainingDues: snapshot?.outstanding ?? 0,
         status: snapshot?.lifecycle || 'REFUNDED',
       });
     }
   }
+
+  // Resolve Remaining Dues: show remaining balance ONLY on the latest visible applicable payment row per invoice group
+  const invoiceGroups = new Map();
+  for (const row of result) {
+    if (row.type === 'INCOME' && ['POS Invoice', 'POS Dues Collection'].includes(row.source)) {
+      const key = row.invoiceId || row.invoiceNumber || row.reference;
+      if (!invoiceGroups.has(key)) invoiceGroups.set(key, []);
+      invoiceGroups.get(key).push(row);
+    }
+  }
+
+  for (const [key, groupRows] of invoiceGroups.entries()) {
+    // Sort in chronological order (oldest to newest)
+    groupRows.sort((a, b) => {
+      const seqA = a.paymentSequence ?? (a.source === 'POS Invoice' ? 1 : 2);
+      const seqB = b.paymentSequence ?? (b.source === 'POS Invoice' ? 1 : 2);
+      if (seqA !== seqB) return seqA - seqB;
+      const dDiff = (a.date || '').localeCompare(b.date || '');
+      if (dDiff !== 0) return dDiff;
+      return (a.id || '').localeCompare(b.id || '');
+    });
+
+    // The latest visible row is the last one in chronological order
+    const latestRow = groupRows[groupRows.length - 1];
+    const snapshot = context?.get(key);
+    latestRow.remainingDues = typeof latestRow.balanceAfterPayment === 'number'
+      ? latestRow.balanceAfterPayment
+      : (snapshot?.outstanding ?? latestRow.remainingDues ?? 0);
+
+    // All earlier rows for this invoice group get null (rendered as '—')
+    for (let idx = 0; idx < groupRows.length - 1; idx++) {
+      groupRows[idx].remainingDues = null;
+    }
+  }
+
   return result.sort((a,b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt && a.createdAt ? new Date(b.createdAt) - new Date(a.createdAt) : 0) || a.id.localeCompare(b.id));
 }
 

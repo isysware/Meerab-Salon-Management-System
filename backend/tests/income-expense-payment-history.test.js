@@ -155,21 +155,21 @@ describe('Income & Expense Report · Payment History Rows Audit', () => {
       const invRow = displayRows.find((r) => r.recordType === 'ORIGINAL_INVOICE');
       expect(invRow).toBeDefined();
       expect(invRow.invoiceNumber).toBe('INV-0002');
-      expect(invRow.serviceAmount).toBe(1000);
+      expect(invRow.serviceCollection).toBe(500); // Service portion collected on this receipt
       expect(invRow.totalBill).toBe(1000);
       expect(invRow.totalReceived).toBe(500);
       expect(invRow.balanceAfterPayment).toBe(500);
-      expect(invRow.currentOutstanding).toBe(0);
+      expect(invRow.remainingDues).toBeNull(); // Superseded by later payments in this group
 
       // Verify Row 2 (Payment Receipt #2)
       const pay2 = displayRows.find((r) => r.recordTypeLabel === 'Payment Receipt #2');
       expect(pay2).toBeDefined();
       expect(pay2.invoiceNumber).toBe('INV-0002');
-      expect(pay2.serviceAmount).toBe(0); // Bill amount NOT duplicated
+      expect(pay2.serviceCollection).toBe(300); // Service portion collected on receipt #2
       expect(pay2.totalBill).toBe(0); // Bill amount NOT duplicated
       expect(pay2.totalReceived).toBe(300);
       expect(pay2.balanceAfterPayment).toBe(200);
-      expect(pay2.currentOutstanding).toBe(0);
+      expect(pay2.remainingDues).toBeNull(); // Superseded by receipt #3
       expect(pay2.receiptNumber).toBe('RCP-0002');
       expect(pay2.paymentAccountName).toBe('Meezan Bank - Main Account');
       expect(pay2.paymentMethod).toBe('ONLINE_ACCOUNT');
@@ -178,16 +178,16 @@ describe('Income & Expense Report · Payment History Rows Audit', () => {
       const pay3 = displayRows.find((r) => r.recordTypeLabel === 'Payment Receipt #3');
       expect(pay3).toBeDefined();
       expect(pay3.invoiceNumber).toBe('INV-0002');
-      expect(pay3.serviceAmount).toBe(0); // Bill amount NOT duplicated
+      expect(pay3.serviceCollection).toBe(200); // Service portion collected on receipt #3
       expect(pay3.totalBill).toBe(0); // Bill amount NOT duplicated
       expect(pay3.totalReceived).toBe(200);
       expect(pay3.balanceAfterPayment).toBe(0);
-      expect(pay3.currentOutstanding).toBe(0);
+      expect(pay3.remainingDues).toBe(0); // Latest visible receipt row shows updated remaining balance: 0!
       expect(pay3.receiptNumber).toBe('RCP-0003');
 
-      // Verify revenue non-duplication across all rows:
-      const totalServiceAmount = displayRows.reduce((sum, r) => sum + (r.serviceAmount || 0), 0);
-      expect(totalServiceAmount).toBe(1000); // exactly 1,000, counted ONLY once!
+      // Verify service collection sum across all rows = exactly original bill:
+      const totalServiceCollections = displayRows.reduce((sum, r) => sum + (r.serviceCollection || 0), 0);
+      expect(totalServiceCollections).toBe(1000); // 500 + 300 + 200 = exactly 1,000!
 
       const totalPaymentsReceived = displayRows.reduce((sum, r) => sum + (r.totalReceived || 0), 0);
       expect(totalPaymentsReceived).toBe(1000); // 500 + 300 + 200 = 1,000
@@ -328,6 +328,169 @@ describe('Income & Expense Report · Payment History Rows Audit', () => {
       expect(displayRows[0].recordTypeLabel).toBe('Staff Loan');
       expect(displayRows[1].recordType).toBe('OPERATING_EXPENSE');
       expect(displayRows[1].recordTypeLabel).toBe('Operating Expense');
+    });
+
+    it('Scenario: Unpaid Invoice displays outstanding balance on Original Invoice row', () => {
+      const mockUnpaid = {
+        id: 'inv-unpaid-1',
+        invoiceNumber: 'INV-9999',
+        date: new Date('2026-11-01T00:00:00Z'),
+        clientName: 'Fatima',
+        branchId: 'b-main',
+        netSales: D(1500),
+        tax: D(150),
+        amountDue: D(1650),
+        refunds: [],
+        lines: [{ id: 'l1', netSales: D(1500), tax: D(150) }],
+        payments: [],
+      };
+
+      const context = new Map([
+        ['inv-unpaid-1', { invoice: mockUnpaid, ...invoicePresentation(mockUnpaid, '2026-11-30') }],
+      ]);
+
+      const inputRows = [
+        {
+          id: 'inv-inv-unpaid-1',
+          invoiceId: 'inv-unpaid-1',
+          invoiceNumber: 'INV-9999',
+          reference: 'INV-9999',
+          customerName: 'Fatima',
+          branchId: 'b-main',
+          date: '2026-11-01',
+          type: 'INCOME',
+          category: 'Sales & Services',
+          source: 'POS Invoice',
+          recordType: 'ORIGINAL_INVOICE',
+          recordTypeLabel: 'Original Invoice',
+          paymentSequence: 0,
+          serviceCollection: 0,
+          serviceAmount: 0,
+          tax: 150,
+          totalBill: 1650,
+          invoiceBillTotal: 1650,
+          totalReceived: 0,
+          balanceAfterPayment: 1650,
+          currentOutstanding: 1650,
+          remainingDues: 1650,
+          status: 'UNPAID',
+        },
+      ];
+
+      const displayRows = groupLedgerInvoices(inputRows, context);
+      expect(displayRows.length).toBe(1);
+      expect(displayRows[0].recordType).toBe('ORIGINAL_INVOICE');
+      expect(displayRows[0].serviceCollection).toBe(0); // 0 collection
+      expect(displayRows[0].totalBill).toBe(1650);
+      expect(displayRows[0].totalReceived).toBe(0);
+      expect(displayRows[0].remainingDues).toBe(1650); // Unpaid invoice shows full outstanding balance
+      expect(displayRows[0].status).toBe('UNPAID');
+    });
+
+    it('Scenario: Tax-inclusive partial payments split service and tax correctly', () => {
+      // Bill: 1,000 + 10% tax = 1,100
+      // Payment 1: 550 (Net: 500, Tax: 50, Remaining: 550)
+      // Payment 2: 550 (Net: 500, Tax: 50, Remaining: 0)
+      const mockTaxInv = {
+        id: 'inv-tax-1',
+        invoiceNumber: 'INV-TAX-01',
+        date: new Date('2026-11-01T00:00:00Z'),
+        clientName: 'Zainab',
+        branchId: 'b-main',
+        netSales: D(1000),
+        tax: D(100),
+        amountDue: D(0),
+        refunds: [],
+        lines: [{ id: 'l1', netSales: D(1000), tax: D(100) }],
+        payments: [
+          { id: 'p1', date: new Date('2026-11-01T00:00:00Z'), createdAt: new Date('2026-11-01T10:00:00Z'), billAmountAllocated: D(550) },
+          { id: 'p2', date: new Date('2026-11-02T00:00:00Z'), createdAt: new Date('2026-11-02T10:00:00Z'), billAmountAllocated: D(550) },
+        ],
+      };
+
+      const context = new Map([
+        ['inv-tax-1', { invoice: mockTaxInv, ...invoicePresentation(mockTaxInv, '2026-11-30') }],
+      ]);
+
+      const inputRows = [
+        {
+          id: 'inv-tax-1-orig',
+          invoiceId: 'inv-tax-1',
+          invoiceNumber: 'INV-TAX-01',
+          reference: 'INV-TAX-01',
+          customerName: 'Zainab',
+          branchId: 'b-main',
+          date: '2026-11-01',
+          type: 'INCOME',
+          category: 'Sales & Services',
+          source: 'POS Invoice',
+          recordType: 'ORIGINAL_INVOICE',
+          recordTypeLabel: 'Original Invoice',
+          paymentSequence: 1,
+          collectedService: 500,
+          serviceCollection: 500,
+          collectedTax: 50,
+          tax: 50,
+          totalBill: 1100,
+          invoiceBillTotal: 1100,
+          totalReceived: 550,
+          balanceAfterPayment: 550,
+          status: 'PARTIAL',
+        },
+        {
+          id: 'inv-tax-1-due',
+          invoiceId: 'inv-tax-1',
+          invoiceNumber: 'INV-TAX-01',
+          reference: 'INV-TAX-01',
+          customerName: 'Zainab',
+          branchId: 'b-main',
+          date: '2026-11-02',
+          type: 'INCOME',
+          category: 'Sales & Services',
+          source: 'POS Dues Collection',
+          recordType: 'SUBSEQUENT_PAYMENT',
+          recordTypeLabel: 'Payment Receipt #2',
+          paymentSequence: 2,
+          collectedService: 500,
+          serviceCollection: 500,
+          collectedTax: 50,
+          tax: 50,
+          totalBill: 0,
+          invoiceBillTotal: 1100,
+          totalReceived: 550,
+          balanceAfterPayment: 0,
+          status: 'PAID',
+        },
+      ];
+
+      const displayRows = groupLedgerInvoices(inputRows, context);
+      expect(displayRows.length).toBe(2);
+
+      const rOrig = displayRows.find(r => r.recordType === 'ORIGINAL_INVOICE');
+      expect(rOrig.serviceCollection).toBe(500);
+      expect(rOrig.tax).toBe(50);
+      expect(rOrig.totalBill).toBe(1100);
+      expect(rOrig.totalReceived).toBe(550);
+      expect(rOrig.remainingDues).toBeNull(); // superseded
+
+      const rDue = displayRows.find(r => r.recordType === 'SUBSEQUENT_PAYMENT');
+      expect(rDue.serviceCollection).toBe(500);
+      expect(rDue.tax).toBe(50);
+      expect(rDue.totalBill).toBe(0);
+      expect(rDue.totalReceived).toBe(550);
+      expect(rDue.remainingDues).toBe(0); // settled
+
+      // Sum of service collections = 1,000 (never includes tax!)
+      const totalService = displayRows.reduce((s, r) => s + r.serviceCollection, 0);
+      expect(totalService).toBe(1000);
+
+      // Sum of tax = 100
+      const totalTax = displayRows.reduce((s, r) => s + r.tax, 0);
+      expect(totalTax).toBe(100);
+
+      // Total payments = 1,100
+      const totalPaid = displayRows.reduce((s, r) => s + r.totalReceived, 0);
+      expect(totalPaid).toBe(1100);
     });
   });
 
@@ -549,20 +712,21 @@ describe('Income & Expense Report · Payment History Rows Audit', () => {
       const rOriginal = fullReport.displayRows.find((r) => r.recordType === 'ORIGINAL_INVOICE');
       expect(rOriginal).toBeDefined();
       expect(rOriginal.invoiceNumber).toBe('INV-0002');
-      expect(rOriginal.serviceAmount).toBe(1000); // counted only on original invoice
+      expect(rOriginal.serviceCollection).toBe(500); // Service portion collected on initial payment
       expect(rOriginal.totalBill).toBe(1000);
       expect(rOriginal.totalReceived).toBe(500);
       expect(rOriginal.balanceAfterPayment).toBe(500);
-      expect(rOriginal.currentOutstanding).toBe(0); // settled today
+      expect(rOriginal.remainingDues).toBeNull(); // Superseded by subsequent payments #2 & #3
       expect(rOriginal.receiptNumber).toBe('RCP-0001');
 
       const rPay2 = fullReport.displayRows.find((r) => r.recordTypeLabel === 'Payment Receipt #2');
       expect(rPay2).toBeDefined();
       expect(rPay2.invoiceNumber).toBe('INV-0002');
-      expect(rPay2.serviceAmount).toBe(0); // Bill NOT duplicated
+      expect(rPay2.serviceCollection).toBe(300); // Service portion collected on receipt #2
       expect(rPay2.totalBill).toBe(0); // Bill NOT duplicated
       expect(rPay2.totalReceived).toBe(300);
       expect(rPay2.balanceAfterPayment).toBe(200);
+      expect(rPay2.remainingDues).toBeNull(); // Superseded by receipt #3
       expect(rPay2.receiptNumber).toBe('RCP-0002');
       expect(rPay2.paymentMethod).toBe('ONLINE_ACCOUNT');
       expect(rPay2.paymentAccountName).toBe('Meezan Bank - Main Account');
@@ -570,10 +734,11 @@ describe('Income & Expense Report · Payment History Rows Audit', () => {
       const rPay3 = fullReport.displayRows.find((r) => r.recordTypeLabel === 'Payment Receipt #3');
       expect(rPay3).toBeDefined();
       expect(rPay3.invoiceNumber).toBe('INV-0002');
-      expect(rPay3.serviceAmount).toBe(0); // Bill NOT duplicated
+      expect(rPay3.serviceCollection).toBe(200); // Service portion collected on receipt #3
       expect(rPay3.totalBill).toBe(0); // Bill NOT duplicated
       expect(rPay3.totalReceived).toBe(200);
       expect(rPay3.balanceAfterPayment).toBe(0);
+      expect(rPay3.remainingDues).toBe(0); // Final payment settling invoice shows remaining dues: 0!
       expect(rPay3.receiptNumber).toBe('RCP-0003');
       expect(rPay3.paymentMethod).toBe('CASH');
 
@@ -582,6 +747,8 @@ describe('Income & Expense Report · Payment History Rows Audit', () => {
       expect(fullReport.totals.customerInvoiceTotal).toBe(1000);
       // Collections must be exactly 1000 (500 + 300 + 200)
       expect(fullReport.totals.customerCollections).toBe(1000);
+      // Service collection total = 1000
+      expect(fullReport.totals.income).toBe(1000);
       // Outstanding balance is 0
       expect(fullReport.totals.totalOutstandingDues).toBe(0);
 
@@ -600,10 +767,11 @@ describe('Income & Expense Report · Payment History Rows Audit', () => {
       expect(day2Row.recordType).toBe('SUBSEQUENT_PAYMENT');
       expect(day2Row.recordTypeLabel).toBe('Payment Receipt #2');
       expect(day2Row.invoiceNumber).toBe('INV-0002');
-      expect(day2Row.serviceAmount).toBe(0); // NO bill revenue recognized in this period
+      expect(day2Row.serviceCollection).toBe(300); // Actual service portion collected on this day
       expect(day2Row.totalBill).toBe(0);
       expect(day2Row.totalReceived).toBe(300);
       expect(day2Row.balanceAfterPayment).toBe(200);
+      expect(day2Row.remainingDues).toBe(200); // Only visible row in period for this invoice shows balance as of this receipt!
       expect(day2Row.paymentMethod).toBe('ONLINE_ACCOUNT');
       expect(day2Row.paymentAccountName).toBe('Meezan Bank - Main Account');
       expect(day2Report.totals.customerCollections).toBe(300);
