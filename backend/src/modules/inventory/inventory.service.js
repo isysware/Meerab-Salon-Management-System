@@ -13,7 +13,7 @@ import { auditLog } from '../../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../../lib/AppError.js';
 import { assertBranchAccess, resolveReadBranch, resolveWriteBranch } from '../../lib/scope.js';
 import { dateOnly, getBusinessDate, startOfDay, endOfDay } from '../../lib/dates.js';
-import { round2, toDec } from '../../lib/money.js';
+import { round2, toDec, max0 } from '../../lib/money.js';
 import { nextSequence } from '../../lib/sequence.js';
 import { consumeStock, postStockMovement, previewBatchPicks, reverseStockMovement, qty } from '../../lib/stock.js';
 import { getActiveDrawer, postCashMovement, postAccountMovement } from '../cash/cash.service.js';
@@ -884,7 +884,7 @@ export const cogsReport = async (actor, { branchId, startDate, endDate } = {}) =
 
   const [movements, lines, branches] = await Promise.all([
     prisma.stockMovement.findMany({
-      where: { ...(b ? { branchId: b } : {}), ...created, movementType: { in: ['POS_SALE_OUT', 'POS_RETURN_IN', 'SALES_RETURN_IN', 'SALON_CONSUMPTION_OUT'] } },
+      where: { ...(b ? { branchId: b } : {}), ...created, movementType: { in: ['POS_SALE_OUT', 'POS_RETURN_IN', 'SALES_RETURN_IN', 'SALON_CONSUMPTION_OUT', 'POSITIVE_ADJUSTMENT'] } },
       include: { item: true },
     }),
     prisma.invoiceLine.findMany({
@@ -908,9 +908,26 @@ export const cogsReport = async (actor, { branchId, startDate, endDate } = {}) =
     s.net = s.net.plus(l.netSales);
     stats.set(k, s);
   }
+
+  const reversalMoves = movements.filter((m) => m.movementType === 'POSITIVE_ADJUSTMENT' && m.sourceReferenceType === 'STOCK_MOVEMENT_REVERSAL' && m.sourceReferenceId);
+  const origMoves = reversalMoves.length > 0 ? await prisma.stockMovement.findMany({
+    where: { id: { in: reversalMoves.map((m) => m.sourceReferenceId).filter(Boolean) } },
+    select: { id: true, movementType: true },
+  }) : [];
+  const origTypeMap = new Map(origMoves.map((o) => [o.id, o.movementType]));
+
   let consumption = toDec(0);
   for (const m of movements) {
     if (m.movementType === 'SALON_CONSUMPTION_OUT') { consumption = consumption.plus(m.totalCost); continue; }
+    if (m.movementType === 'POSITIVE_ADJUSTMENT' && m.sourceReferenceType === 'STOCK_MOVEMENT_REVERSAL') {
+      const origType = origTypeMap.get(m.sourceReferenceId);
+      if (origType === 'SALON_CONSUMPTION_OUT') {
+        consumption = consumption.minus(m.totalCost);
+      }
+      continue;
+    }
+    if (m.movementType === 'POSITIVE_ADJUSTMENT') continue;
+
     const k = key(m.branchId, m.itemId);
     const s = stats.get(k) ?? { productId: m.itemId, productName: m.item.name, sku: m.item.sku, branchId: m.branchId, qtySold: toDec(0), qtyReturned: toDec(0), gross: toDec(0), discount: toDec(0), net: toDec(0), cogs: toDec(0) };
     if (m.movementType === 'POS_SALE_OUT') s.cogs = s.cogs.plus(m.totalCost);
@@ -918,6 +935,7 @@ export const cogsReport = async (actor, { branchId, startDate, endDate } = {}) =
     s.category = m.item.category;
     stats.set(k, s);
   }
+  consumption = max0(consumption);
 
   const records = [...stats.values()].map((s) => {
     const profit = round2(s.net.minus(s.cogs));

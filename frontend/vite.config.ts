@@ -14,13 +14,13 @@ export default defineConfig(() => {
     server: {
       port: 3002,
       host: '0.0.0.0',
+      allowedHosts: true as const,
       // Same-origin API in development: /api/* is forwarded to the Express backend, so the
       // httpOnly refresh cookie works without any CORS/cookie configuration.
       proxy: {
         '/api': { target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:5000', changeOrigin: true },
       },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},

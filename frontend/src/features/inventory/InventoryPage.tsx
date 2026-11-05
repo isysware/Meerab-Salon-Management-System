@@ -168,7 +168,7 @@ export const InventoryPage: React.FC = () => {
         salonService.getInventoryBatches(bId, undefined, user),
         salonService.getPaymentAccounts(bId),
         salonService.getCashDrawers(bId),
-        salonService.getStaffMembers(bId || 'ALL', user).catch(() => []),
+        salonService.getStaffMembers(bId || 'ALL').catch(() => []),
       ]);
 
       setInventoryItems(items);
@@ -1193,7 +1193,7 @@ export const InventoryPage: React.FC = () => {
                 <Button size="sm" variant="outline" onClick={handleOpenCreatePurchase} className="text-xs h-8 gap-1.5">
                   <Truck className="w-3.5 h-3.5" /> New Purchase
                 </Button>
-                <Button size="sm" variant="outline" onClick={handleOpenStockOutModal} className="text-xs h-8 gap-1.5">
+                <Button size="sm" variant="outline" onClick={() => handleOpenStockOutModal()} className="text-xs h-8 gap-1.5">
                   <ArrowUpRight className="w-3.5 h-3.5" /> Salon Consumption
                 </Button>
                 <Button size="sm" variant="outline" onClick={handleOpenSettlementModal} className="text-xs h-8 gap-1.5">
@@ -1715,7 +1715,7 @@ export const InventoryPage: React.FC = () => {
               </p>
             </div>
             {isAdmin && (
-              <Button size="sm" onClick={handleOpenStockOutModal} className="text-xs h-8 gap-1.5 bg-[#9D2558] hover:bg-[#1B3FC5] text-white">
+              <Button size="sm" onClick={() => handleOpenStockOutModal()} className="text-xs h-8 gap-1.5 bg-[#9D2558] hover:bg-[#1B3FC5] text-white">
                 <ArrowUpRight className="w-3.5 h-3.5" /> Record Stock-Out
               </Button>
             )}
@@ -1779,9 +1779,9 @@ export const InventoryPage: React.FC = () => {
                         </TableCell>
                         <TableCell className="text-xs text-slate-700">{m.actorName || 'System'}</TableCell>
                         <TableCell className="text-right">
-                          {m.direction === 'OUT' && (m.movementType === 'MANUAL_OUT' || m.movementType === 'SALON_CONSUMPTION' || m.movementType === 'INTERNAL_USE' || m.movementType === 'DAMAGE' || m.movementType === 'EXPIRED' || m.sourceReferenceType === 'MANUAL_OUT') && (
+                          {m.direction === 'OUT' && (m.movementType.endsWith('_OUT') || (m.sourceReferenceType as string) === 'MANUAL_OUT') && (
                             <Button
-                              size="xs"
+                              size="sm"
                               variant="outline"
                               onClick={() => handleOpenReverseModal(m)}
                               className="text-[10px] h-6 px-2 text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 cursor-pointer"
@@ -2822,7 +2822,7 @@ export const InventoryPage: React.FC = () => {
                     <SelectItem value="house" className="text-xs">House / General Salon</SelectItem>
                     {staffList.map((st) => (
                       <SelectItem key={st.id} value={st.id} className="text-xs">
-                        {st.name} ({st.designation || st.role || 'Staff'})
+                        {st.name} ({st.designation || (st as any).role || 'Staff'})
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -2537,11 +2537,10 @@ class MockSalonService implements SalonServiceContract {
               compError = 'Component service name is missing.';
               break;
             }
-            const newCode = `SVR-${(services.length + 1).toString().padStart(4, '0')}`;
+            const newCode = `SVR-${(store.services.length + 1).toString().padStart(4, '0')}`;
             srv = {
               id: `srv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
               branchId: effectiveBranchId,
-              categoryId: 'cat-general',
               category: 'General',
               code: newCode,
               name: rawServiceName,
@@ -2551,7 +2550,7 @@ class MockSalonService implements SalonServiceContract {
               taxTreatment: 'BRANCH_DEFAULT',
               isActive: true,
             };
-            services.push(srv);
+            store.services.push(srv);
             branchServices.push(srv);
           }
 
@@ -11745,7 +11744,7 @@ class MockSalonService implements SalonServiceContract {
 
       // Synchronize authorized selling-price update if explicitly specified on stock-in
       if (line.sellingPrice !== undefined && Number(line.sellingPrice) > 0) {
-        const targetItem = clonedStore.inventoryItems.find((it) => it.id === line.itemId);
+        const targetItem = (clonedStore.inventoryItems || []).find((it) => it.id === line.itemId);
         if (targetItem && targetItem.itemType !== 'SALON_CONSUMABLE') {
           targetItem.sellingPrice = roundCurrency(line.sellingPrice);
           targetItem.updatedAt = nowIso;
@@ -12454,6 +12453,7 @@ class MockSalonService implements SalonServiceContract {
       createdAt: nowIso,
     };
 
+    if (!clonedStore.stockMovements) clonedStore.stockMovements = [];
     clonedStore.stockMovements.unshift(compensating);
     mockStorage.saveStore(clonedStore);
     return { ...compensating };

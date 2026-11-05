@@ -277,7 +277,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   const utcRange = { gte: ctx.fromDate, lte: ctx.toDate };
   const branchFilter = ctx.branchId ? { branchId: ctx.branchId } : {};
 
-  const [branches, staffMembers, users, invoices, duesPayments, refunds, expenses, payrollRuns, commissionEvents, inventoryLosses, retailCogsAgg, consumableUsageAgg, returnedCogsAgg, supplierPayments] = await Promise.all([
+  const [branches, staffMembers, users, invoices, duesPayments, refunds, expenses, payrollRuns, commissionEvents, inventoryLosses, retailCogsAgg, consumableUsageAgg, returnedCogsAgg, supplierPayments, consumptionReversals] = await Promise.all([
     prisma.branch.findMany({ select: { id: true, name: true, city: true } }),
     prisma.staff.findMany({ select: { id: true, name: true, employeeCode: true, branchId: true } }),
     prisma.user.findMany({ select: { id: true, name: true, role: true, branchId: true } }),
@@ -520,6 +520,18 @@ export const incomeExpenseReport = async (actor, query = {}) => {
         supplier: { select: { id: true, name: true } },
       },
     }),
+    // 11. Reversals of internal consumption / salon usage
+    actor.role === 'ACCOUNTANT' || !prisma.stockMovement?.findMany
+      ? Promise.resolve([])
+      : prisma.stockMovement.findMany({
+          where: {
+            createdAt: utcRange,
+            movementType: 'POSITIVE_ADJUSTMENT',
+            sourceReferenceType: 'STOCK_MOVEMENT_REVERSAL',
+            ...branchFilter,
+          },
+          select: { id: true, totalCost: true, sourceReferenceId: true },
+        }),
   ]);
 
   const branchMap = new Map(branches.map((b) => [b.id, b.name]));
@@ -1127,7 +1139,25 @@ export const incomeExpenseReport = async (actor, query = {}) => {
 
   const returnedCogs = toDec(returnedCogsAgg?._sum?.totalCost || 0);
   const retailCogs = max0(toDec(retailCogsAgg?._sum?.cogsAmount || 0).minus(returnedCogs));
-  const consumableUsage = toDec(consumableUsageAgg?._sum?.totalCost || 0);
+
+  let consumptionReversalsCost = toDec(0);
+  if (consumptionReversals && consumptionReversals.length > 0) {
+    const origMovements = await prisma.stockMovement.findMany({
+      where: {
+        id: { in: consumptionReversals.map((m) => m.sourceReferenceId).filter(Boolean) },
+        movementType: { in: ['SALON_CONSUMPTION_OUT', 'INTERNAL_USE_OUT'] },
+      },
+      select: { id: true },
+    });
+    const reversedIds = new Set(origMovements.map((m) => m.id));
+    for (const rev of consumptionReversals) {
+      if (reversedIds.has(rev.sourceReferenceId)) {
+        consumptionReversalsCost = consumptionReversalsCost.plus(toDec(rev.totalCost));
+      }
+    }
+  }
+
+  const consumableUsage = max0(toDec(consumableUsageAgg?._sum?.totalCost || 0).minus(consumptionReversalsCost));
   const totalCogs = round2(retailCogs.plus(consumableUsage));
   const grossContribution = round2(totalIncome.minus(totalCogs));
   const netOperatingPosition = round2(grossContribution.minus(totalOperatingExpenses));
@@ -1366,12 +1396,16 @@ export const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, t
             'EXPIRED_OUT',
             'DAMAGED_OUT',
             'NEGATIVE_ADJUSTMENT',
+            'POSITIVE_ADJUSTMENT',
           ],
         },
       },
       select: {
+        id: true,
         movementType: true,
         totalCost: true,
+        sourceReferenceType: true,
+        sourceReferenceId: true,
       },
     }),
     prisma.expense.findMany({
@@ -1517,6 +1551,13 @@ export const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, t
   let materialConsumption = toDec(0);
   let inventoryLoss = toDec(0);
 
+  const reversalMoves = movements.filter((m) => m.movementType === 'POSITIVE_ADJUSTMENT' && m.sourceReferenceType === 'STOCK_MOVEMENT_REVERSAL' && m.sourceReferenceId);
+  const origMoves = reversalMoves.length > 0 ? await prisma.stockMovement.findMany({
+    where: { id: { in: reversalMoves.map((m) => m.sourceReferenceId).filter(Boolean) } },
+    select: { id: true, movementType: true },
+  }) : [];
+  const origTypeMap = new Map(origMoves.map((o) => [o.id, o.movementType]));
+
   for (const m of movements) {
     const cost = toDec(m.totalCost);
     if (m.movementType === 'POS_SALE_OUT') {
@@ -1531,6 +1572,13 @@ export const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, t
       m.movementType === 'NEGATIVE_ADJUSTMENT'
     ) {
       inventoryLoss = inventoryLoss.plus(cost);
+    } else if (m.movementType === 'POSITIVE_ADJUSTMENT' && m.sourceReferenceType === 'STOCK_MOVEMENT_REVERSAL') {
+      const origType = origTypeMap.get(m.sourceReferenceId);
+      if (origType === 'SALON_CONSUMPTION_OUT' || origType === 'INTERNAL_USE_OUT') {
+        materialConsumption = materialConsumption.minus(cost);
+      } else if (origType === 'EXPIRED_OUT' || origType === 'DAMAGED_OUT' || origType === 'NEGATIVE_ADJUSTMENT') {
+        inventoryLoss = inventoryLoss.minus(cost);
+      }
     }
   }
   materialConsumption = max0(materialConsumption);
@@ -3342,6 +3390,16 @@ export const inventoryReport = async (actor, query = {}) => {
       orderBy: { createdAt: 'desc' },
     });
 
+    const movementIds = movements.map((m) => m.id);
+    const reversals = movementIds.length > 0 ? await prisma.stockMovement.findMany({
+      where: {
+        sourceReferenceType: 'STOCK_MOVEMENT_REVERSAL',
+        sourceReferenceId: { in: movementIds },
+      },
+      select: { sourceReferenceId: true, movementNumber: true, createdAt: true },
+    }) : [];
+    const reversalMap = new Map(reversals.map((r) => [r.sourceReferenceId, r]));
+
     let totalQty = toDec(0);
     let totalCost = toDec(0);
     const categoryCostMap = new Map();
@@ -3349,12 +3407,16 @@ export const inventoryReport = async (actor, query = {}) => {
     const rows = movements.map((m) => {
       const q = toDec(m.quantity);
       const c = toDec(m.totalCost);
+      const isReversed = reversalMap.has(m.id);
+      const revInfo = reversalMap.get(m.id);
 
-      totalQty = totalQty.plus(q);
-      totalCost = totalCost.plus(c);
+      if (!isReversed) {
+        totalQty = totalQty.plus(q);
+        totalCost = totalCost.plus(c);
 
-      const cat = m.item?.category || 'Consumable';
-      categoryCostMap.set(cat, (categoryCostMap.get(cat) || toDec(0)).plus(c));
+        const cat = m.item?.category || 'Consumable';
+        categoryCostMap.set(cat, (categoryCostMap.get(cat) || toDec(0)).plus(c));
+      }
 
       return {
         id: m.id,
@@ -3366,7 +3428,7 @@ export const inventoryReport = async (actor, query = {}) => {
         itemId: m.itemId,
         itemName: m.item?.name || 'Item',
         sku: m.item?.sku || 'SKU',
-        category: cat,
+        category: m.item?.category || 'Consumable',
         batchNumber: m.batch?.batchNumber || 'N/A',
         quantity: n(q),
         unitCost: n(m.unitCost),
@@ -3375,6 +3437,9 @@ export const inventoryReport = async (actor, query = {}) => {
         notes: m.notes || '',
         sourceReferenceNumber: m.sourceReferenceNumber || '',
         userName: m.userName || 'Staff',
+        isReversed,
+        status: isReversed ? 'REVERSED' : 'POSTED',
+        reversalMovementNumber: revInfo?.movementNumber || null,
       };
     });
 

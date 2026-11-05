@@ -352,6 +352,7 @@ export interface PurchaseLineItem {
   quantity: number;
   unitPurchaseCost: number; // purchase cost snapshot
   historicalCostSnapshot?: number; // authoritative purchase cost snapshot
+  sellingPrice?: number; // optional batch-specific selling price
   lineDiscount: number;
   lineTotal: number;
   batchNumber?: string;
@@ -474,7 +475,7 @@ export interface StockMovement {
   quantity: number;
   unitCostSnapshot: number;
   totalCostImpact: number;
-  sourceReferenceType: 'PURCHASE' | 'INVOICE' | 'SETTLEMENT' | 'MANUAL_OUT' | 'RETURN' | 'OPENING';
+  sourceReferenceType: 'PURCHASE' | 'INVOICE' | 'SETTLEMENT' | 'MANUAL_OUT' | 'RETURN' | 'OPENING' | 'STOCK_MOVEMENT_REVERSAL';
   sourceReferenceId: string;
   referenceId?: string; // alias for sourceReferenceId
   sourceReferenceNumber: string;
@@ -662,7 +663,9 @@ export interface ConsumptionCostBreakdown {
   batchNumber: string;
   quantity: number;
   unitCost: number;
+  unitCostSnapshot?: number;
   totalCost: number;
+  costImpact?: number;
   expiryDate?: string;
 }
 

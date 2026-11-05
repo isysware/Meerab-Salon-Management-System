@@ -60,6 +60,7 @@ import {
   InventoryBatch,
   InventoryItem,
   Purchase,
+  ConsumptionPreview,
   StockLevelSnapshot,
   StockMovement,
   StockSettlement,
