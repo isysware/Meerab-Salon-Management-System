@@ -2328,6 +2328,13 @@ export type IncomeExpenseItemType =
   | 'INVENTORY_WRITEOFF';
 
 export interface IncomeExpenseReportRow {
+  recordType?: 'ORIGINAL_INVOICE' | 'SUBSEQUENT_PAYMENT' | 'REFUND_REVERSAL' | 'OPERATING_EXPENSE' | 'SALARY_EXPENSE' | 'COMMISSION_EXPENSE' | 'SETTLEMENT' | 'SUPPLIER_PAYMENT' | string;
+  recordTypeLabel?: string;
+  paymentSequence?: number;
+  receiptNumber?: string | null;
+  paymentAccountName?: string | null;
+  balanceAfterPayment?: number;
+  currentOutstanding?: number;
   originalInvoiceDate?: string;
   refundAmount?: number;
   refundCashOut?: number;

@@ -1,5 +1,5 @@
 import { drawerDebits, drawerMoney } from './cashDrawerUtils';
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { salonService } from '@/services';
 import {

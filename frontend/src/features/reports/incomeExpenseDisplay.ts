@@ -12,7 +12,20 @@ export function invoiceEventDetails(row: IncomeExpenseReportRow): string {
 export const isCustomerInvoiceEntry = (row: IncomeExpenseReportRow) =>
   row.type === 'INCOME' && ['POS Invoice', 'POS Dues Collection', 'Sales Refund'].includes(row.source);
 
+export const isOriginalInvoice = (row: IncomeExpenseReportRow) =>
+  row.recordType === 'ORIGINAL_INVOICE' || (row.source === 'POS Invoice' && !row.recordType);
+
+export const isSubsequentPayment = (row: IncomeExpenseReportRow) =>
+  row.recordType === 'SUBSEQUENT_PAYMENT' || row.source === 'POS Dues Collection';
+
+export const isRefundRecord = (row: IncomeExpenseReportRow) =>
+  row.recordType === 'REFUND_REVERSAL' || row.source === 'Sales Refund';
+
 export function incomeExpenseEntryType(row: IncomeExpenseReportRow): string {
+  if (row.recordTypeLabel) return row.recordTypeLabel;
+  if (row.recordType === 'ORIGINAL_INVOICE') return 'Original Invoice';
+  if (row.recordType === 'SUBSEQUENT_PAYMENT') return 'Subsequent Payment';
+  if (row.recordType === 'REFUND_REVERSAL') return 'Refund / Reversal';
   if (row.type === 'SALARY_EXPENSE') return 'Salary';
   if (row.type === 'COMMISSION_EXPENSE') return 'Commission';
   if (row.source === 'Staff Loan') return 'Staff Loan';

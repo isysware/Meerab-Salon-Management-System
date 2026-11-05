@@ -77,9 +77,8 @@ export const UnpaidInvoicesPage: React.FC = () => {
   const [isCollectModalOpen, setIsCollectModalOpen] = useState(false);
   const [collectMethod, setCollectMethod] = useState<'CASH' | 'ONLINE'>('CASH');
   const [collectAmount, setCollectAmount] = useState<number>(0);
-  const [collectCashTendered, setCollectCashTendered] = useState<number>(0);
+  const [isPartialMode, setIsPartialMode] = useState<boolean>(false);
   const [selectedOnlineAccountId, setSelectedOnlineAccountId] = useState<string>('');
-  const [collectionNotes, setCollectionNotes] = useState('');
   const [isCollecting, setIsCollecting] = useState(false);
   const [collectionIdempotencyKey, setCollectionIdempotencyKey] = useState<string>('');
 
@@ -305,15 +304,16 @@ export const UnpaidInvoicesPage: React.FC = () => {
   const handleOpenCollect = (inv: Invoice) => {
     setSelectedInvoice(inv);
     setCollectAmount(inv.amountDue);
-    setCollectCashTendered(inv.amountDue);
-    setCollectionNotes('');
+    setIsPartialMode(false);
     setCollectMethod('CASH');
 
     const key = `COLLECT-${inv.id}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     setCollectionIdempotencyKey(key);
 
     // Find accounts for this invoice's branch
-    const branchAccs = paymentAccounts.filter((a) => (a.branchIds ?? [a.branchId]).includes(inv.branchId));
+    const branchAccs = paymentAccounts.filter(
+      (a) => (a.branchIds ?? [a.branchId]).includes(inv.branchId) && a.isActive
+    );
     if (branchAccs.length > 0) {
       setSelectedOnlineAccountId(branchAccs[0].id);
     }
@@ -323,7 +323,7 @@ export const UnpaidInvoicesPage: React.FC = () => {
 
   // Submit collection
   const handleSubmitCollection = async () => {
-    if (!selectedInvoice) return;
+    if (!selectedInvoice || isCollecting) return;
     setIsCollecting(true);
 
     try {
@@ -332,21 +332,19 @@ export const UnpaidInvoicesPage: React.FC = () => {
         throw new Error('Please enter a collection amount greater than 0.');
       }
       if (paymentAmount > selectedInvoice.amountDue) {
-        throw new Error(`Collection amount cannot exceed outstanding balance (${selectedInvoice.amountDue} PKR).`);
+        throw new Error(`Collection amount cannot exceed outstanding balance (${formatCurrency(selectedInvoice.amountDue)}).`);
       }
 
       const payments: POSPaymentEntry[] = [];
 
       if (collectMethod === 'CASH') {
-        const tendered = Math.max(paymentAmount, collectCashTendered || paymentAmount);
-        const change = Math.max(0, tendered - paymentAmount);
         payments.push({
           method: 'CASH',
           amount: paymentAmount,
           billAllocation: paymentAmount,
           tipAllocation: 0,
-          cashTendered: tendered,
-          changeReturned: change,
+          cashTendered: paymentAmount,
+          changeReturned: 0,
         });
       } else {
         const acc = paymentAccounts.find((a) => a.id === selectedOnlineAccountId);
@@ -368,7 +366,7 @@ export const UnpaidInvoicesPage: React.FC = () => {
           invoiceId: selectedInvoice.id,
           payments,
           idempotencyKey: collectionIdempotencyKey,
-          notes: collectionNotes,
+          notes: `Receivable collection for ${selectedInvoice.invoiceNumber}`,
         },
         user
       );
@@ -688,144 +686,95 @@ export const UnpaidInvoicesPage: React.FC = () => {
         © iSysware Management System
       </div>
 
-      {/* ── 3. COLLECT PAYMENT MODAL (KEPT 100% OPERATIONAL LOGIC) ── */}
+      {/* ── 3. COLLECT PAYMENT MODAL (SIMPLIFIED OUTSTANDING RECEIVABLE) ── */}
       <Dialog open={isCollectModalOpen} onOpenChange={setIsCollectModalOpen}>
-        <DialogContent className="max-w-md font-sans p-4 sm:p-5 space-y-2.5">
-          <DialogHeader className="pb-1 border-b border-slate-100">
+        <DialogContent className="max-w-md font-sans p-5 space-y-4 rounded-2xl bg-white shadow-xl border border-slate-200">
+          <DialogHeader className="pb-2 border-b border-slate-100">
             <div className="flex items-center justify-between pr-4">
-              <DialogTitle className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                <Coins className="w-4 h-4 text-emerald-600" />
+              <DialogTitle className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Coins className="w-5 h-5 text-emerald-600" />
                 Collect Outstanding Receivable
               </DialogTitle>
-              <Badge variant="neutral" className="text-[10px] font-mono bg-[#FDF2F5] text-[#9D2558] border-[#F1DEE3]">
+              <Badge variant="neutral" className="text-xs font-mono bg-[#FDF2F5] text-[#9D2558] border-[#F1DEE3] font-bold px-2 py-0.5">
                 {selectedInvoice?.invoiceNumber}
               </Badge>
             </div>
-            <DialogDescription className="text-[11px] text-slate-500">
+            <DialogDescription className="text-xs text-slate-500 mt-1">
               Record customer payment against Invoice {selectedInvoice?.invoiceNumber}.
             </DialogDescription>
           </DialogHeader>
 
           {/* Form Content */}
           {selectedInvoice && (
-            <div className="space-y-2.5 text-xs">
-              {/* Compact Customer & Outstanding Balance Card */}
-              <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+            <div className="space-y-4 text-xs">
+              {/* Customer & Outstanding Balance Card */}
+              <div className="p-4 rounded-xl bg-gradient-to-br from-rose-50/70 via-white to-rose-50/30 border border-rose-100 flex items-center justify-between shadow-2xs">
                 <div>
-                  <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                    <span>{selectedInvoice.clientName}</span>
-                    {selectedInvoice.clientPhone && (
-                      <span className="text-[10px] font-normal font-mono text-slate-500">({selectedInvoice.clientPhone})</span>
-                    )}
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Customer</span>
+                  <div className="font-bold text-slate-900 text-sm mt-0.5">
+                    {selectedInvoice.clientName}
                   </div>
-                  <span className="text-[10px] text-slate-400">Sale Date: {selectedInvoice.date} (retained)</span>
+                  {selectedInvoice.clientPhone && (
+                    <span className="text-xs text-slate-500 font-mono block mt-0.5">
+                      {selectedInvoice.clientPhone}
+                    </span>
+                  )}
                 </div>
                 <div className="text-right">
-                  <span className="text-[9px] font-bold text-rose-600 uppercase tracking-wide block">Balance Due</span>
-                  <span className="font-mono font-extrabold text-rose-700 text-sm">
+                  <span className="text-[10px] font-bold text-rose-600 uppercase tracking-wider block">Remaining Balance</span>
+                  <span className="font-mono font-extrabold text-rose-700 text-lg block mt-0.5">
                     {formatCurrency(selectedInvoice.amountDue)}
                   </span>
                 </div>
               </div>
 
-              {/* Method Choice */}
-              <div>
-                <label className="text-[10px] font-bold text-slate-700 block mb-1">Receipt Payment Method</label>
-                <div className="grid grid-cols-2 gap-1.5">
+              {/* Method Choice: Cash / Online Account */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 block">Payment Method</label>
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setCollectMethod('CASH')}
-                    className={`h-7.5 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                    className={`h-9 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
                       collectMethod === 'CASH'
-                        ? 'bg-[#FDF2F5] border-[#9D2558] text-[#9D2558] font-bold shadow-2xs'
+                        ? 'bg-emerald-50/80 border-emerald-500 text-emerald-800 shadow-2xs ring-1 ring-emerald-500/20'
                         : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    <Banknote className="w-3.5 h-3.5" />
-                    Physical Cash
+                    <Banknote className="w-4 h-4 text-emerald-600" />
+                    Cash
                   </button>
                   <button
                     type="button"
                     onClick={() => setCollectMethod('ONLINE')}
-                    className={`h-7.5 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                    className={`h-9 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
                       collectMethod === 'ONLINE'
-                        ? 'bg-[#FDF2F5] border-[#9D2558] text-[#9D2558] font-bold shadow-2xs'
+                        ? 'bg-emerald-50/80 border-emerald-500 text-emerald-800 shadow-2xs ring-1 ring-emerald-500/20'
                         : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    <CreditCard className="w-3.5 h-3.5" />
+                    <CreditCard className="w-4 h-4 text-emerald-600" />
                     Online Account
                   </button>
                 </div>
               </div>
 
-              {/* Amount to Collect Input */}
-              <div>
-                <div className="flex justify-between items-center mb-0.5">
-                  <label className="text-[10px] font-bold text-slate-700">Amount to Collect (PKR)</label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCollectAmount(selectedInvoice.amountDue);
-                      setCollectCashTendered(selectedInvoice.amountDue);
-                    }}
-                    className="text-[10px] text-[#9D2558] hover:underline font-bold cursor-pointer"
-                  >
-                    Full Balance ({formatCurrency(selectedInvoice.amountDue)})
-                  </button>
-                </div>
-                <Input
-                  type="number"
-                  min="0"
-                  max={selectedInvoice.amountDue}
-                  value={collectAmount || ''}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value) || 0;
-                    setCollectAmount(val);
-                    setCollectCashTendered(val);
-                  }}
-                  className="font-mono font-bold text-xs h-7.5"
-                />
-              </div>
-
-              {/* Cash Tendered / Change */}
-              {collectMethod === 'CASH' && (
-                <div className="grid grid-cols-2 gap-1.5">
-                  <div>
-                    <label className="text-[10px] text-slate-500 font-medium block mb-0.5">Cash Tendered (PKR)</label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={collectCashTendered || ''}
-                      onChange={(e) => setCollectCashTendered(parseFloat(e.target.value) || 0)}
-                      className="font-mono h-7 text-xs"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-500 font-medium block mb-0.5">Change Returned</label>
-                    <div className="h-7 flex items-center font-mono font-bold text-emerald-700 text-xs px-2 bg-slate-50 border border-slate-200 rounded-md">
-                      {formatCurrency(Math.max(0, collectCashTendered - collectAmount))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Online Account Picker */}
+              {/* Named Account Selection (Shown when Online Account is selected) */}
               {collectMethod === 'ONLINE' && (
-                <div>
-                  <label className="text-[10px] text-slate-500 font-medium block mb-0.5">Deposit To Payment Account</label>
+                <div className="space-y-1.5 animate-in fade-in duration-150">
+                  <label className="text-xs font-bold text-slate-700 block">Deposit To Payment Account</label>
                   <Select
                     value={selectedOnlineAccountId}
                     onValueChange={setSelectedOnlineAccountId}
                   >
-                    <SelectTrigger className="h-7.5 text-xs">
-                      <SelectValue />
+                    <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 bg-white">
+                      <SelectValue placeholder="Select Account" />
                     </SelectTrigger>
                     <SelectContent>
                       {paymentAccounts
-                        .filter((a) => (a.branchIds ?? [a.branchId]).includes(selectedInvoice.branchId))
+                        .filter((a) => (a.branchIds ?? [a.branchId]).includes(selectedInvoice.branchId) && a.isActive)
                         .map((acc) => (
-                          <SelectItem key={acc.id} value={acc.id} className="text-xs">
+                          <SelectItem key={acc.id} value={acc.id} className="text-xs font-medium">
                             {acc.name} ({acc.accountIdentifier})
                           </SelectItem>
                         ))}
@@ -834,52 +783,82 @@ export const UnpaidInvoicesPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Collection Notes */}
-              <div>
-                <label className="text-[10px] text-slate-500 font-medium block mb-0.5">Collection Notes (Optional)</label>
-                <Input
-                  placeholder="e.g. Cleared remaining balance via cash till"
-                  value={collectionNotes}
-                  onChange={(e) => setCollectionNotes(e.target.value)}
-                  className="h-7 text-xs"
-                />
-              </div>
+              {/* Partial Payment Toggle & Input */}
+              {!isPartialMode ? (
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-xs text-slate-500">
+                    Collecting full balance: <strong className="font-mono text-slate-800">{formatCurrency(selectedInvoice.amountDue)}</strong>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsPartialMode(true);
+                    }}
+                    className="text-xs font-semibold text-[#9D2558] hover:text-[#851C47] hover:underline cursor-pointer"
+                  >
+                    Collect Partial Amount
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2 p-3 rounded-xl bg-slate-50 border border-slate-200 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700">Partial Amount to Collect (PKR)</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsPartialMode(false);
+                        setCollectAmount(selectedInvoice.amountDue);
+                      }}
+                      className="text-[11px] font-semibold text-[#9D2558] hover:underline cursor-pointer"
+                    >
+                      Collect Full Balance ({formatCurrency(selectedInvoice.amountDue)})
+                    </button>
+                  </div>
+                  <Input
+                    type="number"
+                    min="1"
+                    max={selectedInvoice.amountDue}
+                    step="any"
+                    autoFocus
+                    value={collectAmount || ''}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value) || 0;
+                      setCollectAmount(Math.min(selectedInvoice.amountDue, Math.max(0, val)));
+                    }}
+                    placeholder={`Enter amount (max ${formatCurrency(selectedInvoice.amountDue)})`}
+                    className="font-mono font-bold text-sm h-9 bg-white rounded-lg border-slate-300"
+                  />
+                  <div className="flex justify-between text-[11px] text-slate-500 font-mono">
+                    <span>Collecting: {formatCurrency(collectAmount)}</span>
+                    <span className="text-rose-600 font-semibold">
+                      Remaining Due: {formatCurrency(Math.max(0, selectedInvoice.amountDue - collectAmount))}
+                    </span>
+                  </div>
+                </div>
+              )}
 
-              {/* Compact Audit Badge */}
-              <div className="py-1 px-2.5 rounded-lg bg-[#FDF2F5]/60 border border-[#F1DEE3] text-[10px] text-slate-500 flex items-center justify-between">
-                <span>Receipt attributed to <strong className="text-slate-700">{user.name}</strong></span>
-                <span>Date: <strong className="text-slate-700">{demoDate}</strong></span>
+              {/* Single Clear Accept Payment Button */}
+              <div className="pt-2">
+                <Button
+                  disabled={isCollecting || collectAmount <= 0 || collectAmount > selectedInvoice.amountDue}
+                  onClick={handleSubmitCollection}
+                  className="w-full h-11 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  {isCollecting ? (
+                    <>
+                      <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin inline-block" />
+                      <span>Recording Collection...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Accept Payment — {formatCurrency(collectAmount)}</span>
+                    </>
+                  )}
+                </Button>
               </div>
             </div>
           )}
-
-          <DialogFooter className="gap-2 pt-1 border-t border-slate-100 sm:justify-end">
-            <Button
-              variant="outline"
-              disabled={isCollecting}
-              onClick={() => setIsCollectModalOpen(false)}
-              className="text-xs h-7.5 px-3"
-            >
-              Cancel
-            </Button>
-            <Button
-              disabled={isCollecting || collectAmount <= 0}
-              onClick={handleSubmitCollection}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-7.5 px-3.5 gap-1.5 cursor-pointer font-bold"
-            >
-              {isCollecting ? (
-                <>
-                  <span className="w-3 h-3 rounded-full border-2 border-white/40 border-t-white animate-spin inline-block" />
-                  Recording...
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Confirm Receipt ({formatCurrency(collectAmount)})
-                </>
-              )}
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 

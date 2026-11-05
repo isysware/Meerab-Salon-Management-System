@@ -8,6 +8,7 @@ export default defineConfig({
       'tests/inventory-fifo-fefo.test.js',
       'tests/supplier-payment-reporting.test.js',
       'tests/salon-consumption.test.js',
+      'tests/income-expense-payment-history.test.js',
     ],
   },
 });

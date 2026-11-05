@@ -30,43 +30,83 @@ export async function loadInvoicePresentation(scope, ids, to) {
   return new Map(invoices.map(inv => [inv.id, { invoice: inv, ...invoicePresentation(inv, to) }]));
 }
 
-/** Presentation only: every signed amount is summed exactly once from the selected dated rows. */
+/** Presentation only: keeps dated original invoices and separate subsequent payment rows without squashing payment history. */
 export function groupLedgerInvoices(rows, context) {
-  const groups = new Map(), result = [];
+  const result = [];
   for (const row of rows) {
     if (row.type !== 'INCOME' || !['POS Invoice', 'POS Dues Collection', 'Sales Refund'].includes(row.source)) {
-      result.push(row); continue;
+      result.push({
+        ...row,
+        recordType: row.recordType || (row.type === 'OPERATING_EXPENSE' ? 'OPERATING_EXPENSE' : row.type === 'SALARY_EXPENSE' ? 'SALARY_EXPENSE' : row.type === 'COMMISSION_EXPENSE' ? 'COMMISSION_EXPENSE' : row.type === 'SETTLEMENT' ? 'SETTLEMENT' : row.type === 'SUPPLIER_PAYMENT' ? 'SUPPLIER_PAYMENT' : 'EXPENSE'),
+        recordTypeLabel: row.recordTypeLabel || (row.type === 'OPERATING_EXPENSE' ? 'Operating Expense' : row.type === 'SALARY_EXPENSE' ? 'Salary' : row.type === 'COMMISSION_EXPENSE' ? 'Commission' : row.type === 'SETTLEMENT' ? (row.source === 'Staff Loan' ? 'Staff Loan' : 'Settlement') : row.type === 'SUPPLIER_PAYMENT' ? 'Supplier Payment' : 'Expense'),
+      });
+      continue;
     }
     const key = row.invoiceId || row.invoiceNumber || row.reference;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(row);
+    const snapshot = context?.get(key);
+
+    if (row.source === 'POS Invoice') {
+      result.push({
+        ...row,
+        id: row.id || `inv-${key}`,
+        source: 'POS Invoice',
+        recordType: 'ORIGINAL_INVOICE',
+        recordTypeLabel: row.recordTypeLabel || 'Original Invoice',
+        reference: snapshot?.invoice.invoiceNumber || row.invoiceNumber || row.reference,
+        invoiceNumber: snapshot?.invoice.invoiceNumber || row.invoiceNumber || row.reference,
+        date: snapshot?.originalDate || row.date,
+        originalInvoiceDate: snapshot?.originalDate || row.date,
+        customerName: snapshot?.invoice.clientName || row.customerName,
+        branchId: snapshot?.invoice.branchId || row.branchId,
+        serviceAmount: snapshot?.originalNet ?? row.serviceAmount,
+        tax: snapshot?.originalTax ?? row.tax,
+        totalBill: snapshot?.originalBill ?? row.invoiceBillTotal ?? row.totalBill,
+        invoiceBillTotal: snapshot?.originalBill ?? row.invoiceBillTotal ?? row.totalBill,
+        balanceAfterPayment: row.balanceAfterPayment,
+        currentOutstanding: snapshot?.outstanding ?? row.currentOutstanding ?? row.remainingDues ?? 0,
+        remainingDues: snapshot?.outstanding ?? row.remainingDues ?? 0,
+        status: snapshot ? (snapshot.lifecycle === 'ACTIVE' ? snapshot.status : snapshot.lifecycle) : row.status,
+        refundHistory: snapshot?.refundHistory || [],
+      });
+    } else if (row.source === 'POS Dues Collection') {
+      result.push({
+        ...row,
+        id: row.id,
+        source: 'POS Dues Collection',
+        recordType: 'SUBSEQUENT_PAYMENT',
+        recordTypeLabel: row.recordTypeLabel || 'Subsequent Payment',
+        reference: snapshot?.invoice.invoiceNumber || row.invoiceNumber || row.reference,
+        invoiceNumber: snapshot?.invoice.invoiceNumber || row.invoiceNumber || row.reference,
+        originalInvoiceDate: snapshot?.originalDate || row.originalInvoiceDate,
+        customerName: snapshot?.invoice.clientName || row.customerName,
+        branchId: snapshot?.invoice.branchId || row.branchId,
+        serviceAmount: 0,
+        tax: 0,
+        totalBill: 0,
+        invoiceBillTotal: snapshot?.originalBill ?? row.invoiceBillTotal,
+        balanceAfterPayment: row.balanceAfterPayment,
+        currentOutstanding: snapshot?.outstanding ?? row.currentOutstanding ?? 0,
+        remainingDues: snapshot?.outstanding ?? row.remainingDues ?? 0,
+        status: snapshot ? (snapshot.lifecycle === 'ACTIVE' ? snapshot.status : snapshot.lifecycle) : row.status,
+      });
+    } else if (row.source === 'Sales Refund') {
+      result.push({
+        ...row,
+        id: row.id,
+        source: 'Sales Refund',
+        recordType: 'REFUND_REVERSAL',
+        recordTypeLabel: 'Refund / Reversal',
+        reference: row.reference,
+        invoiceNumber: snapshot?.invoice.invoiceNumber || row.invoiceNumber,
+        customerName: snapshot?.invoice.clientName || row.customerName || 'Client Refund',
+        branchId: snapshot?.invoice.branchId || row.branchId,
+        currentOutstanding: snapshot?.outstanding ?? 0,
+        remainingDues: snapshot?.outstanding ?? 0,
+        status: snapshot?.lifecycle || 'REFUNDED',
+      });
+    }
   }
-  for (const [key, events] of groups) {
-    const original = events.find(e => e.source === 'POS Invoice') || events[0];
-    const snapshot = context.get(key);
-    const refundEvents = events.filter(e => e.source === 'Sales Refund');
-    const row = { ...original, id: `invoice-${key}`, source: 'POS Invoice', reference: original.invoiceNumber || original.reference,
-      date: snapshot?.originalDate || original.date, originalInvoiceDate: snapshot?.originalDate || original.date,
-      customerName: snapshot?.invoice.clientName || original.customerName,
-      serviceAmount: snapshot?.originalNet ?? original.serviceAmount,
-      tax: snapshot?.originalTax ?? original.tax, totalBill: snapshot?.originalBill ?? original.invoiceBillTotal ?? original.totalBill,
-      invoiceBillTotal: snapshot?.originalBill ?? original.invoiceBillTotal,
-      remaining: snapshot?.outstanding ?? original.remaining, remainingDues: snapshot?.outstanding ?? original.remainingDues,
-      status: snapshot ? snapshot.lifecycle === 'ACTIVE' ? snapshot.status : snapshot.lifecycle : original.status,
-      refundAmount: n(refundEvents.reduce((s, e) => s.minus(e.totalBill || 0).minus(e.tipAmount || 0), toDec(0))),
-      refundCashOut: n(refundEvents.reduce((s, e) => s.minus(e.collectionAmount || 0), toDec(0))),
-      refundHistory: snapshot?.refundHistory || [],
-      reportEvents: events.map(e => ({ id: e.id, reference: e.reference, date: e.date, type: e.source,
-        amount: e.cashFlow ?? e.collectionAmount ?? e.paid ?? 0, net: e.income, tax: e.collectedTax || 0, tip: e.tipAmount || 0,
-        method: e.paymentMethod })),
-    };
-    for (const field of ['income','recognizedIncome','collectedService','collectedTax','totalReceived','paid','collectionAmount','discount','tipAmount']) row[field] = n(sum(events, field));
-    row.cashFlow = row.collectionAmount;
-    const methods = [...new Set(events.map(e => e.paymentMethod).filter(Boolean))];
-    row.paymentMethod = methods.length === 1 ? methods[0] : 'MULTIPLE';
-    result.push(row);
-  }
-  return result.sort((a,b) => (b.date || '').localeCompare(a.date || '') || a.id.localeCompare(b.id));
+  return result.sort((a,b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt && a.createdAt ? new Date(b.createdAt) - new Date(a.createdAt) : 0) || a.id.localeCompare(b.id));
 }
 
 export function groupIncomeLines(rows) {

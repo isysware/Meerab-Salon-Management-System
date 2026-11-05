@@ -383,6 +383,7 @@ export async function shareReceiptPdfViaWhatsApp({ invoice, branch, targetPhone 
   generated.pdf.save(generated.fileName);
   const branchName = (branch?.name || 'MEERUB SALON & SPA').toUpperCase();
   const methodSummary = getPaymentMethodSummary(invoice);
+  const isBkg = Boolean(invoice.isBookingInvoice || invoice.invoiceNumber?.startsWith('BKG'));
   const summaryText = isBkg
     ? `*${branchName} — BOOKING ADVANCE INVOICE*\nBooking Ref: *${invoice.invoiceNumber}*\nEvent Date: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Quoted Price:* ${formatCurrency(invoice.total)}\n*Advance Paid (${methodSummary}):* ${formatCurrency(invoice.amountPaid)}\n*Remaining Balance (Due on Event):* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official Booking Advance Receipt PDF attached above._\nThank you for choosing ${branchName}!`
     : `*${branchName} — OFFICIAL RECEIPT*\nInvoice No: *${invoice.invoiceNumber}*\nDate: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Payable:* ${formatCurrency(invoice.total)}\n*Paid Amount (${methodSummary}):* ${formatCurrency(invoice.amountPaid)}\n*Outstanding Balance:* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official PDF Receipt attached above._\nThank you for visiting!`;
