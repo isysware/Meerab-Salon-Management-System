@@ -130,13 +130,25 @@ export function groupLedgerInvoices(rows, context) {
   }
 
   for (const [key, groupRows] of invoiceGroups.entries()) {
-    // Sort in chronological order (oldest to newest)
+    // Sort in chronological order (oldest to newest):
+    // Original Invoice is always first (typeRank 0), followed by subsequent dues payments (typeRank 1), then reversals.
     groupRows.sort((a, b) => {
+      const dDiff = (a.date || '').localeCompare(b.date || '');
+      if (dDiff !== 0) return dDiff;
+
+      const typeRank = r => (r.source === 'POS Invoice' || r.recordType === 'ORIGINAL_INVOICE') ? 0
+        : (r.source === 'POS Dues Collection' || r.recordType === 'SUBSEQUENT_PAYMENT') ? 1 : 2;
+      const rDiff = typeRank(a) - typeRank(b);
+      if (rDiff !== 0) return rDiff;
+
       const seqA = a.paymentSequence ?? (a.source === 'POS Invoice' ? 1 : 2);
       const seqB = b.paymentSequence ?? (b.source === 'POS Invoice' ? 1 : 2);
       if (seqA !== seqB) return seqA - seqB;
-      const dDiff = (a.date || '').localeCompare(b.date || '');
-      if (dDiff !== 0) return dDiff;
+
+      if (a.createdAt && b.createdAt) {
+        const timeDiff = new Date(a.createdAt) - new Date(b.createdAt);
+        if (timeDiff !== 0) return timeDiff;
+      }
       return (a.id || '').localeCompare(b.id || '');
     });
 
@@ -153,7 +165,35 @@ export function groupLedgerInvoices(rows, context) {
     }
   }
 
-  return result.sort((a,b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt && a.createdAt ? new Date(b.createdAt) - new Date(a.createdAt) : 0) || a.id.localeCompare(b.id));
+  return result.sort((a, b) => {
+    const keyA = a.invoiceId || a.invoiceNumber || a.reference;
+    const keyB = b.invoiceId || b.invoiceNumber || b.reference;
+
+    // Within the SAME invoice group, Original Invoice MUST appear before subsequent receipts:
+    if (keyA && keyB && keyA === keyB) {
+      const typeRank = r => (r.source === 'POS Invoice' || r.recordType === 'ORIGINAL_INVOICE') ? 0
+        : (r.source === 'POS Dues Collection' || r.recordType === 'SUBSEQUENT_PAYMENT') ? 1 : 2;
+      const rDiff = typeRank(a) - typeRank(b);
+      if (rDiff !== 0) return rDiff;
+      const seqDiff = (a.paymentSequence ?? 0) - (b.paymentSequence ?? 0);
+      if (seqDiff !== 0) return seqDiff;
+      if (a.createdAt && b.createdAt) {
+        return new Date(a.createdAt) - new Date(b.createdAt);
+      }
+      return (a.id || '').localeCompare(b.id || '');
+    }
+
+    // Different transactions / invoice groups: sort descending by date (newest first)
+    const dateDiff = (b.date || '').localeCompare(a.date || '');
+    if (dateDiff !== 0) return dateDiff;
+
+    if (b.createdAt && a.createdAt) {
+      const timeDiff = new Date(b.createdAt) - new Date(a.createdAt);
+      if (timeDiff !== 0) return timeDiff;
+    }
+
+    return (b.id || '').localeCompare(a.id || '');
+  });
 }
 
 export function groupIncomeLines(rows) {

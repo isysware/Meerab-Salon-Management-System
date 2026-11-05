@@ -492,6 +492,98 @@ describe('Income & Expense Report · Payment History Rows Audit', () => {
       const totalPaid = displayRows.reduce((s, r) => s + r.totalReceived, 0);
       expect(totalPaid).toBe(1100);
     });
+
+    it('Scenario: Same-Date Initial Payment 500 + Dues Collection 500 (RCP-0004) reconciles to 0 Remaining Dues and Original Invoice comes first', () => {
+      const mockInvoice = {
+        id: 'inv-0003',
+        invoiceNumber: 'INV-0003',
+        date: new Date('2026-11-05T00:00:00Z'),
+        clientName: 'Ayesha',
+        branchId: 'b-main',
+        netSales: D(1000),
+        tax: D(0),
+        amountDue: D(0),
+        refunds: [],
+        lines: [{ id: 'line-1', netSales: D(1000), tax: D(0) }],
+        payments: [
+          { id: 'p-pos', date: new Date('2026-11-05T00:00:00Z'), createdAt: new Date('2026-11-05T14:33:00Z'), kind: 'POS', billAmountAllocated: D(500), tipAmountAllocated: D(0) },
+          { id: 'p-due', date: new Date('2026-11-05T00:00:00Z'), createdAt: new Date('2026-11-05T14:48:00Z'), kind: 'DUES_COLLECTION', billAmountAllocated: D(500), tipAmountAllocated: D(0) },
+        ],
+      };
+
+      const context = new Map([
+        ['inv-0003', { invoice: mockInvoice, ...invoicePresentation(mockInvoice, '2026-11-05') }],
+      ]);
+
+      const inputRows = [
+        {
+          id: 'inv-inv-0003',
+          invoiceId: 'inv-0003',
+          invoiceNumber: 'INV-0003',
+          reference: 'INV-0003',
+          customerName: 'Ayesha',
+          branchId: 'b-main',
+          date: '2026-11-05',
+          createdAt: new Date('2026-11-05T14:33:00Z'),
+          type: 'INCOME',
+          source: 'POS Invoice',
+          recordType: 'ORIGINAL_INVOICE',
+          recordTypeLabel: 'Original Invoice',
+          paymentSequence: 1,
+          receiptNumber: 'RCP-0003',
+          serviceCollection: 500,
+          serviceAmount: 500,
+          tax: 0,
+          totalBill: 1000,
+          totalReceived: 500,
+          balanceAfterPayment: 500,
+          status: 'PARTIAL',
+        },
+        {
+          id: 'due-pay-due',
+          invoiceId: 'inv-0003',
+          invoiceNumber: 'INV-0003',
+          reference: 'INV-0003',
+          customerName: 'Ayesha',
+          branchId: 'b-main',
+          date: '2026-11-05',
+          createdAt: new Date('2026-11-05T14:48:00Z'),
+          type: 'INCOME',
+          source: 'POS Dues Collection',
+          recordType: 'SUBSEQUENT_PAYMENT',
+          recordTypeLabel: 'Payment Receipt #2',
+          paymentSequence: 2,
+          receiptNumber: 'RCP-0004',
+          serviceCollection: 500,
+          serviceAmount: 500,
+          tax: 0,
+          totalBill: 0,
+          totalReceived: 500,
+          balanceAfterPayment: 0,
+          status: 'PAID',
+        },
+      ];
+
+      const displayRows = groupLedgerInvoices(inputRows, context);
+      expect(displayRows.length).toBe(2);
+
+      // Requirement 5: Original invoice appears BEFORE subsequent receipt in invoice-group ordering
+      expect(displayRows[0].recordType).toBe('ORIGINAL_INVOICE');
+      expect(displayRows[0].invoiceNumber).toBe('INV-0003');
+      expect(displayRows[0].remainingDues).toBeNull(); // Requirement 2: earlier rows show null ('—')
+
+      expect(displayRows[1].recordType).toBe('SUBSEQUENT_PAYMENT');
+      expect(displayRows[1].recordTypeLabel).toBe('Payment Receipt #2');
+      expect(displayRows[1].receiptNumber).toBe('RCP-0004');
+      // Requirement 3: fully paid invoice: latest receipt shows 0.00
+      expect(displayRows[1].remainingDues).toBe(0);
+
+      // Total Outstanding dues across non-null remaining rows must be exactly 0
+      const totalOutstanding = displayRows
+        .filter(r => r.remainingDues !== null && r.remainingDues !== undefined)
+        .reduce((sum, r) => sum + r.remainingDues, 0);
+      expect(totalOutstanding).toBe(0);
+    });
   });
 
   describe('2. incomeExpenseReport End-to-End Service Integration Tests', () => {

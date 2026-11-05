@@ -353,7 +353,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
             payments: {
               where: { reversedAt: null },
               orderBy: { createdAt: 'asc' },
-              select: { id: true, billAmountAllocated: true, createdAt: true },
+              select: { id: true, kind: true, billAmountAllocated: true, createdAt: true },
             },
           },
         },
@@ -1283,7 +1283,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     refundsPaid: n(totalRefundsPaid),
   };
 
-  return formatReportResponse({ ...ctx.meta, displayBasis: 'Chronological cash collections and paid operating expenses. Shows actual service collection on each receipt and updated remaining dues.' }, {
+  return formatReportResponse({ ...ctx.meta, displayBasis: 'Chronological transaction history showing actual collections, expenses, payment receipts, and remaining customer dues.' }, {
     kpis,
     rows: filteredRows,
     displayRows,
@@ -1395,7 +1395,7 @@ export const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, t
             payments: {
               where: { reversedAt: null },
               orderBy: { createdAt: 'asc' },
-              select: { id: true, billAmountAllocated: true, createdAt: true },
+              select: { id: true, kind: true, billAmountAllocated: true, createdAt: true },
             },
           },
         },

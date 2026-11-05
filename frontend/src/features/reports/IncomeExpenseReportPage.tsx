@@ -221,7 +221,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
     if (!reportData || !reportData.rows.length) return;
     const meta: [string, string][] = [
       ['Report', 'Income & Expense Statement'],
-      ['Display Basis', 'Chronological cash collections and paid operating expenses. Shows actual service collection on each receipt and updated remaining dues.'],
+      ['Display Basis', 'Chronological transaction history showing actual collections, expenses, payment receipts, and remaining customer dues.'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
@@ -242,13 +242,13 @@ export const IncomeExpenseReportPage: React.FC = () => {
       'Invoice / Reference',
       'Customer / Payee',
       'Branch',
+      'Payment Status',
       'Service Collection (Excl. Tax)',
       'Tax Amount',
       'Total Bill (Incl. Tax, Excl. Tip)',
       'Tip Amount',
-      'Payment Received (Incl. Tip)',
+      'Payment Received / Cash Movement',
       'Remaining Dues',
-      'Payment Status',
       'Date',
       'Payment Method',
     ];
@@ -273,13 +273,13 @@ export const IncomeExpenseReportPage: React.FC = () => {
         (r.reference || r.invoiceNumber || r.source || '—') + (r.receiptNumber ? ` (${r.receiptNumber})` : ''),
         customerOrPayee + (r.reportEvents ? ' | ' + invoiceEventDetails(r) : ''),
         r.branchName || '—',
+        r.status || 'PAID',
         !isInvoice ? '\u2014' : isRefund ? `-${Math.abs(serviceCollectionVal).toFixed(2)}` : (serviceCollectionVal === 0 ? '0.00' : `+${serviceCollectionVal.toFixed(2)}`),
         !isInvoice ? '\u2014' : isRefund ? `-${Math.abs(taxVal).toFixed(2)}` : taxVal.toFixed(2),
         !isInvoice || isSubsequent ? '\u2014' : isRefund ? `-${Math.abs(totalBillVal).toFixed(2)}` : totalBillVal.toFixed(2),
         isInvoice && (r.tipAmount ?? 0) > 0 ? (r.tipAmount ?? 0).toFixed(2) : '\u2014',
         incomeExpenseCashText(r),
         !isInvoice || remainingVal === null || remainingVal === undefined ? '\u2014' : (remainingVal > 0 ? remainingVal.toFixed(2) : '0.00'),
-        r.status || 'PAID',
         formatDateDisplay(r.date),
         formatMethod(r.paymentMethod, r.paymentAccountName),
       ];
@@ -288,19 +288,19 @@ export const IncomeExpenseReportPage: React.FC = () => {
     const signedPaidFormatted = signedPaid >= 0 ? `+${signedPaid.toFixed(2)}` : signedPaid.toFixed(2);
     const totalsRow = [
       'TOTALS (PKR)',
-      '',
-      '',
-      '',
-      '',
+      '—',
+      '—',
+      '—',
+      '—',
+      '—',
       `+${(reportData.totals.income || 0).toFixed(2)}`,
       `+${(reportData.totals.collectedTax ?? reportData.kpis?.totalCollectedTax ?? 0).toFixed(2)}`,
       `+${totalBillSum.toFixed(2)}`,
-      (reportData.totals.tipAmount ?? 0).toFixed(2),
+      (reportData.totals.tipAmount ?? 0) > 0 ? (reportData.totals.tipAmount ?? 0).toFixed(2) : '—',
       signedPaidFormatted,
       (reportData.totals.remaining || 0).toFixed(2),
-      '',
-      '',
-      '',
+      '—',
+      '—',
     ];
 
     downloadReportExcel('Income_Expense_Report', meta, [{ headers, rows: [...rows, totalsRow] }]);
@@ -310,7 +310,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
     if (!reportData || !reportData.rows.length) return;
     const meta: [string, string][] = [
       ['Report', 'Income & Expense Statement'],
-      ['Display Basis', 'Chronological cash collections and paid operating expenses. Shows actual service collection on each receipt and updated remaining dues.'],
+      ['Display Basis', 'Chronological transaction history showing actual collections, expenses, payment receipts, and remaining customer dues.'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
@@ -331,13 +331,13 @@ export const IncomeExpenseReportPage: React.FC = () => {
       'Invoice / Reference',
       'Customer / Payee',
       'Branch',
+      'Payment Status',
       'Service Collection (Excl. Tax)',
       'Tax Amount',
       'Total Bill (Incl. Tax, Excl. Tip)',
       'Tip Amount',
-      'Payment Received (Incl. Tip)',
+      'Payment Received / Cash Movement',
       'Remaining Dues',
-      'Payment Status',
       'Date',
       'Payment Method',
     ];
@@ -362,13 +362,13 @@ export const IncomeExpenseReportPage: React.FC = () => {
         (r.reference || r.invoiceNumber || r.source || '—') + (r.receiptNumber ? ` (${r.receiptNumber})` : ''),
         customerOrPayee + (r.reportEvents ? ' | ' + invoiceEventDetails(r) : ''),
         r.branchName || '—',
+        r.status || 'PAID',
         !isInvoice ? '\u2014' : isRefund ? `-${Math.abs(serviceCollectionVal).toFixed(2)}` : (serviceCollectionVal === 0 ? '0.00' : `+${serviceCollectionVal.toFixed(2)}`),
         !isInvoice ? '\u2014' : isRefund ? `-${Math.abs(taxVal).toFixed(2)}` : taxVal.toFixed(2),
         !isInvoice || isSubsequent ? '\u2014' : isRefund ? `-${Math.abs(totalBillVal).toFixed(2)}` : totalBillVal.toFixed(2),
         isInvoice && (r.tipAmount ?? 0) > 0 ? (r.tipAmount ?? 0).toFixed(2) : '\u2014',
         incomeExpenseCashText(r),
         !isInvoice || remainingVal === null || remainingVal === undefined ? '\u2014' : (remainingVal > 0 ? remainingVal.toFixed(2) : '0.00'),
-        r.status || 'PAID',
         formatDateDisplay(r.date),
         formatMethod(r.paymentMethod, r.paymentAccountName),
       ];
@@ -377,19 +377,19 @@ export const IncomeExpenseReportPage: React.FC = () => {
     const signedPaidFormatted = signedPaid >= 0 ? `+${signedPaid.toFixed(2)}` : signedPaid.toFixed(2);
     const totalsRow = [
       'TOTALS (PKR)',
-      '',
-      '',
-      '',
-      '',
+      '—',
+      '—',
+      '—',
+      '—',
+      '—',
       `+${(reportData.totals.income || 0).toFixed(2)}`,
       `+${(reportData.totals.collectedTax ?? reportData.kpis?.totalCollectedTax ?? 0).toFixed(2)}`,
       `+${totalBillSum.toFixed(2)}`,
-      (reportData.totals.tipAmount ?? 0).toFixed(2),
+      (reportData.totals.tipAmount ?? 0) > 0 ? (reportData.totals.tipAmount ?? 0).toFixed(2) : '—',
       signedPaidFormatted,
       (reportData.totals.remaining || 0).toFixed(2),
-      '',
-      '',
-      '',
+      '—',
+      '—',
     ];
 
     downloadReportCsv('Income_Expense_Report', meta, [{ headers, rows: [...rows, totalsRow] }]);
@@ -403,7 +403,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
     const customerCollectionsFormatted = formatPKR(customerCollections);
     const meta: [string, string][] = [
       ['Report', 'Income & Expense Statement'],
-      ['Display Basis', 'Chronological cash collections and paid operating expenses. Shows actual service collection on each receipt and updated remaining dues.'],
+      ['Display Basis', 'Chronological transaction history showing actual collections, expenses, payment receipts, and remaining customer dues.'],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
       ['From Date', fromDate || reportData.meta.from || '—'],
       ['To Date', toDate || reportData.meta.to || '—'],
@@ -422,15 +422,15 @@ export const IncomeExpenseReportPage: React.FC = () => {
       'Invoice / Reference',
       'Customer / Payee',
       'Branch',
+      'Payment Status',
       'Service Collection (Excl. Tax)',
       'Tax Amount',
       'Total Bill (Incl. Tax, Excl. Tip)',
       'Tip Amount',
-      'Payment Received (Incl. Tip)',
+      'Payment Received / Cash Movement',
       'Remaining Dues',
-      'Status',
       'Date',
-      'Method',
+      'Payment Method',
     ];
     const rows = (reportData.displayRows ?? reportData.rows).map((r, i) => {
       const isInvoice = isCustomerInvoiceEntry(r);
@@ -452,13 +452,13 @@ export const IncomeExpenseReportPage: React.FC = () => {
         (r.reference || r.invoiceNumber || r.source || '—') + (r.receiptNumber ? ` (${r.receiptNumber})` : ''),
         customerOrPayee + (r.reportEvents ? ' | ' + invoiceEventDetails(r) : ''),
         r.branchName || '—',
+        r.status || 'PAID',
         !isInvoice ? '\u2014' : isRefund ? `-${formatPKR(Math.abs(serviceCollectionVal))}` : (serviceCollectionVal === 0 ? '0.00' : `+${formatPKR(serviceCollectionVal)}`),
         !isInvoice ? '\u2014' : isRefund ? `-${formatPKR(Math.abs(taxVal))}` : formatPKR(taxVal),
         !isInvoice || isSubsequent ? '\u2014' : isRefund ? `-${formatPKR(Math.abs(totalBillVal))}` : formatPKR(totalBillVal),
         isInvoice && (r.tipAmount ?? 0) > 0 ? formatPKR(r.tipAmount ?? 0) : '\u2014',
         incomeExpenseCashText(r),
         !isInvoice || remainingVal === null || remainingVal === undefined ? '\u2014' : (remainingVal > 0 ? formatPKR(remainingVal) : '0.00'),
-        r.status || 'PAID',
         formatDateDisplay(r.date),
         formatMethod(r.paymentMethod, r.paymentAccountName),
       ];
@@ -472,19 +472,19 @@ export const IncomeExpenseReportPage: React.FC = () => {
       rows,
       totals: [
         'TOTALS (PKR)',
-        '',
-        '',
-        '',
-        '',
+        '—',
+        '—',
+        '—',
+        '—',
+        '—',
         `+${formatPKR(reportData.totals.income)}`,
         `+${formatPKR(reportData.totals.collectedTax ?? reportData.kpis?.totalCollectedTax ?? 0)}`,
         `+${formatPKR(totalBillSum)}`,
-        formatPKR(reportData.totals.tipAmount ?? 0),
+        (reportData.totals.tipAmount ?? 0) > 0 ? formatPKR(reportData.totals.tipAmount ?? 0) : '—',
         signedPaid >= 0 ? `+${formatPKR(signedPaid)}` : `-${formatPKR(Math.abs(signedPaid))}`,
         formatPKR(reportData.totals.remaining || 0),
-        '',
-        '',
-        '',
+        '—',
+        '—',
       ],
     });
   };
@@ -810,7 +810,7 @@ export const IncomeExpenseReportPage: React.FC = () => {
                   </span>
                 </div>
                 <p className="text-[11px] text-[#78616C] mt-0.5">
-                  Chronological payment history. Original invoices show bill amounts; subsequent receipts track collections and balance after payment.
+                  Chronological transaction history showing actual collections, expenses, payment receipts, and remaining customer dues.
                 </p>
               </div>
             </div>
@@ -1083,109 +1083,112 @@ export const IncomeExpenseReportPage: React.FC = () => {
 
               {/* Simplified & Compact Table Footer */}
               <tfoot className="bg-[#FAF8F9]/90 border-t-2 border-slate-200 text-xs">
-                {/* Row 1: TOTALS (PKR) */}
+                {/* Row 1: TOTALS (PKR) - Strictly aligned to 10 table columns */}
                 <tr className="border-b border-slate-200/70 font-bold">
-                  <td colSpan={2} className="py-3.5 px-4 text-left text-slate-900 tracking-wide uppercase text-[11px]">
+                  {/* Col 1: Record Type */}
+                  <td className="py-3.5 px-4 text-left text-slate-900 tracking-wide uppercase text-[11px]">
                     TOTALS (PKR)
                   </td>
-                  {/* Col 3: Service Collection */}
+                  {/* Col 2: Reference / Customer or Payee */}
+                  <td className="py-3.5 px-4 text-slate-400 font-normal">—</td>
+                  {/* Col 3: Payment Status */}
+                  <td className="py-3.5 px-4 text-center text-slate-400 font-normal">—</td>
+                  {/* Col 4: Service Collection (Excl. Tax) */}
                   <td className="py-3.5 px-4 text-right font-mono tabular-nums text-sm text-emerald-700">
                     +{formatPKR(totals.income)}
                   </td>
-                  {/* Col 4: Tax Amount */}
+                  {/* Col 5: Tax Amount */}
                   <td className="py-3.5 px-4 text-right font-mono tabular-nums text-sm text-slate-700">
                     +{formatPKR(reportData?.totals?.collectedTax ?? reportData?.kpis?.totalCollectedTax ?? 0)}
                   </td>
-                  {/* Col 5: Total Bill */}
+                  {/* Col 6: Total Bill */}
                   <td className="py-3.5 px-4 text-right font-mono tabular-nums text-sm text-[#18191B]">
                     +{formatPKR(totalBillSum)}
                   </td>
-                  {/* Col 6: Tip Amount */}
-                  <td className="py-3.5 px-4 text-right font-mono tabular-nums text-sm text-slate-700">
-                    PKR {formatPKR(reportData?.totals.tipAmount ?? 0)}
+                  {/* Col 7: Tip Amount */}
+                  <td className="py-3.5 px-4 text-right font-mono tabular-nums text-sm text-slate-700 font-normal">
+                    {(reportData?.totals.tipAmount ?? 0) > 0 ? `PKR ${formatPKR(reportData?.totals.tipAmount ?? 0)}` : '—'}
                   </td>
-                  {/* Col 7: Total Cash Movement (Income Collections minus Paid Expenses) */}
+                  {/* Col 8: Payment Received / Cash Movement */}
                   <td className={`py-3.5 px-4 text-right font-mono tabular-nums text-sm font-bold ${signedPaid >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                     {signedPaid >= 0 ? `+${formatPKR(signedPaid)}` : `-${formatPKR(Math.abs(signedPaid))}`}
                   </td>
-                  {/* Col 8: Remaining Dues */}
+                  {/* Col 9: Remaining Dues */}
                   <td className="py-3.5 px-4 text-right font-mono tabular-nums text-sm text-amber-700">
                     +{formatPKR(totals.remaining || 0)}
                   </td>
-                  {/* Col 9: Payment Status spacer */}
-                  <td className="py-3.5 px-4"></td>
-                  {/* Col 10: Date / Method spacer */}
-                  <td className="py-3.5 px-4"></td>
+                  {/* Col 10: Date / Method */}
+                  <td className="py-3.5 px-4 text-slate-400 font-normal">—</td>
                 </tr>
 
                 {/* Row 2: Direct Collections */}
                 <tr className="border-t-2 border-slate-300 font-semibold bg-slate-50/70">
-                  <td colSpan={6} className="py-3.5 px-4 text-right text-slate-800">
+                  <td colSpan={7} className="py-3.5 px-4 text-right text-slate-800">
                     Total Customer Collections (Net of Customer Refunds)
                   </td>
                   <td colSpan={2} className="py-3.5 px-4 text-right font-mono font-bold text-slate-900">
                     +{formatPKR(customerCollections)}
                   </td>
-                  <td colSpan={2} className="py-3.5 px-4"></td>
+                  <td colSpan={1} className="py-3.5 px-4"></td>
                 </tr>
 
                 {/* Row 3: Operating Expenses */}
                 <tr className="border-b border-slate-200/70">
-                  <td colSpan={6} className="py-3 px-4 text-right font-medium text-slate-700">
+                  <td colSpan={7} className="py-3 px-4 text-right font-medium text-slate-700">
                     Actual Paid Operating Expenses (Including Salary and Commission Payouts)
                   </td>
                   <td colSpan={2} className="py-3 px-4 text-right font-bold font-mono tabular-nums text-rose-700">
                     -{formatPKR(totalExpensesRecognized)}
                   </td>
-                  <td colSpan={2} className="py-3 px-4"></td>
+                  <td colSpan={1} className="py-3 px-4"></td>
                 </tr>
 
                 {/* Row 4: Supplier Payments */}
                 {supplierCashOutflow > 0 && (
                   <tr className="border-b border-slate-200/70">
-                    <td colSpan={6} className="py-3 px-4 text-right font-medium text-slate-700">
+                    <td colSpan={7} className="py-3 px-4 text-right font-medium text-slate-700">
                       Supplier / Vendor Payments — Inventory Cash Outflow (Net of Reversals)
                     </td>
                     <td colSpan={2} className="py-3 px-4 text-right font-mono text-amber-700 font-medium">
                       -{formatPKR(supplierCashOutflow)}
                     </td>
-                    <td colSpan={2} className="py-3 px-4"></td>
+                    <td colSpan={1} className="py-3 px-4"></td>
                   </tr>
                 )}
 
                 {/* Row 5: Other Non-Operating Cash Outflows */}
                 {nonOperatingCashOutflows > 0 && (
                   <tr className="border-b border-slate-200/70">
-                    <td colSpan={6} className="py-3 px-4 text-right font-medium text-slate-700">
+                    <td colSpan={7} className="py-3 px-4 text-right font-medium text-slate-700">
                       Other Non-Operating Cash Outflows (Net of Reversals)
                     </td>
                     <td colSpan={2} className="py-3 px-4 text-right font-mono text-slate-700">
                       -{formatPKR(nonOperatingCashOutflows)}
                     </td>
-                    <td colSpan={2} className="py-3 px-4"></td>
+                    <td colSpan={1} className="py-3 px-4"></td>
                   </tr>
                 )}
 
                 {/* Row 6: Net Cash Movement */}
                 <tr className="border-b border-slate-300 font-bold bg-slate-100/60">
-                  <td colSpan={6} className="py-3.5 px-4 text-right text-slate-900 text-sm">
+                  <td colSpan={7} className="py-3.5 px-4 text-right text-slate-900 text-sm">
                     Net Cash Movement
                   </td>
                   <td colSpan={2} className={`py-3.5 px-4 text-right font-mono font-bold tabular-nums text-sm ${signedPaid >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                     {signedPaid >= 0 ? `+${formatPKR(signedPaid)}` : `-${formatPKR(Math.abs(signedPaid))}`}
                   </td>
-                  <td colSpan={2} className="py-3.5 px-4"></td>
+                  <td colSpan={1} className="py-3.5 px-4"></td>
                 </tr>
 
                 {/* Row 7: Current Remaining Customer Dues */}
                 <tr className="border-b border-slate-200/70 font-semibold bg-amber-50/40">
-                  <td colSpan={6} className="py-3 px-4 text-right text-amber-900">
+                  <td colSpan={7} className="py-3 px-4 text-right text-amber-900">
                     Current Remaining Customer Dues
                   </td>
                   <td colSpan={2} className="py-3 px-4 text-right font-mono font-bold text-amber-700">
                     PKR {formatPKR(totals.remaining || 0)}
                   </td>
-                  <td colSpan={2} className="py-3 px-4"></td>
+                  <td colSpan={1} className="py-3 px-4"></td>
                 </tr>
               </tfoot>
             </table>
