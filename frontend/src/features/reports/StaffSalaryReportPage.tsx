@@ -69,12 +69,12 @@ export const StaffSalaryReportPage: React.FC = () => {
   );
   const [selectedStaff, setSelectedStaff] = useState<string>('ALL');
   const [paymentStatus, setPaymentStatus] = useState<string>('ALL');
-  const [fromMonth, setFromMonth] = useState<string>(yearStart);
+  const [fromMonth, setFromMonth] = useState<string>(thisMonth);
   const [toMonth, setToMonth] = useState<string>(thisMonth);
 
-  // Page state: Only fetch when user explicitly clicks Filter ("filter karna sa aae default nhi")
-  const [hasFiltered, setHasFiltered] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  // Page state: Auto-load default monthly date range on mount
+  const [hasFiltered, setHasFiltered] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [reportData, setReportData] = useState<StaffSalaryReport | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -118,6 +118,17 @@ export const StaffSalaryReportPage: React.FC = () => {
 
     fetchReport(query);
   };
+
+  // Auto-fetch default monthly date range on mount or when branch changes
+  useEffect(() => {
+    fetchReport({
+      branchId: selectedBranch,
+      fromMonth,
+      toMonth,
+      staffId: selectedStaff !== 'ALL' ? selectedStaff : undefined,
+      paymentStatus: paymentStatus !== 'ALL' ? (paymentStatus as any) : undefined,
+    });
+  }, [fetchReport, selectedBranch]);
 
   // Export handlers
   const handleExportExcel = () => {

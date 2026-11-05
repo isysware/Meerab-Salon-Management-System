@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { salonService } from '@/services';
 import {
@@ -11,6 +11,7 @@ import {
   downloadReportCsv,
   downloadReportExcel,
   printReportWindow,
+  resolvePreset,
 } from '@/features/reports/reportUtils';
 import {
   Filter,
@@ -71,7 +72,7 @@ const formatDateDisplay = (dateStr: string) => {
 };
 
 export const DetailedExpensesReportPage: React.FC = () => {
-  const { user, activeBranchId, allBranches } = useAuth();
+  const { user, activeBranchId, allBranches, demoDate } = useAuth();
 
   // Role guard: Super Admin, Admin, and Accountant
   if (!user || user.role === 'STAFF') {
@@ -79,21 +80,26 @@ export const DetailedExpensesReportPage: React.FC = () => {
   }
 
   const isSuperAdmin = user.role === 'SUPER_ADMIN';
+  const defaultBranch = isSuperAdmin ? (activeBranchId || 'ALL') : (user.branchId || '');
+
+  const businessDate = demoDate || new Date().toISOString().slice(0, 10);
+  const defaultRange = resolvePreset('THIS_MONTH', businessDate) || {
+    from: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10),
+    to: businessDate,
+  };
 
   // Filter Form State
-  const [selectedBranch, setSelectedBranch] = useState<string>(
-    isSuperAdmin ? (activeBranchId || 'ALL') : (user.branchId || '')
-  );
+  const [selectedBranch, setSelectedBranch] = useState<string>(defaultBranch);
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
   const [selectedPaymentSource, setSelectedPaymentSource] = useState<string>('ALL');
-  const [fromDate, setFromDate] = useState<string>('');
-  const [toDate, setToDate] = useState<string>('');
+  const [fromDate, setFromDate] = useState<string>(defaultRange.from);
+  const [toDate, setToDate] = useState<string>(defaultRange.to);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Page state: Only fetch when user explicitly clicks Filter ("filter karna sa aae default nhi")
-  const [hasFiltered, setHasFiltered] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  // Page state: Auto-load default monthly date range on mount
+  const [hasFiltered, setHasFiltered] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [reportData, setReportData] = useState<DetailedExpensesReport | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -134,6 +140,22 @@ export const DetailedExpensesReportPage: React.FC = () => {
 
     fetchReport(query);
   };
+
+  // Auto-fetch default month on mount or when branch changes
+  useEffect(() => {
+    fetchReport({
+      branchId: selectedBranch,
+      startDate: fromDate || undefined,
+      endDate: toDate || undefined,
+      from: fromDate || undefined,
+      to: toDate || undefined,
+      preset: 'THIS_MONTH',
+      category: selectedCategory !== 'ALL' ? selectedCategory : undefined,
+      status: (selectedStatus as any) || 'ALL',
+      paymentSource: (selectedPaymentSource as any) || 'ALL',
+      search: searchQuery.trim() || undefined,
+    });
+  }, [fetchReport, selectedBranch]);
 
   // Export handlers
   const handleExportExcel = () => {

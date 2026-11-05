@@ -1023,6 +1023,8 @@ export interface Invoice {
   amountPaid: number; // Sum of confirmed payments
   amountDue: number; // Outstanding receivable
   payments: PaymentRecord[];
+  isBookingInvoice?: boolean;
+  bookingType?: string;
   processedByUserId: string;
   processedByName: string;
   idempotencyKey?: string;
@@ -1678,6 +1680,8 @@ export interface AttendancePolicyConfig {
   branchId: string;
   autoMarkAbsentEnabled: boolean; // default true
   autoAbsentThresholdMinutes: number; // default 60 (1 hour after shift start)
+  autoHalfDayEnabled?: boolean; // default false (OFF by default)
+  halfDayThresholdMinutes?: number; // default 120 (2 hours after shift start)
   defaultStartTime: string; // default "09:00"
   defaultEndTime: string; // default "18:00"
   lateGraceMinutes: number; // default 15

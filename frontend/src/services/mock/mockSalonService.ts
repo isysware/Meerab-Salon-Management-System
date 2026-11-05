@@ -7151,6 +7151,8 @@ class MockSalonService implements SalonServiceContract {
       branchId,
       autoMarkAbsentEnabled: true,
       autoAbsentThresholdMinutes: 60,
+      autoHalfDayEnabled: false,
+      halfDayThresholdMinutes: 120,
       defaultStartTime: '09:00',
       defaultEndTime: '18:00',
       lateGraceMinutes: 15,
@@ -7180,6 +7182,8 @@ class MockSalonService implements SalonServiceContract {
         branchId,
         autoMarkAbsentEnabled: policyData.autoMarkAbsentEnabled ?? true,
         autoAbsentThresholdMinutes: policyData.autoAbsentThresholdMinutes ?? 60,
+        autoHalfDayEnabled: policyData.autoHalfDayEnabled ?? false,
+        halfDayThresholdMinutes: policyData.halfDayThresholdMinutes ?? 120,
         defaultStartTime: policyData.defaultStartTime || '09:00',
         defaultEndTime: policyData.defaultEndTime || '18:00',
         lateGraceMinutes: policyData.lateGraceMinutes ?? 15,
@@ -7191,6 +7195,8 @@ class MockSalonService implements SalonServiceContract {
     } else {
       if (policyData.autoMarkAbsentEnabled !== undefined) config.autoMarkAbsentEnabled = policyData.autoMarkAbsentEnabled;
       if (policyData.autoAbsentThresholdMinutes !== undefined) config.autoAbsentThresholdMinutes = policyData.autoAbsentThresholdMinutes;
+      if (policyData.autoHalfDayEnabled !== undefined) config.autoHalfDayEnabled = policyData.autoHalfDayEnabled;
+      if (policyData.halfDayThresholdMinutes !== undefined) config.halfDayThresholdMinutes = policyData.halfDayThresholdMinutes;
       if (policyData.defaultStartTime) config.defaultStartTime = policyData.defaultStartTime;
       if (policyData.defaultEndTime) config.defaultEndTime = policyData.defaultEndTime;
       if (policyData.lateGraceMinutes !== undefined) config.lateGraceMinutes = policyData.lateGraceMinutes;

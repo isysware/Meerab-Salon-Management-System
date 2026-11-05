@@ -72,9 +72,9 @@ export const AppointmentReportPage: React.FC = () => {
   const [startDate, setStartDate] = useState<string>(defaultMonth.from);
   const [endDate, setEndDate] = useState<string>(defaultMonth.to);
 
-  // Page state: Only fetch when user explicitly clicks Filter ("filter karna sa aae default nhi")
-  const [hasFiltered, setHasFiltered] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  // Page state: Auto-load default monthly date range on mount
+  const [hasFiltered, setHasFiltered] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [records, setRecords] = useState<AppointmentReportRecord[]>([]);
   const [summary, setSummary] = useState<AppointmentReportSummary>({
     totalAppointments: 0,
@@ -171,6 +171,11 @@ export const AppointmentReportPage: React.FC = () => {
     setHasFiltered(true);
     fetchReport();
   };
+
+  // Auto-fetch default monthly date range on mount or when branch changes
+  useEffect(() => {
+    fetchReport();
+  }, [fetchReport]);
 
   // Export Handlers
   const handleExportExcel = () => {

@@ -12,6 +12,7 @@ import { AccessDeniedView } from '@/features/scaffold/AccessDeniedView';
 import {
   downloadReportCsv,
   printReportWindow,
+  resolvePreset,
 } from '@/features/reports/reportUtils';
 import {
   Filter,
@@ -70,7 +71,7 @@ const formatDateDisplay = (dateStr: string) => {
 };
 
 export const DetailedIncomeReportPage: React.FC = () => {
-  const { user, activeBranchId, allBranches } = useAuth();
+  const { user, activeBranchId, allBranches, demoDate } = useAuth();
 
   if (!user || user.role === 'STAFF') {
     return <AccessDeniedView attemptedPath="/reports/detailed-income" />;
@@ -78,21 +79,26 @@ export const DetailedIncomeReportPage: React.FC = () => {
 
   const isSuperAdmin = user.role === 'SUPER_ADMIN';
   const isAccountant = user.role === 'ACCOUNTANT';
+  const defaultBranch = isSuperAdmin ? (activeBranchId || 'ALL') : (user.branchId || '');
+
+  const businessDate = demoDate || new Date().toISOString().slice(0, 10);
+  const defaultRange = resolvePreset('THIS_MONTH', businessDate) || {
+    from: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10),
+    to: businessDate,
+  };
 
   // Filters State
-  const [selectedBranch, setSelectedBranch] = useState<string>(
-    isSuperAdmin ? (activeBranchId || 'ALL') : (user.branchId || '')
-  );
-  const [fromDate, setFromDate] = useState<string>('');
-  const [toDate, setToDate] = useState<string>('');
+  const [selectedBranch, setSelectedBranch] = useState<string>(defaultBranch);
+  const [fromDate, setFromDate] = useState<string>(defaultRange.from);
+  const [toDate, setToDate] = useState<string>(defaultRange.to);
   const [sourceType, setSourceType] = useState<string>('ALL');
   const [paymentStatus, setPaymentStatus] = useState<string>('ALL');
   const [lifecycle, setLifecycle] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Page State
-  const [hasFiltered, setHasFiltered] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [hasFiltered, setHasFiltered] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reportData, setReportData] = useState<DetailedIncomeReport | null>(null);
 
@@ -145,6 +151,23 @@ export const DetailedIncomeReportPage: React.FC = () => {
 
     fetchReport(query);
   };
+
+  // Auto-fetch default monthly report on initial mount
+  useEffect(() => {
+    const query: DetailedIncomeReportQuery = {
+      branchId: defaultBranch !== 'ALL' ? defaultBranch : undefined,
+      startDate: defaultRange.from,
+      endDate: defaultRange.to,
+      from: defaultRange.from,
+      to: defaultRange.to,
+      preset: 'THIS_MONTH',
+      sourceType: 'ALL',
+      paymentStatus: 'ALL',
+      lifecycle: 'ALL',
+      soldByUserId: isAccountant ? user.id : undefined,
+    };
+    fetchReport(query);
+  }, [defaultBranch, defaultRange.from, defaultRange.to, isAccountant, user.id, fetchReport]);
 
   const filteredRows = useMemo(() => {
     if (!reportData) return [];

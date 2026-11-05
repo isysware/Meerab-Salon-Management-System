@@ -71,12 +71,21 @@ const formatDateDisplay = (dateStr: string) => {
 };
 
 export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS' | 'CASH_DRAWER' }> = ({ initialTab = 'PAYMENT_ACCOUNTS' }) => {
-  const { user, activeBranchId, allBranches } = useAuth();
+  const { user, activeBranchId, allBranches, demoDate } = useAuth();
 
   // Role guard: Super Admin, Admin, and Accountant
   if (!user || user.role === 'STAFF') {
     return <AccessDeniedView attemptedPath="/reports/debit-credit" />;
   }
+
+  const businessDate = demoDate || new Date().toISOString().slice(0, 10);
+  const defaultMonth = useMemo(() => {
+    const parts = businessDate.split('-');
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const firstDay = `${y}-${String(m).padStart(2, '0')}-01`;
+    return { from: firstDay, to: businessDate };
+  }, [businessDate]);
 
   // Active Main Tab: 'PAYMENT_ACCOUNTS' | 'CASH_DRAWER'
   const [activeTab, setActiveTab] = useState<'PAYMENT_ACCOUNTS' | 'CASH_DRAWER'>(user.role === 'ACCOUNTANT' ? 'CASH_DRAWER' : initialTab);
@@ -90,8 +99,8 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
   const [selectedBranch, setSelectedBranch] = useState<string>(
     isSuperAdmin ? (activeBranchId || 'ALL') : (user.branchId || '')
   );
-  const [fromDate, setFromDate] = useState<string>('');
-  const [toDate, setToDate] = useState<string>('');
+  const [fromDate, setFromDate] = useState<string>(defaultMonth.from);
+  const [toDate, setToDate] = useState<string>(defaultMonth.to);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Payment Accounts Specific Filters
@@ -102,9 +111,9 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
   // Cash Drawer Specific Filters
   const [selectedDrawerStatus, setSelectedDrawerStatus] = useState<string>('ALL');
 
-  // State
-  const [hasFiltered, setHasFiltered] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  // State: Auto-load default monthly date range on mount
+  const [hasFiltered, setHasFiltered] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [accountsReport, setAccountsReport] = useState<PaymentAccountsReport | null>(null);
   const [drawerReport, setDrawerReport] = useState<CashDrawerReport | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -153,6 +162,11 @@ export const DebitCreditStatementPage: React.FC<{ initialTab?: 'PAYMENT_ACCOUNTS
     if (e) e.preventDefault();
     fetchReport(activeTab);
   };
+
+  // Auto-fetch default monthly date range on mount or when branch changes
+  useEffect(() => {
+    fetchReport(activeTab);
+  }, [fetchReport, activeTab, selectedBranch]);
 
   const handleTabChange = (newTab: 'PAYMENT_ACCOUNTS' | 'CASH_DRAWER') => {
     setActiveTab(newTab);

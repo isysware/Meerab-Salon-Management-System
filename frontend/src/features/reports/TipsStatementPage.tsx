@@ -76,9 +76,9 @@ export const TipsStatementPage: React.FC = () => {
   const [selectedPaymentSource, setSelectedPaymentSource] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Page state: Only fetch when user explicitly clicks Filter ("filter karna sa aae default nhi")
-  const [hasFiltered, setHasFiltered] = useState<boolean>(false);
-  const [loading, setLoading] = useState<boolean>(false);
+  // Page state: Auto-load default monthly date range on mount
+  const [hasFiltered, setHasFiltered] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'SUMMARY' | 'COLLECTIONS' | 'ALLOCATIONS' | 'PAYOUTS'>('SUMMARY');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -163,6 +163,11 @@ export const TipsStatementPage: React.FC = () => {
     setHasFiltered(true);
     fetchStatement();
   };
+
+  // Auto-fetch default monthly date range on mount or when branch changes
+  useEffect(() => {
+    fetchStatement();
+  }, [fetchStatement]);
 
   // Filtered lists for search query
   const filteredReceipts = useMemo(() => {

@@ -74,7 +74,7 @@ const formatDateDisplay = (dateStr: string) => {
 };
 
 export const SalesInvoicesPage: React.FC = () => {
-  const { user, activeBranchId, allBranches } = useAuth();
+  const { user, activeBranchId, allBranches, demoDate } = useAuth();
 
   // Role guard: Super Admin, Admin, and Accountant
   if (!user || user.role === 'STAFF') {
@@ -83,6 +83,15 @@ export const SalesInvoicesPage: React.FC = () => {
 
   const isSuperAdmin = user.role === 'SUPER_ADMIN';
   const isAccountant = user.role === 'ACCOUNTANT';
+
+  const businessDate = demoDate || new Date().toISOString().slice(0, 10);
+  const defaultMonth = useMemo(() => {
+    const parts = businessDate.split('-');
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const firstDay = `${y}-${String(m).padStart(2, '0')}-01`;
+    return { from: firstDay, to: businessDate };
+  }, [businessDate]);
 
   // Filter Form State
   const [selectedBranch, setSelectedBranch] = useState<string>(
@@ -93,13 +102,13 @@ export const SalesInvoicesPage: React.FC = () => {
   const [paymentStatus, setPaymentStatus] = useState<string>('ALL');
   const [lifecycle, setLifecycle] = useState<string>('ALL');
   const [paymentMethod, setPaymentMethod] = useState<string>('ALL');
-  const [fromDate, setFromDate] = useState<string>('');
-  const [toDate, setToDate] = useState<string>('');
+  const [fromDate, setFromDate] = useState<string>(defaultMonth.from);
+  const [toDate, setToDate] = useState<string>(defaultMonth.to);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Page state: Only fetch when user explicitly clicks Filter ("filter karna sa aae default nhi")
-  const [hasFiltered, setHasFiltered] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  // Page state: Auto-load default monthly date range on mount
+  const [hasFiltered, setHasFiltered] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [reportData, setReportData] = useState<SalesInvoicesReport | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -172,6 +181,23 @@ export const SalesInvoicesPage: React.FC = () => {
 
     fetchReport(query);
   };
+
+  // Auto-fetch default monthly date range on mount or when branch changes
+  useEffect(() => {
+    fetchReport({
+      branchId: selectedBranch,
+      startDate: fromDate || defaultMonth.from,
+      endDate: toDate || defaultMonth.to,
+      from: fromDate || defaultMonth.from,
+      to: toDate || defaultMonth.to,
+      preset: 'THIS_MONTH',
+      paymentStatus: (paymentStatus as any) || 'ALL',
+      lifecycle: (lifecycle as any) || 'ALL',
+      paymentMethod: paymentMethod === 'ALL' ? undefined : paymentMethod,
+      soldByUserId: isAccountant ? user.id : (selectedCashier !== 'ALL' ? selectedCashier : undefined),
+      search: searchQuery.trim() || undefined,
+    });
+  }, [fetchReport, selectedBranch]);
 
   const [printingInvoiceId, setPrintingInvoiceId] = useState<string | null>(null);
 

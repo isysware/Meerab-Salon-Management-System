@@ -45,6 +45,8 @@ import {
 import { BookingConfirmationModal } from './BookingConfirmationModal';
 import { BookingDetailsModal } from './BookingDetailsModal';
 import { MaterialTimePickerModal } from '@/components/ui/MaterialTimePickerModal';
+import { ReceiptModal } from '@/features/pos/ReceiptModal';
+import { bookingToInvoice } from './bookingToInvoice';
 
 const selectClass = 'w-full rounded-xl border border-[#F1DEE3] bg-white px-3 py-2 text-sm text-[#23151D] focus:outline-none focus:ring-2 focus:ring-[#9D2558]/20 focus:border-[#9D2558]';
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Karachi' }).format(new Date());
@@ -1172,6 +1174,7 @@ export function BookingsPage() {
   const [mode, setMode] = useState<'payment' | 'refund' | 'cancel' | 'no-show'>();
   const [ledger, setLedger] = useState<BookingLedger>();
   const [printReceipt, setPrintReceipt] = useState<Booking>();
+  const [invoiceBooking, setInvoiceBooking] = useState<Booking | null>(null);
   const [confirmationBooking, setConfirmationBooking] = useState<Booking | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -2340,6 +2343,19 @@ export function BookingsPage() {
                     >
                       View Details
                     </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-8 text-[#9D2558] border-[#F1DEE3] hover:bg-[#FDF2F5] gap-1 font-semibold"
+                      onClick={() => {
+                        setSelectedDayForBookings(null);
+                        setInvoiceBooking(b);
+                      }}
+                      title="View & Print Booking Advance Invoice"
+                    >
+                      <Receipt className="w-3.5 h-3.5" />
+                      Invoice
+                    </Button>
                     {isOpen(b) && (
                       <Button
                         size="sm"
@@ -2359,11 +2375,12 @@ export function BookingsPage() {
 
       {/* Booking Details Dialog */}
       <BookingDetailsModal
-        isOpen={Boolean(selected && !editing && !mode && !ledger && !printReceipt)}
+        isOpen={Boolean(selected && !editing && !mode && !ledger && !printReceipt && !invoiceBooking)}
         onClose={() => setSelected(undefined)}
         booking={selected || null}
         branch={branches.find(b => b.id === selected?.branchId) || null}
         onEdit={b => setEditing(b)}
+        onOpenInvoice={b => setInvoiceBooking(b)}
         onOpenConfirmationMessage={b => setConfirmationBooking(b)}
         onOpenInPOS={b => navigate(`/pos?bookingId=${b.id}`)}
         onRefund={b => { setSelected(b); setMode('refund'); }}
@@ -2391,7 +2408,7 @@ export function BookingsPage() {
         <PaymentDialog
           booking={selected}
           mode={mode}
-          onSaved={b => { saved(b); setPrintReceipt(b); }}
+          onSaved={b => { saved(b); setInvoiceBooking(b); }}
           onClose={() => setMode(undefined)}
         />
       )}
@@ -2436,32 +2453,23 @@ export function BookingsPage() {
         </Dialog>
       )}
 
-      {/* Payment Receipts Dialog */}
-      {printReceipt && (
-        <Dialog open onOpenChange={o => { if (!o) setPrintReceipt(undefined); }}>
-          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto p-4 sm:p-6 w-[95vw] sm:w-full">
-            <DialogHeader>
-              <DialogTitle>{printReceipt.bookingNumber} · Payment receipts</DialogTitle>
-            </DialogHeader>
-            <p className="text-sm font-semibold">{printReceipt.clientName} · {printReceipt.clientPhone}</p>
-            <div className="space-y-2">
-              {printReceipt.payments.map(p => (
-                <div className="rounded-xl border border-[#F1DEE3] p-4 text-sm space-y-1 bg-[#FDF2F5]/30" key={p.id}>
-                  <p className="font-semibold">{p.receiptNumber} · {p.isRefund ? 'Refund' : 'Advance receipt'}</p>
-                  <p className="text-xs text-slate-500">{p.date} · {p.time} · {p.method} {p.paymentAccountName}</p>
-                  <p className="text-lg font-bold text-emerald-700 font-mono">{formatCurrency(p.amount)}</p>
-                  <p className="text-xs text-slate-600">Collected by {p.processedByName}</p>
-                  {p.reference && <p className="text-xs text-slate-500">{p.reference} {p.notes}</p>}
-                </div>
-              ))}
-            </div>
-            <p className="font-bold font-mono">Remaining: {formatCurrency(printReceipt.remainingBalance)}</p>
-            <Button onClick={() => printBookingDocument(printReceipt.bookingNumber + ' - Payment receipts', printReceipt.clientName + ' | ' + printReceipt.clientPhone, ['Receipt', 'Date', 'Method', 'Amount', 'Type', 'Processed by', 'Reference'], printReceipt.payments.map(p => [p.receiptNumber, p.date, p.method + ' ' + (p.paymentAccountName || ''), p.amount, p.isRefund ? 'Refund' : 'Advance receipt', p.processedByName, p.reference]))}>
-              Print receipts
-            </Button>
-          </DialogContent>
-        </Dialog>
-      )}
+      {/* Booking POS Invoice / Advance Receipt Modal */}
+      <ReceiptModal
+        isOpen={Boolean(invoiceBooking || printReceipt)}
+        onClose={() => {
+          setInvoiceBooking(null);
+          setPrintReceipt(undefined);
+        }}
+        invoice={
+          (invoiceBooking || printReceipt)
+            ? bookingToInvoice(
+                (invoiceBooking || printReceipt)!,
+                branches.find(b => b.id === (invoiceBooking || printReceipt)?.branchId) || null
+              )
+            : null
+        }
+        branch={branches.find(b => b.id === (invoiceBooking || printReceipt)?.branchId) || null}
+      />
 
       {/* Booking Confirmation / WhatsApp Modal */}
       <BookingConfirmationModal
@@ -2470,7 +2478,7 @@ export function BookingsPage() {
         booking={confirmationBooking}
         branch={branches.find(b => b.id === confirmationBooking?.branchId) || null}
         onPrintReceipt={b => {
-          setPrintReceipt(b);
+          setInvoiceBooking(b);
         }}
       />
     </div>

@@ -63,9 +63,9 @@ export const COGSReportPage: React.FC = () => {
   const [customTo, setCustomTo] = useState<string>(defaultMonth.to);
   const [activeTab, setActiveTab] = useState<'STATEMENT' | 'DETAILED'>('STATEMENT');
 
-  // Page state: Only fetch when user explicitly clicks Filter ("filter karna sa aae default nhi")
-  const [hasFiltered, setHasFiltered] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  // Page state: Auto-load default monthly date range on mount
+  const [hasFiltered, setHasFiltered] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [reportData, setReportData] = useState<OperatingProfitReport | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -123,6 +123,19 @@ export const COGSReportPage: React.FC = () => {
 
     fetchReport(query);
   };
+
+  // Auto-fetch default monthly date range on mount or when branch/viewMode changes
+  useEffect(() => {
+    fetchReport({
+      branchId: selectedBranch,
+      preset: selectedPreset,
+      startDate: customFrom || undefined,
+      endDate: customTo || undefined,
+      from: customFrom || undefined,
+      to: customTo || undefined,
+      viewMode,
+    });
+  }, [fetchReport, selectedBranch, viewMode]);
 
   // Active view payload (Accrual vs Collection)
   const activeViewData: OperatingProfitReportViewData | null = useMemo(() => {

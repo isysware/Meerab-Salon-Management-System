@@ -91,9 +91,9 @@ export const InventoryReportsPage: React.FC = () => {
       .catch(() => setSuppliers([]));
   }, [selectedBranch, user]);
 
-  // Page state: Only fetch when user explicitly clicks Filter ("filter karna sa aae default nhi")
-  const [hasFiltered, setHasFiltered] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  // Page state: Auto-load default monthly date range on mount
+  const [hasFiltered, setHasFiltered] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [reportData, setReportData] = useState<InventoryReportData | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -152,6 +152,11 @@ export const InventoryReportsPage: React.FC = () => {
 
     fetchReport(query);
   };
+
+  // Auto-fetch default monthly date range on mount or when branch/tab changes
+  useEffect(() => {
+    handleApplyFilters(undefined, activeTab);
+  }, [selectedBranch, activeTab]);
 
   const handleTabChange = (tab: InventorySubReportType) => {
     setActiveTab(tab);

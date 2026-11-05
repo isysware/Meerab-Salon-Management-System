@@ -119,6 +119,35 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
       branchPhone,
     ].filter(Boolean).join('\n');
 
+    const isBkg = Boolean(invoice.isBookingInvoice || invoice.invoiceNumber?.startsWith('BKG'));
+    const bkgType =
+      invoice.bookingType === 'BRIDAL'
+        ? 'Bridal Event'
+        : invoice.bookingType === 'GROOM'
+        ? 'Groom Event'
+        : 'Salon Reservation';
+
+    if (isBkg) {
+      return `${headerLines}
+================================
+*BOOKING ADVANCE INVOICE*
+Booking Ref: ${invoice.invoiceNumber}
+Event Type: ${bkgType}
+Event Date: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}
+Customer: ${invoice.clientName || 'Valued Customer'}${invoice.clientPhone && invoice.clientPhone !== 'N/A' ? ` (${invoice.clientPhone})` : ''}
+================================
+*RESERVED SERVICES:*
+${items}
+--------------------------------
+Total Quoted Price: ${formatCurrency(invoice.total)}${discounts}
+*Advance Paid (${methodSummary}): ${formatCurrency(invoice.amountPaid)}*
+*Remaining Balance (Due on Event): ${formatCurrency(invoice.amountDue)}*
+================================
+* Advance payment received with thanks.
+* Please settle remaining balance on the event date.
+Thank you for choosing ${branch?.name || 'Meerub Salon & Spa'}!`;
+    }
+
     return `${headerLines}
 ================================
 *SALES INVOICE*
@@ -210,6 +239,7 @@ Powered by Isysware Software Solutions`;
 
   const isPaid = invoice.status === 'PAID';
   const isPartial = invoice.status === 'PARTIAL';
+  const isBkg = Boolean(invoice.isBookingInvoice || invoice.invoiceNumber?.startsWith('BKG'));
   const lines = invoice.lineItems || invoice.lines || [];
   const payments = invoice.payments || [];
 
@@ -222,14 +252,14 @@ Powered by Isysware Software Solutions`;
             <span className="w-6 h-6 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 border border-emerald-200/60">
               <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
             </span>
-            <span>Transaction Receipt</span>
+            <span>{isBkg ? 'Booking Advance Invoice' : 'Transaction Receipt'}</span>
           </DialogTitle>
           <div className="flex items-center gap-2 pr-6">
             <Badge
               variant={isPaid ? 'success' : isPartial ? 'warning' : 'neutral'}
               className="text-[11px] font-bold rounded-full px-2.5 py-0.5"
             >
-              {invoice.status}
+              {isBkg && isPartial ? 'ADVANCE PAID' : isBkg && isPaid ? 'FULLY PAID' : invoice.status}
             </Badge>
           </div>
         </DialogHeader>
@@ -368,16 +398,24 @@ Powered by Isysware Software Solutions`;
             {/* Invoice Meta */}
             <div className="grid grid-cols-2 gap-2 text-[11px] py-1 border-b border-slate-100">
               <div>
-                <span className="text-slate-400 block text-[10px]">Invoice No.</span>
+                <span className="text-slate-400 block text-[10px]">{isBkg ? 'Booking Ref' : 'Invoice No.'}</span>
                 <span className="font-mono font-bold text-slate-900">{invoice.invoiceNumber}</span>
               </div>
               <div className="text-right">
-                <span className="text-slate-400 block text-[10px]">Date & Time</span>
+                <span className="text-slate-400 block text-[10px]">{isBkg ? 'Event Date & Time' : 'Date & Time'}</span>
                 <span className="font-medium text-slate-800">{invoice.date} • {invoice.time}</span>
               </div>
               <div>
-                <span className="text-slate-400 block text-[10px]">Cashier / Terminal</span>
-                <span className="font-medium text-slate-800">{invoice.processedByName}</span>
+                <span className="text-slate-400 block text-[10px]">{isBkg ? 'Event Type' : 'Cashier / Terminal'}</span>
+                <span className="font-medium text-slate-800">
+                  {isBkg
+                    ? invoice.bookingType === 'BRIDAL'
+                      ? 'Bridal Event'
+                      : invoice.bookingType === 'GROOM'
+                      ? 'Groom Event'
+                      : 'Salon Reservation'
+                    : invoice.processedByName}
+                </span>
               </div>
               <div className="text-right">
                 <span className="text-slate-400 block text-[10px]">Customer</span>
@@ -391,7 +429,7 @@ Powered by Isysware Software Solutions`;
             {/* Line Items Table */}
             <div className="space-y-1.5 py-1">
               <div className="flex justify-between font-semibold text-[10px] text-slate-400 uppercase tracking-wider border-b border-slate-100 pb-1">
-                <span>Item / Service</span>
+                <span>{isBkg ? 'Reserved Service / Item' : 'Item / Service'}</span>
                 <span className="text-right">Amount</span>
               </div>
 
@@ -452,24 +490,27 @@ Powered by Isysware Software Solutions`;
               )}
 
               <div className="flex justify-between items-center text-slate-900 font-bold pt-1 border-t border-slate-200">
-                <span>Total Payable:</span>
+                <span>{isBkg ? 'Total Quoted Price:' : 'Total Payable:'}</span>
                 <span className="font-mono text-sm font-extrabold">{formatCurrency(invoice.total)}</span>
               </div>
 
               <div className="flex justify-between items-center text-slate-900 font-bold">
-                <span>Paid Amount ({getPaymentMethodSummary(invoice)}):</span>
+                <span>{isBkg ? 'Advance Paid' : 'Paid Amount'} ({getPaymentMethodSummary(invoice)}):</span>
                 <span className="font-mono text-emerald-700">{formatCurrency(invoice.amountPaid)}</span>
               </div>
 
               <div className={`flex justify-between items-center font-bold ${invoice.amountDue > 0 ? 'text-rose-600' : 'text-slate-800'}`}>
-                <span>Outstanding Balance:</span>
+                <span>{isBkg ? 'Remaining Balance (Due on Event):' : 'Outstanding Balance:'}</span>
                 <span className="font-mono">{formatCurrency(invoice.amountDue)}</span>
               </div>
             </div>
 
             {/* Footer Brand Note */}
             <div className="text-center text-[10px] text-slate-400 pt-2 border-t border-dashed border-slate-200 space-y-0.5">
-              <p>Thank you for choosing {branch?.name || 'iSysware Salon'}!</p>
+              {isBkg && (
+                <p className="font-semibold text-emerald-800 text-[11px]">* Advance payment receipt. Remaining balance payable on event date.</p>
+              )}
+              <p>Thank you for choosing {branch?.name || 'Meerub Salon & Spa'}!</p>
               <p className="font-mono text-[9px] text-slate-400">Powered by Isysware Software Solutions</p>
             </div>
           </div>

@@ -646,6 +646,8 @@ const DEFAULT_ATTENDANCE_POLICY = (branchId) => ({
   branchId,
   autoMarkAbsentEnabled: true,
   autoAbsentThresholdMinutes: 60, // 1 hour after shift start
+  autoHalfDayEnabled: false, // by-default OFF as requested
+  halfDayThresholdMinutes: 120, // 2 hours after shift start
   defaultStartTime: '09:00',
   defaultEndTime: '18:00',
   lateGraceMinutes: 15,
@@ -676,6 +678,8 @@ export const updateAttendancePolicy = async (input, actor) => {
     ...current,
     autoMarkAbsentEnabled: input.autoMarkAbsentEnabled !== undefined ? Boolean(input.autoMarkAbsentEnabled) : current.autoMarkAbsentEnabled,
     autoAbsentThresholdMinutes: input.autoAbsentThresholdMinutes !== undefined ? Number(input.autoAbsentThresholdMinutes) : current.autoAbsentThresholdMinutes,
+    autoHalfDayEnabled: input.autoHalfDayEnabled !== undefined ? Boolean(input.autoHalfDayEnabled) : (current.autoHalfDayEnabled ?? false),
+    halfDayThresholdMinutes: input.halfDayThresholdMinutes !== undefined ? Number(input.halfDayThresholdMinutes) : (current.halfDayThresholdMinutes ?? 120),
     defaultStartTime: input.defaultStartTime || current.defaultStartTime,
     defaultEndTime: input.defaultEndTime || current.defaultEndTime,
     lateGraceMinutes: input.lateGraceMinutes !== undefined ? Number(input.lateGraceMinutes) : current.lateGraceMinutes,

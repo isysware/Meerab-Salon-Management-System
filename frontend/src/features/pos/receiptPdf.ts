@@ -55,6 +55,13 @@ export function generateThermalReceiptHtml(invoice: Invoice, branch: Branch | nu
 
   const lines = invoice.lineItems || invoice.lines || [];
   const methodSummary = getPaymentMethodSummary(invoice);
+  const isBkg = Boolean(invoice.isBookingInvoice || invoice.invoiceNumber?.startsWith('BKG'));
+  const bkgTypeLabel =
+    invoice.bookingType === 'BRIDAL'
+      ? 'Bridal Event'
+      : invoice.bookingType === 'GROOM'
+      ? 'Groom Event'
+      : 'Salon Reservation';
 
   const itemsHtml = lines.map((li) => {
     const qtyText = !li.batchAllocations?.length && li.quantity > 1 ? ` (${li.quantity}x @ ${formatPkr(li.unitPrice)})` : '';
@@ -156,13 +163,14 @@ export function generateThermalReceiptHtml(invoice: Invoice, branch: Branch | nu
   <table class="meta-table">
     <tr>
       <td colspan="2" style="text-align: center; font-weight: bold; font-size: 10.5px; padding-bottom: 2px;">
-        ${branch?.taxRegistrationNumber ? 'TAX INVOICE' : 'RETAIL INVOICE'}
+        ${isBkg ? 'BOOKING ADVANCE INVOICE' : branch?.taxRegistrationNumber ? 'TAX INVOICE' : 'RETAIL INVOICE'}
       </td>
     </tr>
     <tr>
-      <td style="width: 50%;"><strong>Inv #:</strong> ${escapeHtml(invoice.invoiceNumber)}</td>
-      <td style="text-align: right; width: 50%;">${escapeHtml(invoice.date)}${invoice.time ? ` ${escapeHtml(invoice.time)}` : ''}</td>
+      <td style="width: 50%;"><strong>${isBkg ? 'Booking #:' : 'Inv #:'}</strong> ${escapeHtml(invoice.invoiceNumber)}</td>
+      <td style="text-align: right; width: 50%;">${isBkg ? 'Event: ' : ''}${escapeHtml(invoice.date)}${invoice.time ? ` ${escapeHtml(invoice.time)}` : ''}</td>
     </tr>
+    ${isBkg ? `<tr><td colspan="2"><strong>Type:</strong> ${escapeHtml(bkgTypeLabel)}</td></tr>` : ''}
     <tr>
       <td colspan="2"><strong>Client:</strong> ${escapeHtml(invoice.clientName || 'Walk-in Customer')}${invoice.clientPhone && invoice.clientPhone !== 'N/A' ? ` (${escapeHtml(invoice.clientPhone)})` : ''}</td>
     </tr>
@@ -172,7 +180,7 @@ export function generateThermalReceiptHtml(invoice: Invoice, branch: Branch | nu
   <table class="items-table">
     <thead>
       <tr>
-        <th style="text-align: left; width: 58%;">ITEM / SERVICE</th>
+        <th style="text-align: left; width: 58%;">${isBkg ? 'RESERVED SERVICE / ITEM' : 'ITEM / SERVICE'}</th>
         <th style="text-align: center; width: 12%;">QTY</th>
         <th style="text-align: right; width: 30%;">AMOUNT</th>
       </tr>
@@ -185,22 +193,23 @@ export function generateThermalReceiptHtml(invoice: Invoice, branch: Branch | nu
     ${taxRow}
     ${tipRow}
     <tr>
-      <td style="text-align: left; font-weight: bold;">Total Payable:</td>
+      <td style="text-align: left; font-weight: bold;">${isBkg ? 'Total Quoted Price:' : 'Total Payable:'}</td>
       <td style="text-align: right; font-weight: bold;">${formatPkr(invoice.total)}</td>
     </tr>
     <tr>
-      <td style="text-align: left; font-weight: bold;">Paid Amount (${escapeHtml(methodSummary)}):</td>
+      <td style="text-align: left; font-weight: bold;">${isBkg ? 'Advance Paid' : 'Paid Amount'} (${escapeHtml(methodSummary)}):</td>
       <td style="text-align: right; font-weight: bold;">${formatPkr(invoice.amountPaid)}</td>
     </tr>
     <tr>
-      <td style="text-align: left; font-weight: bold; ${invoice.amountDue > 0 ? 'color: #b91c1c;' : ''}">Outstanding Balance:</td>
+      <td style="text-align: left; font-weight: bold; ${invoice.amountDue > 0 ? 'color: #b91c1c;' : ''}">${isBkg ? 'Remaining Balance (Due on Event):' : 'Outstanding Balance:'}</td>
       <td style="text-align: right; font-weight: bold; ${invoice.amountDue > 0 ? 'color: #b91c1c;' : ''}">${formatPkr(invoice.amountDue)}</td>
     </tr>
   </table>
   <div class="divider"></div>
   <div class="footer-note">
+    ${isBkg ? '<div style="font-weight: bold; margin-bottom: 2px; color: #166534;">* Advance payment receipt. Remaining balance payable on event date.</div>' : ''}
     ${invoice.notes ? `<div style="font-weight: bold; margin-bottom: 2px;">Note: ${escapeHtml(invoice.notes)}</div>` : ''}
-    <div>Thank you for your visit!</div>
+    <div>Thank you for choosing ${escapeHtml(branchName)}!</div>
     <div style="font-size: 8px; color: #555; margin-top: 1.5px;">Powered by Isysware Software Solutions</div>
   </div>
 </body>
@@ -262,6 +271,13 @@ export async function generateReceiptPdf(
   const taxReg = branch?.taxRegistrationNumber ? `${branch.taxAuthority || 'Tax Reg'}: ${branch.taxRegistrationNumber}` : '';
   const lines = invoice.lineItems || invoice.lines || [];
   const methodSummary = getPaymentMethodSummary(invoice);
+  const isBkg = Boolean(invoice.isBookingInvoice || invoice.invoiceNumber?.startsWith('BKG'));
+  const bkgTypeLabel =
+    invoice.bookingType === 'BRIDAL'
+      ? 'Bridal Event'
+      : invoice.bookingType === 'GROOM'
+      ? 'Groom Event'
+      : 'Salon Reservation';
 
   let estimatedHeight = 42;
   lines.forEach((li) => {
@@ -291,17 +307,20 @@ export async function generateReceiptPdf(
   if (taxReg) { pdf.text(taxReg, center, y, { align: 'center' }); y += 3.2; }
   pdf.text(dashLine, center, y, { align: 'center' }); y += 3.5;
   pdf.setFont('courier', 'bold'); pdf.setFontSize(8.5);
-  pdf.text(branch?.taxRegistrationNumber ? 'TAX INVOICE' : 'RETAIL INVOICE', center, y, { align: 'center' }); y += 3.5;
+  pdf.text(isBkg ? 'BOOKING ADVANCE INVOICE' : branch?.taxRegistrationNumber ? 'TAX INVOICE' : 'RETAIL INVOICE', center, y, { align: 'center' }); y += 3.5;
   pdf.setFont('courier', 'normal'); pdf.setFontSize(7.2);
-  pdf.text(`Inv #: ${invoice.invoiceNumber}`, leftMargin, y);
-  pdf.text(`${invoice.date}${invoice.time ? ` ${invoice.time}` : ''}`, rightMargin, y, { align: 'right' }); y += 3.2;
+  pdf.text(`${isBkg ? 'Booking #:' : 'Inv #: '} ${invoice.invoiceNumber}`, leftMargin, y);
+  pdf.text(`${isBkg ? 'Event: ' : ''}${invoice.date}${invoice.time ? ` ${invoice.time}` : ''}`, rightMargin, y, { align: 'right' }); y += 3.2;
+  if (isBkg) {
+    pdf.text(`Type: ${bkgTypeLabel}`, leftMargin, y); y += 3.2;
+  }
   const clientText = `Client: ${invoice.clientName || 'Walk-in Customer'}${invoice.clientPhone && invoice.clientPhone !== 'N/A' ? ` (${invoice.clientPhone})` : ''}`;
   pdf.text(clientText.substring(0, 42), leftMargin, y); y += 3.2;
   if (invoice.processedByName) { pdf.text(`Cashier: ${invoice.processedByName}`, leftMargin, y); y += 3.2; }
   pdf.text(dashLine, center, y, { align: 'center' }); y += 3.5;
 
   pdf.setFont('courier', 'bold'); pdf.setFontSize(7.2);
-  pdf.text('ITEM / SERVICE', leftMargin, y); pdf.text('QTY', 51, y, { align: 'center' }); pdf.text('AMOUNT', rightMargin, y, { align: 'right' }); y += 2.2;
+  pdf.text(isBkg ? 'RESERVED SERVICE' : 'ITEM / SERVICE', leftMargin, y); pdf.text('QTY', 51, y, { align: 'center' }); pdf.text('AMOUNT', rightMargin, y, { align: 'right' }); y += 2.2;
   pdf.setFont('courier', 'normal'); pdf.text(dashLine, center, y, { align: 'center' }); y += 3.2;
 
   lines.forEach((li) => {
@@ -330,12 +349,15 @@ export async function generateReceiptPdf(
   if (invoice.discount > 0) printRow('Discount:', `- ${formatPkr(invoice.discount)}`);
   if (invoice.tax > 0) printRow(`Sales Tax:`, formatPkr(invoice.tax));
   if (invoice.tip > 0) printRow('Staff Gratuity / Tip:', formatPkr(invoice.tip));
-  printRow('Total Payable:', formatPkr(invoice.total), true);
-  printRow(`Paid Amount (${methodSummary}):`, formatPkr(invoice.amountPaid), true);
-  printRow('Outstanding Balance:', formatPkr(invoice.amountDue), true);
+  printRow(isBkg ? 'Total Quoted Price:' : 'Total Payable:', formatPkr(invoice.total), true);
+  printRow(`${isBkg ? 'Advance Paid' : 'Paid Amount'} (${methodSummary}):`, formatPkr(invoice.amountPaid), true);
+  printRow(isBkg ? 'Remaining Balance (Due on Event):' : 'Outstanding Balance:', formatPkr(invoice.amountDue), true);
   pdf.setFont('courier', 'normal'); pdf.setFontSize(6.8);
   pdf.text(dashLine, center, y, { align: 'center' }); y += 3.2;
-  pdf.text(`Thank you for your visit!`, center, y, { align: 'center' }); y += 2.8;
+  if (isBkg) {
+    pdf.text('* Advance payment receipt. Remaining due on event.', center, y, { align: 'center' }); y += 2.8;
+  }
+  pdf.text(`Thank you for choosing ${branchName}!`, center, y, { align: 'center' }); y += 2.8;
   pdf.text('Powered by Isysware Software Solutions', center, y, { align: 'center' });
 
   const blob = pdf.output('blob');
@@ -361,7 +383,9 @@ export async function shareReceiptPdfViaWhatsApp({ invoice, branch, targetPhone 
   generated.pdf.save(generated.fileName);
   const branchName = (branch?.name || 'MEERUB SALON & SPA').toUpperCase();
   const methodSummary = getPaymentMethodSummary(invoice);
-  const summaryText = `*${branchName} — OFFICIAL RECEIPT*\nInvoice No: *${invoice.invoiceNumber}*\nDate: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Payable:* ${formatCurrency(invoice.total)}\n*Paid Amount (${methodSummary}):* ${formatCurrency(invoice.amountPaid)}\n*Outstanding Balance:* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official PDF Receipt attached above._\nThank you for visiting!`;
+  const summaryText = isBkg
+    ? `*${branchName} — BOOKING ADVANCE INVOICE*\nBooking Ref: *${invoice.invoiceNumber}*\nEvent Date: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Quoted Price:* ${formatCurrency(invoice.total)}\n*Advance Paid (${methodSummary}):* ${formatCurrency(invoice.amountPaid)}\n*Remaining Balance (Due on Event):* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official Booking Advance Receipt PDF attached above._\nThank you for choosing ${branchName}!`
+    : `*${branchName} — OFFICIAL RECEIPT*\nInvoice No: *${invoice.invoiceNumber}*\nDate: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Payable:* ${formatCurrency(invoice.total)}\n*Paid Amount (${methodSummary}):* ${formatCurrency(invoice.amountPaid)}\n*Outstanding Balance:* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official PDF Receipt attached above._\nThank you for visiting!`;
   const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(summaryText)}`;
   window.open(waUrl, '_blank', 'noopener,noreferrer');
   return { sharedDirectly: false, downloaded: true, fileName: generated.fileName, phone: cleanPhone, file: generated.file };

@@ -43,6 +43,7 @@ interface BookingDetailsModalProps {
   onRefund?: (booking: Booking) => void;
   onNoShow?: (booking: Booking) => void;
   onStartService?: (booking: Booking) => void;
+  onOpenInvoice?: (booking: Booking) => void;
 }
 
 export const BookingDetailsModal: React.FC<BookingDetailsModalProps> = ({
@@ -57,6 +58,7 @@ export const BookingDetailsModal: React.FC<BookingDetailsModalProps> = ({
   onRefund,
   onNoShow,
   onStartService,
+  onOpenInvoice,
 }) => {
   if (!booking) return null;
 
@@ -273,8 +275,18 @@ export const BookingDetailsModal: React.FC<BookingDetailsModalProps> = ({
               <div className="text-right space-y-1">
                 <div className="flex items-center justify-end gap-2 text-xs">
                   <span className="text-slate-600">Advance Paid:</span>
-                  <span className="font-bold text-emerald-700 font-mono text-sm bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg">
+                  <span className="font-bold text-emerald-700 font-mono text-sm bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg inline-flex items-center gap-1">
                     {formatCurrency(advance)}
+                    {onOpenInvoice && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenInvoice(booking)}
+                        title="View & Print Advance Invoice / Receipt"
+                        className="hover:text-emerald-950 transition-colors cursor-pointer ml-1"
+                      >
+                        <Receipt className="w-3.5 h-3.5 text-emerald-600" />
+                      </button>
+                    )}
                   </span>
                 </div>
                 <div className="flex items-center justify-end gap-2 text-xs">
@@ -329,6 +341,19 @@ export const BookingDetailsModal: React.FC<BookingDetailsModalProps> = ({
               <MessageSquare className="w-3.5 h-3.5" />
               Confirmation Message
             </Button>
+
+            {onOpenInvoice && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onOpenInvoice(booking)}
+                className="text-xs gap-1.5 border-emerald-300 text-emerald-800 bg-emerald-50/80 hover:bg-emerald-100 font-bold shadow-2xs cursor-pointer"
+              >
+                <Receipt className="w-3.5 h-3.5 text-emerald-700" />
+                Booking Invoice
+              </Button>
+            )}
 
             <Button
               type="button"

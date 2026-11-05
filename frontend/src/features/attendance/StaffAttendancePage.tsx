@@ -86,6 +86,7 @@ interface EditableAttendanceRow {
   notes: string;
   isModified: boolean;
   isAutoAbsent?: boolean;
+  isAutoHalfDay?: boolean;
 }
 
 export const StaffAttendancePage: React.FC = () => {
@@ -206,6 +207,7 @@ export const StaffAttendancePage: React.FC = () => {
             notes: existing.notes || '',
             isModified: false,
             isAutoAbsent: false,
+            isAutoHalfDay: mappedStatus === 'HALF_DAY',
           };
         }
 
@@ -387,10 +389,31 @@ export const StaffAttendancePage: React.FC = () => {
     setRows((prev) =>
       prev.map((r) => {
         if (r.staffId !== staffId) return r;
+
+        let newStatus = r.status === 'SELECT_STATUS' ? 'PRESENT' : r.status;
+        let isAutoHalfDay = false;
+        let newNotes = r.notes;
+
+        // Auto-Half Day check: if autoHalfDayEnabled is true and check-in time exceeds cutoff
+        if (attendancePolicy?.autoHalfDayEnabled && val) {
+          const shiftStartMins = parseTimeToMinutes(r.startTime || '09:00');
+          const checkInMins = parseTimeToMinutes(val);
+          const threshold = attendancePolicy.halfDayThresholdMinutes ?? 120;
+          if (checkInMins >= shiftStartMins + threshold) {
+            newStatus = 'HALF_DAY';
+            isAutoHalfDay = true;
+            if (!newNotes || newNotes.includes('Auto-marked')) {
+              newNotes = `Auto-marked Half Day: Checked in at ${val} (>= ${threshold}m after shift start ${r.startTime})`;
+            }
+          }
+        }
+
         return {
           ...r,
           checkIn: val,
-          status: r.status === 'SELECT_STATUS' ? 'PRESENT' : r.status,
+          status: newStatus,
+          isAutoHalfDay,
+          notes: newNotes,
           isModified: true,
         };
       })
@@ -933,6 +956,16 @@ export const StaffAttendancePage: React.FC = () => {
                               title={row.notes}
                             >
                               Auto-Absent (&gt;{attendancePolicy?.autoAbsentThresholdMinutes || 60}m)
+                            </span>
+                          </div>
+                        )}
+                        {row.isAutoHalfDay && row.status === 'HALF_DAY' && (
+                          <div className="mt-1">
+                            <span
+                              className="inline-block text-[10px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded shadow-2xs"
+                              title={row.notes}
+                            >
+                              Auto-Half Day (&gt;{attendancePolicy?.halfDayThresholdMinutes || 120}m)
                             </span>
                           </div>
                         )}

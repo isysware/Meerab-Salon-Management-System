@@ -13,6 +13,7 @@ import {
   downloadReportCsv,
   downloadReportExcel,
   printReportWindow,
+  resolvePreset,
 } from '@/features/reports/reportUtils';
 import {
   Filter,
@@ -84,7 +85,7 @@ const formatMethod = (method: string) => {
 };
 
 export const IncomeExpenseReportPage: React.FC = () => {
-  const { user, activeBranchId, allBranches } = useAuth();
+  const { user, activeBranchId, allBranches, demoDate } = useAuth();
 
   // Role guard: Super Admin, Admin, and Accountant
   if (!user || user.role === 'STAFF') {
@@ -95,19 +96,25 @@ export const IncomeExpenseReportPage: React.FC = () => {
   const isAccountant = user.role === 'ACCOUNTANT';
   const defaultBranch = isSuperAdmin ? (activeBranchId || 'ALL') : (user.branchId || '');
 
+  const businessDate = demoDate || new Date().toISOString().slice(0, 10);
+  const defaultRange = resolvePreset('THIS_MONTH', businessDate) || {
+    from: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10),
+    to: businessDate,
+  };
+
   // Filter Form State
   const [selectedBranch, setSelectedBranch] = useState<string>(defaultBranch);
   const [selectedUserType, setSelectedUserType] = useState<string>('ALL');
   const [selectedUser, setSelectedUser] = useState<string>('ALL');
-  const [fromDate, setFromDate] = useState<string>('');
-  const [toDate, setToDate] = useState<string>('');
+  const [fromDate, setFromDate] = useState<string>(defaultRange.from);
+  const [toDate, setToDate] = useState<string>(defaultRange.to);
 
   // Loaded users for filter dropdown
   const [usersList, setUsersList] = useState<User[]>([]);
 
-  // Page state: Only fetch when user explicitly clicks Filter ("filter karna sa aae default nhi")
-  const [hasFiltered, setHasFiltered] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  // Page state: Auto-load default monthly date range on mount
+  const [hasFiltered, setHasFiltered] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [reportData, setReportData] = useState<IncomeExpenseReport | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -171,6 +178,21 @@ export const IncomeExpenseReportPage: React.FC = () => {
 
     fetchReport(query);
   };
+
+  // Auto-fetch default report on initial mount with default date range
+  useEffect(() => {
+    const query: IncomeExpenseReportQuery = {
+      branchId: defaultBranch,
+      startDate: defaultRange.from,
+      endDate: defaultRange.to,
+      from: defaultRange.from,
+      to: defaultRange.to,
+      preset: 'THIS_MONTH',
+      userType: isAccountant ? 'ACCOUNTANT' : undefined,
+      user: isAccountant ? user.name : undefined,
+    };
+    fetchReport(query);
+  }, [defaultBranch, defaultRange.from, defaultRange.to, isAccountant, user.name, fetchReport]);
 
   // Signed Paid total: Net cash settled = income paid - expense paid (e.g. 2,000 - 150 - 50 = PKR 1,800)
   const signedPaid = useMemo(() => {

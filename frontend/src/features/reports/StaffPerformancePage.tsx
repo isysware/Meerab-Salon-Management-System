@@ -79,9 +79,9 @@ export const StaffPerformancePage: React.FC = () => {
   const [selectedPackageId, setSelectedPackageId] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Page state: Only fetch when user explicitly clicks Filter ("filter karna sa aae default nhi")
-  const [hasFiltered, setHasFiltered] = useState<boolean>(false);
-  const [loading, setLoading] = useState<boolean>(false);
+  // Page state: Auto-load default monthly date range on mount
+  const [hasFiltered, setHasFiltered] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(true);
   const [performanceRecords, setPerformanceRecords] = useState<StaffPerformanceRecord[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -164,6 +164,11 @@ export const StaffPerformancePage: React.FC = () => {
     setHasFiltered(true);
     fetchReport();
   };
+
+  // Auto-fetch default monthly date range on mount or when branch changes
+  useEffect(() => {
+    fetchReport();
+  }, [fetchReport]);
 
   // Filter records by search query
   const filteredRecords = useMemo(() => {

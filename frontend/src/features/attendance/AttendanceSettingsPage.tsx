@@ -30,6 +30,15 @@ const THRESHOLD_PRESETS = [
   { value: 120, label: '120 Mins (2 Hours)' },
 ];
 
+const HALF_DAY_PRESETS = [
+  { value: 60, label: '60 Mins (1 Hour)' },
+  { value: 90, label: '90 Mins (1.5 Hours)' },
+  { value: 120, label: '120 Mins (2 Hours - Recommended)' },
+  { value: 150, label: '150 Mins (2.5 Hours)' },
+  { value: 180, label: '180 Mins (3 Hours)' },
+  { value: 240, label: '240 Mins (4 Hours)' },
+];
+
 export const AttendanceSettingsPage: React.FC = () => {
   const { user, activeBranchId, allBranches } = useAuth();
   const { navigate } = useRouter();
@@ -59,6 +68,8 @@ export const AttendanceSettingsPage: React.FC = () => {
   // Policy Form State
   const [autoMarkAbsentEnabled, setAutoMarkAbsentEnabled] = useState<boolean>(true);
   const [thresholdMinutes, setThresholdMinutes] = useState<number>(60);
+  const [autoHalfDayEnabled, setAutoHalfDayEnabled] = useState<boolean>(false);
+  const [halfDayThresholdMinutes, setHalfDayThresholdMinutes] = useState<number>(120);
   const [defaultStartTime, setDefaultStartTime] = useState<string>('09:00');
   const [defaultEndTime, setDefaultEndTime] = useState<string>('18:00');
   const [lateGraceMinutes, setLateGraceMinutes] = useState<number>(15);
@@ -73,6 +84,8 @@ export const AttendanceSettingsPage: React.FC = () => {
       const policy = await salonService.getAttendancePolicy(bId);
       setAutoMarkAbsentEnabled(policy.autoMarkAbsentEnabled ?? true);
       setThresholdMinutes(policy.autoAbsentThresholdMinutes ?? 60);
+      setAutoHalfDayEnabled(policy.autoHalfDayEnabled ?? false);
+      setHalfDayThresholdMinutes(policy.halfDayThresholdMinutes ?? 120);
       setDefaultStartTime(policy.defaultStartTime || '09:00');
       setDefaultEndTime(policy.defaultEndTime || '18:00');
       setLateGraceMinutes(policy.lateGraceMinutes ?? 15);
@@ -103,6 +116,8 @@ export const AttendanceSettingsPage: React.FC = () => {
         branchId: effectiveBranchId,
         autoMarkAbsentEnabled,
         autoAbsentThresholdMinutes: Number(thresholdMinutes) || 60,
+        autoHalfDayEnabled,
+        halfDayThresholdMinutes: Number(halfDayThresholdMinutes) || 120,
         defaultStartTime,
         defaultEndTime,
         lateGraceMinutes: Number(lateGraceMinutes) || 15,
@@ -131,6 +146,18 @@ export const AttendanceSettingsPage: React.FC = () => {
     const displayH = cutH % 12 === 0 ? 12 : cutH % 12;
     return `${String(displayH).padStart(2, '0')}:${String(cutM).padStart(2, '0')} ${period}`;
   }, [defaultStartTime, thresholdMinutes]);
+
+  // Calculate Half-Day cutoff preview time
+  const calculatedHalfDayCutoffTime = useMemo(() => {
+    const [hStr, mStr] = defaultStartTime.split(':');
+    const startMins = (parseInt(hStr, 10) || 9) * 60 + (parseInt(mStr, 10) || 0);
+    const cutoffMins = startMins + (Number(halfDayThresholdMinutes) || 120);
+    const cutH = Math.floor(cutoffMins / 60) % 24;
+    const cutM = cutoffMins % 60;
+    const period = cutH >= 12 ? 'PM' : 'AM';
+    const displayH = cutH % 12 === 0 ? 12 : cutH % 12;
+    return `${String(displayH).padStart(2, '0')}:${String(cutM).padStart(2, '0')} ${period}`;
+  }, [defaultStartTime, halfDayThresholdMinutes]);
 
   const displayStartFormatted = useMemo(() => {
     const [hStr, mStr] = defaultStartTime.split(':');
@@ -336,7 +363,116 @@ export const AttendanceSettingsPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Card 2: Shift Default Timings & Lateness Grace */}
+          {/* Card 2: Late Arrival & Auto-Half Day Setting */}
+          <div className="rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl p-6 sm:p-7 shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-black/5">
+              <div className="space-y-0.5">
+                <h2 className="text-base font-bold text-[#18191B] flex items-center gap-2">
+                  <span>Late Arrival &amp; Auto-Half Day Setting</span>
+                  <span
+                    className={`px-2.5 py-0.5 text-[10px] font-bold rounded-full border ${
+                      autoHalfDayEnabled
+                        ? 'bg-amber-50 text-amber-800 border-amber-300'
+                        : 'bg-slate-100 text-slate-500 border-slate-200'
+                    }`}
+                  >
+                    {autoHalfDayEnabled ? 'Rule Active' : 'Rule Inactive (Default Off)'}
+                  </span>
+                </h2>
+                <p className="text-xs text-[#78616C]">
+                  Agar staff shift start ke baad is time se late aaye to uska status automatically 'HALF_DAY' count ho jaye.
+                </p>
+              </div>
+
+              {/* Toggle Switch */}
+              <label className="relative inline-flex items-center cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={autoHalfDayEnabled}
+                  onChange={(e) => setAutoHalfDayEnabled(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#B82E69]" />
+                <span className="ml-3 text-xs font-semibold text-[#18191B]">
+                  {autoHalfDayEnabled ? 'Enabled' : 'Disabled (Off)'}
+                </span>
+              </label>
+            </div>
+
+            {/* Threshold Selector */}
+            <div className={`space-y-4 transition-opacity ${autoHalfDayEnabled ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+              <div>
+                <label className="block text-xs font-semibold text-[#18191B] mb-1.5">
+                  Lateness Cutoff Threshold for Half-Day <span className="text-rose-500">*</span>
+                </label>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {HALF_DAY_PRESETS.map((p) => {
+                    const isSelected = halfDayThresholdMinutes === p.value;
+                    return (
+                      <button
+                        key={p.value}
+                        type="button"
+                        onClick={() => setHalfDayThresholdMinutes(p.value)}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#B82E69] text-white shadow-[0_4px_16px_rgba(184,46,105,0.22)]'
+                            : 'bg-white/70 hover:bg-white text-[#78616C] border border-white/80'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center gap-3 max-w-xs">
+                  <div className="relative flex-1">
+                    <input
+                      type="number"
+                      min={15}
+                      max={480}
+                      value={halfDayThresholdMinutes}
+                      onChange={(e) => setHalfDayThresholdMinutes(Math.max(15, parseInt(e.target.value, 10) || 120))}
+                      className="w-full text-xs pr-16 pl-3 py-2 bg-white/70 border border-white/80 rounded-xl focus:bg-white focus:ring-2 focus:ring-[#B82E69]/20 font-semibold text-[#18191B]"
+                    />
+                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-xs text-[#78616C] font-medium">
+                      Minutes
+                    </div>
+                  </div>
+                  <span className="text-xs text-[#78616C]">
+                    ({(halfDayThresholdMinutes / 60).toFixed(1)} hrs)
+                  </span>
+                </div>
+              </div>
+
+              {/* Dynamic Live Demonstration Box */}
+              <div className="bg-[#FAF8F9]/80 p-4 rounded-2xl border border-white/80 space-y-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-[#18191B]">
+                  <Info className="w-4 h-4 text-[#B82E69]" />
+                  <span>Half Day Rule in Action (Example Preview):</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-1">
+                  <div className="bg-white/90 p-3 rounded-xl border border-white/80">
+                    <span className="text-[11px] text-[#78616C] block">Shift Start Time:</span>
+                    <span className="font-bold text-[#18191B] text-sm">{displayStartFormatted}</span>
+                  </div>
+                  <div className="bg-white/90 p-3 rounded-xl border border-white/80">
+                    <span className="text-[11px] text-[#78616C] block">Lateness Threshold:</span>
+                    <span className="font-bold text-[#B82E69] text-sm">+{halfDayThresholdMinutes} Minutes</span>
+                  </div>
+                  <div className="bg-white/90 p-3 rounded-xl border border-white/80">
+                    <span className="text-[11px] text-[#78616C] block">Auto-Half Day Cutoff:</span>
+                    <span className="font-bold text-amber-700 text-sm">{calculatedHalfDayCutoffTime}</span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-[#78616C] pt-1">
+                  Agar staff <strong>{calculatedHalfDayCutoffTime}</strong> ke baad check-in punch karega, toh attendance sheet par uska status automatically <strong className="text-amber-700">'HALF_DAY'</strong> count ho jayega.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 3: Shift Default Timings & Lateness Grace */}
           <div className="rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl p-6 sm:p-7 shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] space-y-4">
             <h2 className="text-base font-bold text-[#18191B] pb-2 border-b border-black/5">
               Shift Timings & Grace Periods (Branch Standards)

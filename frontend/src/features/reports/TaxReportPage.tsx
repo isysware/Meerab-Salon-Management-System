@@ -81,7 +81,7 @@ const formatMethod = (method: string) => {
 type TaxViewTab = 'SERVICES' | 'SERVICE_SUMMARY' | 'INVOICES';
 
 export const TaxReportPage: React.FC = () => {
-  const { user, activeBranchId, allBranches } = useAuth();
+  const { user, activeBranchId, allBranches, demoDate } = useAuth();
 
   // Role guard: Super Admin, Admin, and Accountant
   if (!user || user.role === 'STAFF') {
@@ -90,18 +90,27 @@ export const TaxReportPage: React.FC = () => {
 
   const isSuperAdmin = user.role === 'SUPER_ADMIN';
 
+  const businessDate = demoDate || new Date().toISOString().slice(0, 10);
+  const defaultMonth = useMemo(() => {
+    const parts = businessDate.split('-');
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const firstDay = `${y}-${String(m).padStart(2, '0')}-01`;
+    return { from: firstDay, to: businessDate };
+  }, [businessDate]);
+
   // Filters State
   const [selectedBranch, setSelectedBranch] = useState<string>(activeBranchId || user.branchId || 'ALL');
-  const [fromDate, setFromDate] = useState<string>('');
-  const [toDate, setToDate] = useState<string>('');
+  const [fromDate, setFromDate] = useState<string>(defaultMonth.from);
+  const [toDate, setToDate] = useState<string>(defaultMonth.to);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<TaxViewTab>('SERVICES');
 
-  // Page state: Only fetch when user explicitly clicks Filter (Matching Income & Expense Page UI)
-  const [hasFiltered, setHasFiltered] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  // Page state: Auto-load default monthly date range on mount
+  const [hasFiltered, setHasFiltered] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reportData, setReportData] = useState<TaxReport | null>(null);
 
@@ -146,6 +155,19 @@ export const TaxReportPage: React.FC = () => {
 
     fetchReport(query);
   };
+
+  // Auto-fetch default monthly date range on mount or when branch changes
+  useEffect(() => {
+    fetchReport({
+      branchId: selectedBranch !== 'ALL' ? selectedBranch : undefined,
+      startDate: fromDate || defaultMonth.from,
+      endDate: toDate || defaultMonth.to,
+      from: fromDate || defaultMonth.from,
+      to: toDate || defaultMonth.to,
+      preset: 'THIS_MONTH',
+      search: searchQuery.trim() || undefined,
+    });
+  }, [fetchReport, selectedBranch]);
 
   // Service rows & summaries
   const serviceRows: TaxReportServiceRow[] = useMemo(() => {
