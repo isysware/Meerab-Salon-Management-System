@@ -2218,7 +2218,7 @@ export interface DetailedIncomeRow {
   refundAmount?: number;
   refundHistory?: ReportRefundHistory[];
   id: string;
-  invoiceId: string;
+  invoiceId?: string | null;
   invoiceNumber: string;
   bookingNumber?: string;
   bookingReference?: string;
@@ -2226,13 +2226,13 @@ export interface DetailedIncomeRow {
   time: string;
   branchId: string;
   branchName: string;
-  incomeSource: 'SERVICE' | 'PRODUCT' | 'PACKAGE';
+  incomeSource: 'SERVICE' | 'PRODUCT' | 'PACKAGE' | 'BOOKING_ADVANCE';
   clientId?: string;
   clientName: string;
   clientPhone?: string;
   itemCode?: string;
   itemName: string;
-  staffId: string;
+  staffId: string | null;
   staffName: string;
   quantity: number;
   unitPrice: number;
@@ -2245,7 +2245,7 @@ export interface DetailedIncomeRow {
   tax: number;
   netTax: number;
   total: number;
-  paymentStatus: InvoiceStatus;
+  paymentStatus: InvoiceStatus | string;
   lifecycle: InvoiceLifecycle;
   createdByName: string;
   payments: DetailedIncomePayment[];
@@ -2281,6 +2281,7 @@ export interface DetailedIncomeKPIs {
   totalTaxCharged: number;
   netTaxLiability: number;
   tipsCollected: number;
+  bookingAdvanceCollections?: number;
   serviceRevenue: number;
   serviceCount: number;
   productRevenue: number;
@@ -2297,7 +2298,7 @@ export interface DetailedIncomeReportQuery {
   endDate?: string;
   from?: string;
   to?: string;
-  sourceType?: 'ALL' | 'SERVICE' | 'PRODUCT' | 'PACKAGE';
+  sourceType?: 'ALL' | 'SERVICE' | 'PRODUCT' | 'PACKAGE' | 'BOOKING_ADVANCE';
   paymentStatus?: 'PAID' | 'PARTIAL' | 'UNPAID' | 'ALL';
   lifecycle?: 'ACTIVE' | 'PARTIALLY_REFUNDED' | 'REFUNDED' | 'VOIDED' | 'ALL';
   paymentMethod?: string;
@@ -2653,6 +2654,32 @@ export interface OperatingProfitReportQuery {
   viewMode?: 'ACCRUAL' | 'COLLECTION' | 'ALL';
 }
 
+export interface CustomerAdvanceMovement {
+  id: string;
+  date: string;
+  type: 'ADVANCE_RECEIVED' | 'ADVANCE_REFUND' | 'ADVANCE_APPLIED';
+  typeLabel: string;
+  direction: 'CREDIT' | 'DEBIT';
+  receiptNumber: string;
+  bookingNumber: string;
+  clientName: string;
+  paymentMethod: string;
+  paymentAccountName?: string;
+  amount: number;
+  processedByName: string;
+  description: string;
+  createdAt: string | Date;
+}
+
+export interface CustomerAdvanceLiabilitySection {
+  openingBalance: number;
+  advancesReceived: number;
+  advanceRefunds: number;
+  advancesApplied: number;
+  closingBalance: number;
+  movements: CustomerAdvanceMovement[];
+}
+
 export interface OperatingProfitReportViewData {
   kpis: OperatingProfitKPIs;
   statementRows: OperatingProfitStatementRow[];
@@ -2671,6 +2698,7 @@ export interface OperatingProfitReportViewData {
     earnedCommission?: number;
     paidCommission?: number;
   };
+  customerAdvances?: CustomerAdvanceLiabilitySection;
 }
 
 export interface OperatingProfitReport {
@@ -2704,6 +2732,7 @@ export interface OperatingProfitReport {
     earnedCommission?: number;
     paidCommission?: number;
   };
+  customerAdvances?: CustomerAdvanceLiabilitySection;
   accrual?: OperatingProfitReportViewData;
   collection?: OperatingProfitReportViewData;
 }

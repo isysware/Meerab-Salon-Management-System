@@ -29,6 +29,7 @@ import {
   CreditCard,
   Search,
   RotateCw,
+  Calendar,
 } from 'lucide-react';
 
 const selectClass =
@@ -354,6 +355,7 @@ export const DetailedIncomeReportPage: React.FC = () => {
               <option value="SERVICE">Services Only</option>
               <option value="PRODUCT">Retail Products Only</option>
               <option value="PACKAGE">Packages Only</option>
+              <option value="BOOKING_ADVANCE">Advance Deposits Only</option>
             </select>
           </div>
 
@@ -482,6 +484,14 @@ export const DetailedIncomeReportPage: React.FC = () => {
                 <span className="text-xl font-extrabold text-[#B82E69] font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.totalPaid)}</span>
                 <div className="text-[10px] text-emerald-600 mt-1">Actual receipts including collected tax and tips</div>
               </div>
+
+              {typeof reportData.kpis.bookingAdvanceCollections === 'number' && (
+                <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
+                  <span className="text-[10px] font-bold text-teal-700 uppercase tracking-wider block mb-1">Advance Deposits</span>
+                  <span className="text-xl font-extrabold text-teal-700 font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.bookingAdvanceCollections)}</span>
+                  <div className="text-[10px] text-slate-400 mt-1">Held client deposit liability</div>
+                </div>
+              )}
 
               <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
                 <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block mb-1">Services Net</span>
@@ -620,6 +630,11 @@ export const DetailedIncomeReportPage: React.FC = () => {
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
                                   <ShoppingBag className="w-3 h-3" />
                                   <span>Product</span>
+                                </span>
+                              ) : row.incomeSource === 'BOOKING_ADVANCE' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-teal-50 text-teal-800 border border-teal-200">
+                                  <Calendar className="w-3 h-3 text-teal-600" />
+                                  <span>Advance Deposit</span>
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">

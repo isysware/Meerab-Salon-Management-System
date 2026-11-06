@@ -1795,14 +1795,184 @@ export const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, t
   };
 };
 
+export const computeCustomerAdvanceMovements = async (branchId, fromStr, toStr) => {
+  const branchFilter = branchId && branchId !== 'ALL' ? { branchId } : {};
+  const fromDateOnly = dateOnly(fromStr);
+  const toDateOnly = dateOnly(toStr);
+
+  // 1. Historical opening balance prior to fromStr
+  const [priorReceivedAgg, priorRefundsAgg, priorAppliedAgg] = await Promise.all([
+    prisma.bookingPayment.aggregate({
+      where: {
+        ...branchFilter,
+        isRefund: false,
+        date: { lt: fromDateOnly },
+      },
+      _sum: { amount: true },
+    }),
+    prisma.bookingPayment.aggregate({
+      where: {
+        ...branchFilter,
+        isRefund: true,
+        date: { lt: fromDateOnly },
+      },
+      _sum: { amount: true },
+    }),
+    prisma.invoice.aggregate({
+      where: {
+        ...branchFilter,
+        advanceAdjusted: { gt: 0 },
+        lifecycle: { not: 'VOIDED' },
+        date: { lt: fromDateOnly },
+      },
+      _sum: { advanceAdjusted: true },
+    }),
+  ]);
+
+  const priorRec = toDec(priorReceivedAgg._sum.amount ?? 0);
+  const priorRef = toDec(priorRefundsAgg._sum.amount ?? 0);
+  const priorApp = toDec(priorAppliedAgg._sum.advanceAdjusted ?? 0);
+  const openingBalance = max0(priorRec.minus(priorRef).minus(priorApp)).toNumber();
+
+  // 2. In-period transactions
+  const [periodPayments, periodInvoices] = await Promise.all([
+    prisma.bookingPayment.findMany({
+      where: {
+        ...branchFilter,
+        date: {
+          gte: fromDateOnly,
+          lte: toDateOnly,
+        },
+      },
+      include: {
+        booking: {
+          select: { id: true, bookingNumber: true, clientName: true, clientPhone: true },
+        },
+      },
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+    }),
+    prisma.invoice.findMany({
+      where: {
+        ...branchFilter,
+        advanceAdjusted: { gt: 0 },
+        lifecycle: { not: 'VOIDED' },
+        date: {
+          gte: fromDateOnly,
+          lte: toDateOnly,
+        },
+      },
+      include: {
+        booking: {
+          select: { id: true, bookingNumber: true, clientName: true },
+        },
+      },
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+    }),
+  ]);
+
+  let advancesReceivedDec = toDec(0);
+  let advanceRefundsDec = toDec(0);
+  const paymentMovements = [];
+
+  for (const bp of periodPayments) {
+    const amtDec = toDec(bp.amount);
+    if (bp.isRefund) {
+      advanceRefundsDec = advanceRefundsDec.plus(amtDec);
+      paymentMovements.push({
+        id: `m-bp-${bp.id}`,
+        date: ymd(bp.date),
+        type: 'ADVANCE_REFUND',
+        typeLabel: 'Advance Refund',
+        direction: 'DEBIT',
+        receiptNumber: bp.receiptNumber,
+        bookingNumber: bp.booking?.bookingNumber || '—',
+        clientName: bp.booking?.clientName || 'Customer',
+        paymentMethod: bp.method || 'CASH',
+        paymentAccountName: bp.paymentAccountName || (bp.method === 'CASH' ? 'Cash Drawer' : 'Online Account'),
+        amount: round2(amtDec).toNumber(),
+        processedByName: bp.processedByName || 'System',
+        description: `Customer advance refund (${bp.booking?.bookingNumber || 'Booking'})`,
+        createdAt: bp.createdAt,
+      });
+    } else {
+      advancesReceivedDec = advancesReceivedDec.plus(amtDec);
+      paymentMovements.push({
+        id: `m-bp-${bp.id}`,
+        date: ymd(bp.date),
+        type: 'ADVANCE_RECEIVED',
+        typeLabel: 'Advance Received',
+        direction: 'CREDIT',
+        receiptNumber: bp.receiptNumber,
+        bookingNumber: bp.booking?.bookingNumber || '—',
+        clientName: bp.booking?.clientName || 'Customer',
+        paymentMethod: bp.method || 'CASH',
+        paymentAccountName: bp.paymentAccountName || (bp.method === 'CASH' ? 'Cash Drawer' : 'Online Account'),
+        amount: round2(amtDec).toNumber(),
+        processedByName: bp.processedByName || 'System',
+        description: `Customer advance deposit (${bp.booking?.bookingNumber || 'Booking'})`,
+        createdAt: bp.createdAt,
+      });
+    }
+  }
+
+  let advancesAppliedDec = toDec(0);
+  const appliedMovements = [];
+
+  for (const inv of periodInvoices) {
+    const adjDec = toDec(inv.advanceAdjusted);
+    advancesAppliedDec = advancesAppliedDec.plus(adjDec);
+    appliedMovements.push({
+      id: `m-inv-${inv.id}`,
+      date: ymd(inv.date),
+      type: 'ADVANCE_APPLIED',
+      typeLabel: 'Advance Applied to Invoice',
+      direction: 'DEBIT',
+      receiptNumber: inv.invoiceNumber,
+      bookingNumber: inv.booking?.bookingNumber || '—',
+      clientName: inv.clientName || 'Customer',
+      paymentMethod: 'ADJUSTMENT',
+      paymentAccountName: 'Customer Deposit Liability',
+      amount: round2(adjDec).toNumber(),
+      processedByName: inv.processedByName || 'System',
+      description: `Advance applied to checkout invoice ${inv.invoiceNumber}`,
+      createdAt: inv.createdAt,
+    });
+  }
+
+  const advancesReceived = round2(advancesReceivedDec).toNumber();
+  const advanceRefunds = round2(advanceRefundsDec).toNumber();
+  const advancesApplied = round2(advancesAppliedDec).toNumber();
+
+  const closingBalanceDec = max0(
+    toDec(openingBalance).plus(advancesReceivedDec).minus(advanceRefundsDec).minus(advancesAppliedDec)
+  );
+  const closingBalance = round2(closingBalanceDec).toNumber();
+
+  const movements = [...paymentMovements, ...appliedMovements].sort((a, b) => {
+    const dDiff = b.date.localeCompare(a.date);
+    if (dDiff !== 0) return dDiff;
+    return new Date(b.createdAt) - new Date(a.createdAt);
+  });
+
+  return {
+    openingBalance,
+    advancesReceived,
+    advanceRefunds,
+    advancesApplied,
+    closingBalance,
+    movements,
+  };
+};
+
 export const operatingProfitReport = async (actor, query = {}) => {
   denyNonAdmins(actor, 'operating profit reports');
   const ctx = await resolveReportContext(actor, query, 'RECOGNITION');
   const prior = resolvePriorPeriodDates(ctx.fromStr, ctx.toStr);
 
-  const [currentMetrics, priorMetrics] = await Promise.all([
+  const [currentMetrics, priorMetrics, customerAdvances] = await Promise.all([
     computePeriodMetrics(ctx.branchId, ctx.fromStr, ctx.toStr, ctx.fromDate, ctx.toDate),
     computePeriodMetrics(ctx.branchId, prior.priorFromStr, prior.priorToStr, prior.priorFromDate, prior.priorToDate),
+    computeCustomerAdvanceMovements(ctx.branchId, ctx.fromStr, ctx.toStr),
   ]);
 
   const rev = currentMetrics.totalNetSales;
@@ -2009,6 +2179,7 @@ export const operatingProfitReport = async (actor, query = {}) => {
     statementRows,
     rows: detailedRows,
     totals: accrualTotals,
+    customerAdvances,
   };
 
   // ══════════════════════════════════════════════════════════════════════════════
@@ -2274,6 +2445,7 @@ export const operatingProfitReport = async (actor, query = {}) => {
     statementRows: collectionStatementRows,
     rows: collectionDetailedRows,
     totals: collectionTotals,
+    customerAdvances,
   };
 
   const isCollectionRequested = query.viewMode === 'COLLECTION';
@@ -2291,6 +2463,7 @@ export const operatingProfitReport = async (actor, query = {}) => {
     statementRows: defaultView.statementRows,
     rows: defaultView.rows,
     totals: defaultView.totals,
+    customerAdvances,
     accrual: accrualViewData,
     collection: collectionViewData,
   });

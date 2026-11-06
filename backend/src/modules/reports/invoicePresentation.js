@@ -199,12 +199,12 @@ export function groupLedgerInvoices(rows, context) {
 export function groupIncomeLines(rows) {
   const groups = new Map();
   for (const row of rows) {
-    const key = `${row.invoiceId}:${row.lineId}`;
+    const key = row.invoiceId ? `${row.invoiceId}:${row.lineId}` : row.id;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(row);
   }
   return [...groups.entries()].map(([key, events]) => {
-    const row = { ...events[0], id: `line-${key}`, date: events[0].originalInvoiceDate || events[0].date,
+    const row = { ...events[0], id: events[0].invoiceId ? `line-${key}` : events[0].id, date: events[0].originalInvoiceDate || events[0].date,
       payments: events.flatMap(e => e.payments || []),
       refunds: [...new Map(events.flatMap(e => e.refunds || []).map(r => [r.id, r])).values()],
     };

@@ -14,7 +14,7 @@ const { mockPrisma } = vi.hoisted(() => {
     },
     staff: { findMany: vi.fn() },
     user: { findMany: vi.fn() },
-    invoice: { findMany: vi.fn() },
+    invoice: { findMany: vi.fn(), aggregate: vi.fn() },
     invoicePayment: { findMany: vi.fn() },
     invoiceRefund: { findMany: vi.fn() },
     expense: { findMany: vi.fn() },
@@ -29,6 +29,7 @@ const { mockPrisma } = vi.hoisted(() => {
     tipReceipt: { findMany: vi.fn() },
     commissionRun: { findMany: vi.fn() },
     commissionPayment: { findMany: vi.fn() },
+    bookingPayment: { findMany: vi.fn(), aggregate: vi.fn() },
   };
   return { mockPrisma };
 });
@@ -47,7 +48,8 @@ vi.mock('../src/modules/reports/fullCommissionAccrual.js', () => ({
   accruedCommissionForPeriod: vi.fn().mockResolvedValue(new Prisma.Decimal(0)),
 }));
 
-import { incomeExpenseReport } from '../src/modules/reports/reports.service.js';
+import { incomeExpenseReport, operatingProfitReport } from '../src/modules/reports/reports.service.js';
+import { detailedIncomeReport } from '../src/modules/reports/detailedCollections.report.js';
 
 describe('Booking Advance & POS Payment Integration Tests', () => {
   beforeEach(() => {
@@ -58,6 +60,7 @@ describe('Booking Advance & POS Payment Integration Tests', () => {
     mockPrisma.user.findMany.mockResolvedValue([{ id: 'user-admin', name: 'Staff Reception', role: 'ADMIN', branchId: 'branch-1' }]);
     mockPrisma.invoicePayment.findMany.mockResolvedValue([]);
     mockPrisma.invoiceRefund.findMany.mockResolvedValue([]);
+    mockPrisma.invoice.aggregate.mockResolvedValue({ _sum: { advanceAdjusted: 0 } });
     mockPrisma.expense.findMany.mockResolvedValue([]);
     mockPrisma.payrollRun.findMany.mockResolvedValue([]);
     mockPrisma.commissionEvent.findMany.mockResolvedValue([]);
@@ -71,6 +74,8 @@ describe('Booking Advance & POS Payment Integration Tests', () => {
     mockPrisma.tipReceipt.findMany.mockResolvedValue([]);
     mockPrisma.commissionRun.findMany.mockResolvedValue([]);
     mockPrisma.commissionPayment.findMany.mockResolvedValue([]);
+    mockPrisma.bookingPayment.findMany.mockResolvedValue([]);
+    mockPrisma.bookingPayment.aggregate.mockResolvedValue({ _sum: { amount: 0 } });
   });
 
   describe('Scenario A: Two Advances on PKR 10,000 Booking', () => {
@@ -506,6 +511,243 @@ describe('Booking Advance & POS Payment Integration Tests', () => {
       // Collections from advance (+5000) and refund (-5000) cancel out to 0
       expect(report.totals.customerCollections).toBe(0);
       expect(report.totals.netCashMovement).toBe(0);
+    });
+  });
+
+  describe('Scenario C: Detailed Income Report Booking Advance Integration', () => {
+    it('8. Detailed Income displays actual Booking Advance installment and POS checkout without double counting', async () => {
+      const bookingPayment = {
+        id: 'bp-001',
+        receiptNumber: 'BPR-0001',
+        bookingId: 'bkg-001',
+        branchId: 'branch-1',
+        isRefund: false,
+        amount: D(5000),
+        date: new Date('2026-11-01T00:00:00.000Z'),
+        time: '10:00',
+        method: 'CASH',
+        paymentAccountId: null,
+        paymentAccountName: 'Cash Drawer',
+        processedByUserId: 'user-admin',
+        processedByName: 'Staff Reception',
+        createdAt: new Date('2026-11-01T10:00:00.000Z'),
+        booking: {
+          id: 'bkg-001',
+          bookingNumber: 'BKG-0001',
+          clientId: 'client-1',
+          clientName: 'Ayesha Khan',
+          clientPhone: '03001234567',
+          branchId: 'branch-1',
+        },
+        branch: { id: 'branch-1', name: 'Karachi Branch' },
+      };
+
+      const finalInvoice = {
+        id: 'inv-001',
+        invoiceNumber: 'INV-0001',
+        branchId: 'branch-1',
+        clientId: 'client-1',
+        clientName: 'Ayesha Khan',
+        clientPhone: '03001234567',
+        bookingId: 'bkg-001',
+        date: new Date('2026-11-05T00:00:00.000Z'),
+        createdAt: new Date('2026-11-05T15:00:00.000Z'),
+        subtotal: D(10000),
+        discount: D(0),
+        discountType: 'NONE',
+        discountValue: D(0),
+        netSales: D(10000),
+        tax: D(0),
+        total: D(10000),
+        advanceAdjusted: D(5000),
+        amountPaid: D(10000),
+        amountDue: D(0),
+        tip: D(0),
+        status: 'PAID',
+        lifecycle: 'ACTIVE',
+        processedByName: 'Staff Reception',
+        lines: [
+          {
+            id: 'line-001',
+            type: 'SERVICE',
+            name: 'Bridal Makeup',
+            code: 'SRV-001',
+            unitPrice: D(10000),
+            quantity: 1,
+            discountAllocated: D(0),
+            netSales: D(10000),
+            tax: D(0),
+            taxRate: D(0),
+            staffId: 'staff-1',
+            staffName: 'Zara',
+            staffCommissionRate: D(0),
+            components: [],
+          },
+        ],
+        payments: [
+          {
+            id: 'pay-pos-001',
+            receiptNumber: 'RCP-0001',
+            date: new Date('2026-11-05T00:00:00.000Z'),
+            time: '15:00',
+            amount: D(5000),
+            billAmountAllocated: D(5000),
+            tipAmountAllocated: D(0),
+            method: 'CASH',
+            kind: 'POS',
+            createdAt: new Date('2026-11-05T15:00:00.000Z'),
+            reversedAt: null,
+            processedByName: 'Staff Reception',
+          },
+        ],
+        refunds: [],
+        booking: {
+          id: 'bkg-001',
+          bookingNumber: 'BKG-0001',
+          payments: [bookingPayment],
+        },
+      };
+
+      mockPrisma.invoice.findMany.mockResolvedValue([finalInvoice]);
+      mockPrisma.bookingPayment.findMany.mockResolvedValue([bookingPayment]);
+
+      const actor = { id: 'user-admin', name: 'Admin User', role: 'ADMIN', branchId: 'branch-1' };
+
+      const report = await detailedIncomeReport(actor, {
+        from: '2026-11-01',
+        to: '2026-11-05',
+        branchId: 'branch-1',
+      });
+
+      // 1. Advance installment appears as distinct transaction row under BOOKING_ADVANCE category
+      const advanceRow = report.displayRows.find((r) => r.incomeSource === 'BOOKING_ADVANCE');
+      expect(advanceRow).toBeDefined();
+      expect(advanceRow.invoiceNumber).toBe('BPR-0001');
+      expect(advanceRow.bookingNumber).toBe('BKG-0001');
+      expect(advanceRow.clientName).toBe('Ayesha Khan');
+      expect(advanceRow.total).toBe(5000);
+      expect(advanceRow.recognizedNet).toBe(0);
+
+      // 2. POS invoice line displays earned service revenue
+      const serviceRow = report.displayRows.find((r) => r.incomeSource === 'SERVICE');
+      expect(serviceRow).toBeDefined();
+      expect(serviceRow.recognizedNet).toBe(10000);
+      expect(serviceRow.total).toBe(5000);
+
+      // 3. Totals and KPIs: collections = 10,000, revenue = 10,000, no double counting
+      expect(report.kpis.totalPaid).toBe(10000);
+      expect(report.kpis.recognizedNetRevenue).toBe(10000);
+      expect(report.kpis.serviceRevenue).toBe(10000);
+      expect(report.kpis.bookingAdvanceCollections).toBe(5000);
+    });
+
+    it('9. Detailed Income handles booking advance refund correctly', async () => {
+      const refundPayment = {
+        id: 'bp-002-ref',
+        receiptNumber: 'BPR-0002',
+        bookingId: 'bkg-002',
+        branchId: 'branch-1',
+        isRefund: true,
+        amount: D(3000),
+        date: new Date('2026-11-02T00:00:00.000Z'),
+        time: '11:00',
+        method: 'CASH',
+        processedByUserId: 'user-admin',
+        processedByName: 'Staff Reception',
+        createdAt: new Date('2026-11-02T11:00:00.000Z'),
+        booking: {
+          id: 'bkg-002',
+          bookingNumber: 'BKG-0002',
+          clientId: 'client-2',
+          clientName: 'Fatima Ali',
+          clientPhone: '03009876543',
+          branchId: 'branch-1',
+        },
+        branch: { id: 'branch-1', name: 'Karachi Branch' },
+      };
+
+      mockPrisma.invoice.findMany.mockResolvedValue([]);
+      mockPrisma.bookingPayment.findMany.mockResolvedValue([refundPayment]);
+
+      const actor = { id: 'user-admin', name: 'Admin User', role: 'ADMIN', branchId: 'branch-1' };
+      const report = await detailedIncomeReport(actor, {
+        from: '2026-11-01',
+        to: '2026-11-05',
+        branchId: 'branch-1',
+      });
+
+      expect(report.kpis.bookingAdvanceCollections).toBe(-3000);
+      expect(report.kpis.totalPaid).toBe(-3000);
+      expect(report.kpis.recognizedNetRevenue).toBe(0);
+    });
+  });
+
+  describe('Scenario D: Operating Profit & P&L Statement Customer Advances Reconciliation (Non-P&L)', () => {
+    it('10. P&L reconciles opening, received, refunds, applied, and closing advance liability', async () => {
+      mockPrisma.bookingPayment.aggregate
+        .mockResolvedValueOnce({ _sum: { amount: D(2000) } })
+        .mockResolvedValueOnce({ _sum: { amount: D(0) } });
+
+      mockPrisma.invoice.aggregate
+        .mockResolvedValueOnce({ _sum: { advanceAdjusted: D(1000) } });
+
+      const periodPayment = {
+        id: 'bp-010',
+        receiptNumber: 'BPR-0010',
+        bookingId: 'bkg-010',
+        branchId: 'branch-1',
+        isRefund: false,
+        amount: D(5000),
+        date: new Date('2026-11-03T00:00:00.000Z'),
+        method: 'CASH',
+        paymentAccountId: null,
+        paymentAccountName: 'Cash Drawer',
+        processedByName: 'Staff Reception',
+        createdAt: new Date('2026-11-03T10:00:00.000Z'),
+        booking: { id: 'bkg-010', bookingNumber: 'BKG-0010', clientName: 'Sana Malik', clientPhone: '03121234567' },
+      };
+
+      const periodInvoice = {
+        id: 'inv-010',
+        invoiceNumber: 'INV-0010',
+        branchId: 'branch-1',
+        date: new Date('2026-11-04T00:00:00.000Z'),
+        advanceAdjusted: D(4000),
+        total: D(10000),
+        netSales: D(10000),
+        tax: D(0),
+        amountPaid: D(10000),
+        amountDue: D(0),
+        processedByName: 'Staff Reception',
+        clientName: 'Sana Malik',
+        createdAt: new Date('2026-11-04T12:00:00.000Z'),
+        lines: [
+          { id: 'l-010', type: 'SERVICE', unitPrice: D(10000), quantity: 1, discountAllocated: D(0), netSales: D(10000), tax: D(0), staffId: 'staff-1', staffName: 'Zara', staffCommissionRate: D(0), components: [] },
+        ],
+        booking: { id: 'bkg-010', bookingNumber: 'BKG-0010', clientName: 'Sana Malik' },
+      };
+
+      mockPrisma.bookingPayment.findMany.mockResolvedValue([periodPayment]);
+      mockPrisma.invoice.findMany.mockResolvedValue([periodInvoice]);
+
+      const actor = { id: 'user-admin', name: 'Admin User', role: 'ADMIN', branchId: 'branch-1' };
+      const report = await operatingProfitReport(actor, {
+        from: '2026-11-01',
+        to: '2026-11-05',
+        branchId: 'branch-1',
+      });
+
+      const ca = report.customerAdvances;
+      expect(ca).toBeDefined();
+      expect(ca.openingBalance).toBe(1000);
+      expect(ca.advancesReceived).toBe(5000);
+      expect(ca.advanceRefunds).toBe(0);
+      expect(ca.advancesApplied).toBe(4000);
+      expect(ca.closingBalance).toBe(2000);
+      expect(ca.movements.length).toBe(2);
+
+      // Verify Non-P&L invariant: Total Net Sales remains 10,000 (from invoice), not inflated by 5,000 advance
+      expect(report.totals.revenue).toBe(10000);
     });
   });
 });
