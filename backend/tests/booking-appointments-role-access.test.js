@@ -58,6 +58,7 @@ import prisma from '../src/config/prisma.js';
 import * as appointmentService from '../src/modules/appointments/appointments.service.js';
 import * as bookingService from '../src/modules/bookings/bookings.service.js';
 import * as staffService from '../src/modules/staff/staff.service.js';
+import * as clientService from '../src/modules/clients/clients.service.js';
 
 describe('Booking & Appointments Portal Access for Staff & Accountant', () => {
   const staffActor = {
@@ -151,5 +152,41 @@ describe('Booking & Appointments Portal Access for Staff & Accountant', () => {
     // baseSalary must be redacted for staff/accountant
     expect(staffList[0].compensationRedacted).toBe(true);
     expect(staffList[0].baseSalary).toBe(0);
+  });
+
+  it('allows STAFF and ACCOUNTANT to search and list clients for bookings with financial data redacted for staff', async () => {
+    prisma.branch.findMany.mockResolvedValue([{ id: 'branch-1', name: 'Karachi Branch' }]);
+    prisma.client.findMany.mockResolvedValue([
+      {
+        id: 'cl-1',
+        name: 'Amina Tariq',
+        phone: '03001234567',
+        phoneNormalized: '03001234567',
+        branchId: 'branch-1',
+        isArchived: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
+
+    // STAFF lookup
+    const staffClients = await clientService.searchClients(staffActor, { branchId: 'branch-1', q: 'Amina' });
+    expect(staffClients).toHaveLength(1);
+    expect(staffClients[0].name).toBe('Amina Tariq');
+    expect(staffClients[0].outstandingBalance).toBe(0);
+
+    // ACCOUNTANT lookup
+    const acctClients = await clientService.searchClients(accountantActor, { branchId: 'branch-1', q: 'Amina' });
+    expect(acctClients).toHaveLength(1);
+    expect(acctClients[0].name).toBe('Amina Tariq');
+  });
+
+  it('allows ACCOUNTANT and STAFF to list bookings for their branch', async () => {
+    prisma.booking.findMany.mockResolvedValue([]);
+    const acctBookings = await bookingService.listBookings(accountantActor, { branchId: 'branch-1' });
+    expect(Array.isArray(acctBookings)).toBe(true);
+
+    const staffBookings = await bookingService.listBookings(staffActor, { branchId: 'branch-1' });
+    expect(Array.isArray(staffBookings)).toBe(true);
   });
 });

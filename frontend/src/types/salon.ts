@@ -3263,7 +3263,11 @@ export interface DetailedExpensesReportKPIs {
   nonOperatingCashOutflow?: number;
   supplierPayments?: number;
   supplierCashOutflow?: number;
+  supplierGrossPayments?: number;
+  supplierReversals?: number;
+  supplierRefunds?: number;
   totalCashOutflow?: number;
+  totalDisbursementReversals?: number;
   unpaidSalaries?: number;
   unpaidCommissions?: number;
   paidSalaries?: number;
@@ -3294,6 +3298,7 @@ export interface DetailedExpenseRow {
   paymentAccountId?: string | null;
   paymentAccountName?: string | null;
   status: 'DRAFT' | 'POSTED' | 'REVERSED';
+  sourceType?: string;
   externalReference: string;
   notes: string;
   createdByUserId: string;

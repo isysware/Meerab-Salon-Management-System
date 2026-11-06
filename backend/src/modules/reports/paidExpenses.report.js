@@ -1,6 +1,6 @@
 import prisma from '../../config/prisma.js';
 import { forbidden } from '../../lib/AppError.js';
-import { dateOnly, toTimeString, ymd } from '../../lib/dates.js';
+import { dateOnly, toDateString, toTimeString, ymd } from '../../lib/dates.js';
 import { round2, toDec } from '../../lib/money.js';
 import { resolveReportContext, formatReportResponse } from '../../lib/reportRange.js';
 import { loadCollectionEvents, payoutEvents } from './collectionEvents.js';
@@ -27,7 +27,19 @@ export async function detailedExpensesReport(actor, query = {}) {
   const ctx = await resolveReportContext(actor, query, 'PAYMENT_DATE');
   const scope = ctx.branchId ? { branchId: ctx.branchId } : {};
   const admin = ['SUPER_ADMIN', 'ADMIN'].includes(actor.role);
-  const [expenses, branches, categories, payments, slips, commissions, rawSupplierPayments, paymentAccounts] = await Promise.all([
+  const [
+    expenses,
+    branches,
+    categories,
+    payments,
+    slips,
+    commissions,
+    rawSupplierPayments,
+    drawerRefundMovements,
+    accountRefundMovements,
+    rawSupplierReturns,
+    paymentAccounts,
+  ] = await Promise.all([
     prisma.expense.findMany({ where: { ...scope, expenseDate: { gte: dateOnly(ctx.fromStr), lte: dateOnly(ctx.toStr) },
       ...(actor.role === 'ACCOUNTANT' ? { OR: [{ paidByUserId: actor.id }, { createdByUserId: actor.id }] } : {}) } }),
     prisma.branch.findMany({ where: ctx.branchId ? { id: ctx.branchId } : {}, select: { id: true, name: true } }),
@@ -50,6 +62,37 @@ export async function detailedExpensesReport(actor, query = {}) {
         supplier: { select: { id: true, name: true } },
       },
     }),
+    prisma.drawerMovement?.findMany
+      ? prisma.drawerMovement.findMany({
+          where: {
+            ...scope,
+            type: 'SUPPLIER_REFUND',
+            createdAt: { gte: ctx.fromDate, lte: ctx.toDate },
+            ...(actor.role === 'ACCOUNTANT' ? { userId: actor.id } : {}),
+          },
+        })
+      : Promise.resolve([]),
+    prisma.accountMovement?.findMany
+      ? prisma.accountMovement.findMany({
+          where: {
+            ...scope,
+            type: 'SUPPLIER_REFUND',
+            createdAt: { gte: ctx.fromDate, lte: ctx.toDate },
+            ...(actor.role === 'ACCOUNTANT' ? { userId: actor.id } : {}),
+          },
+        })
+      : Promise.resolve([]),
+    prisma.supplierReturn?.findMany
+      ? prisma.supplierReturn.findMany({
+          where: {
+            ...scope,
+            refundTreatment: { in: ['CASH_REFUND', 'ONLINE_REFUND'] },
+          },
+          include: {
+            supplier: { select: { id: true, name: true } },
+          },
+        })
+      : Promise.resolve([]),
     prisma.paymentAccount.findMany({ select: { id: true, name: true } }),
   ]);
   const names = new Map(branches.map(b => [b.id, b.name]));
@@ -146,6 +189,51 @@ export async function detailedExpensesReport(actor, query = {}) {
       }
     }
   }
+  const returnMap = new Map();
+  for (const ret of rawSupplierReturns) {
+    if (ret.id) returnMap.set(ret.id, ret);
+    if (ret.returnNumber) returnMap.set(ret.returnNumber, ret);
+  }
+
+  for (const [method, movements] of [['CASH', drawerRefundMovements], ['ONLINE', accountRefundMovements]]) {
+    for (const m of movements) {
+      const refDate = toDateString(m.createdAt) || ymd(m.createdAt);
+      if (refDate >= ctx.fromStr && refDate <= ctx.toStr) {
+        const ret = (m.sourceId && returnMap.get(m.sourceId)) || (m.reference && returnMap.get(m.reference));
+        const supplierName = ret?.supplier?.name || m.description?.replace(/^Supplier refund (?:from\s+)?/, '').split(' for ')[0]?.split(' · ')[0] || 'Supplier';
+        const purchaseRef = ret?.purchaseNumber || m.reference || '';
+        const amt = n(toDec(m.amount));
+        const accName = m.accountId ? accountNames.get(m.accountId) : null;
+        rawRows.push({
+          id: `sr-${m.id}`,
+          voucherNumber: m.reference || ret?.returnNumber || 'SR-REFUND',
+          date: refDate,
+          time: toTimeString(m.createdAt),
+          branchId: m.branchId,
+          branchName: names.get(m.branchId) || 'Branch',
+          category: SUPPLIER_PAYMENT_CATEGORY,
+          title: `Supplier Refund Received — ${supplierName}`,
+          payee: supplierName,
+          description: m.description || `Supplier refund received from ${supplierName} (${m.reference}${purchaseRef ? ` · Ref: ${purchaseRef}` : ''})`,
+          sourceType: 'SUPPLIER_REFUND',
+          amount: -amt,
+          paidAmount: -amt,
+          paymentSource: method === 'CASH' ? 'CASH_DRAWER' : 'ONLINE_ACCOUNT',
+          paymentAccountId: method === 'CASH' ? null : (m.accountId || null),
+          paymentAccountName: accName || (method === 'CASH' ? 'Cash Drawer' : 'Online Account'),
+          status: 'POSTED',
+          externalReference: purchaseRef,
+          notes: ret?.notes || '',
+          createdByUserId: m.userId,
+          createdByName: m.userName,
+          paidByName: m.userName,
+          isReversalRecord: false,
+          reversalReason: '',
+          reversedByName: '',
+        });
+      }
+    }
+  }
   const search = query.search?.trim().toLowerCase();
   for (const m of loans) rawRows.push({
     id: m.id, voucherNumber: m.reference, date: m.date, time: '', branchId: m.branchId,
@@ -168,9 +256,14 @@ export async function detailedExpensesReport(actor, query = {}) {
   const cash = sum(rows.filter(r => r.paymentSource === 'CASH_DRAWER'), 'paidAmount');
   const online = sum(rows.filter(r => r.paymentSource !== 'CASH_DRAWER'), 'paidAmount');
   const total = cash.plus(online);
-  const operatingRows = rows.filter(r => r.sourceType !== 'STAFF_LOAN' && r.sourceType !== 'SUPPLIER_PAYMENT');
+  const operatingRows = rows.filter(r => r.sourceType !== 'STAFF_LOAN' && r.sourceType !== 'SUPPLIER_PAYMENT' && r.sourceType !== 'SUPPLIER_REFUND');
   const nonOperatingCashOutflow = n(sum(rows.filter(r => r.sourceType === 'STAFF_LOAN'), 'paidAmount'));
-  const supplierPayments = n(sum(rows.filter(r => r.sourceType === 'SUPPLIER_PAYMENT'), 'paidAmount'));
+  const supplierRows = rows.filter(r => r.sourceType === 'SUPPLIER_PAYMENT' || r.sourceType === 'SUPPLIER_REFUND');
+  const supplierPayments = n(sum(supplierRows, 'paidAmount'));
+  const supplierGrossPayments = n(sum(rows.filter(r => r.sourceType === 'SUPPLIER_PAYMENT' && !r.isReversalRecord), 'paidAmount'));
+  const supplierReversals = n(sum(rows.filter(r => r.sourceType === 'SUPPLIER_PAYMENT' && r.isReversalRecord), 'paidAmount').abs());
+  const supplierRefunds = n(sum(rows.filter(r => r.sourceType === 'SUPPLIER_REFUND'), 'paidAmount').abs());
+  const totalDisbursementReversals = n(sum(rows.filter(r => r.status === 'REVERSED' || r.isReversalRecord), 'paidAmount').abs());
   const categoryNames = [...new Set(rows.map(r => r.category))];
   const accountIds = [...new Set(rows.filter(r => r.paymentSource === 'ONLINE_ACCOUNT').map(r => r.paymentAccountId || 'online'))];
   const onlineAccounts = accountIds.map(id => {
@@ -182,21 +275,43 @@ export async function detailedExpensesReport(actor, query = {}) {
   const commissionPayable = commissionEarned.minus(sum(payments.commission.filter(p => p.date <= ctx.toStr), 'signedAmount'));
   return formatReportResponse({ ...ctx.meta, liabilityBasis: 'Branch closing liabilities at period end; not reduced by table filters.' }, {
     rows, categories: [...new Set([...categories.map(c => c.name), ...rawRows.map(r => r.category)])].sort(),
-    kpis: { totalExpenses: n(sum(operatingRows, 'paidAmount')),
+    kpis: {
+      totalExpenses: n(sum(operatingRows, 'paidAmount')),
       cashExpenses: n(sum(operatingRows.filter(r => r.paymentSource === 'CASH_DRAWER'), 'paidAmount')),
       onlineExpenses: n(sum(operatingRows.filter(r => r.paymentSource !== 'CASH_DRAWER'), 'paidAmount')),
-      nonOperatingCashOutflow, supplierPayments, supplierCashOutflow: supplierPayments,
-      totalCashOutflow: n(total), totalVouchersCount: rows.length,
+      nonOperatingCashOutflow,
+      supplierPayments,
+      supplierCashOutflow: supplierPayments,
+      supplierGrossPayments,
+      supplierReversals,
+      supplierRefunds,
+      totalCashOutflow: n(total),
+      totalVouchersCount: rows.length,
       totalPostedAmount: n(sum(operatingRows.filter(r => r.status === 'POSTED'), 'paidAmount')),
-      totalReversedAmount: n(sum(operatingRows.filter(r => r.status === 'REVERSED'), 'paidAmount').negated()),
-      postedCount: rows.filter(r => r.status === 'POSTED').length, reversedCount: rows.filter(r => r.status === 'REVERSED').length,
-      draftCount: rows.filter(r => r.status === 'DRAFT').length, categoryCount: categoryNames.length,
+      totalReversedAmount: totalDisbursementReversals,
+      postedCount: rows.filter(r => r.status === 'POSTED').length,
+      reversedCount: rows.filter(r => r.status === 'REVERSED').length,
+      draftCount: rows.filter(r => r.status === 'DRAFT').length,
+      categoryCount: categoryNames.length,
       paidSalaries: n(sum(rows.filter(r => r.sourceType === 'SALARY'), 'paidAmount')),
       paidCommissions: n(sum(rows.filter(r => r.sourceType === 'COMMISSION'), 'paidAmount')),
-      ...(admin ? { unpaidSalaries: n(salaryPayable), unpaidCommissions: n(commissionPayable) } : {}) },
+      ...(admin ? { unpaidSalaries: n(salaryPayable), unpaidCommissions: n(commissionPayable) } : {}),
+    },
     liabilities: admin ? { unpaidSalaries: n(salaryPayable), unpaidCommissions: n(commissionPayable) } : undefined,
     tenderBreakdown: { totalCash: n(cash), totalOnline: n(online), grandTotal: n(total), onlineAccounts },
     categoryBreakdown: categoryNames.map(categoryName => ({ categoryName, amount: n(sum(rows.filter(r => r.category === categoryName), 'paidAmount')) })),
-    totals: { amount: n(total), cash: n(cash), online: n(online), operatingExpenses: n(sum(operatingRows, 'paidAmount')), nonOperatingCashOutflow, supplierPayments, supplierCashOutflow: supplierPayments, totalCashOutflow: n(total) },
+    totals: {
+      amount: n(total),
+      cash: n(cash),
+      online: n(online),
+      operatingExpenses: n(sum(operatingRows, 'paidAmount')),
+      nonOperatingCashOutflow,
+      supplierPayments,
+      supplierCashOutflow: supplierPayments,
+      supplierGrossPayments,
+      supplierReversals,
+      supplierRefunds,
+      totalCashOutflow: n(total),
+    },
   });
 }

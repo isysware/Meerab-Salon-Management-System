@@ -9,7 +9,7 @@ import * as v from './settings.schema.js';
 import * as c from './settings.controller.js';
 
 const ADMINS = ['SUPER_ADMIN', 'ADMIN'];
-const BACK_OFFICE = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT'];
+const BACK_OFFICE = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT', 'STAFF'];
 
 // ── /tax-rules ───────────────────────────────────────────────────────────────
 export const taxRuleRoutes = Router();

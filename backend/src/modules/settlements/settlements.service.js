@@ -15,7 +15,7 @@ import { round2, toDec } from '../../lib/money.js';
 import { nextSequence } from '../../lib/sequence.js';
 import { num, opt, iso } from '../../lib/dto.js';
 import { formatMinutesToTime, parseTimeToMinutes } from '../../lib/calculations/attendanceCalculations.js';
-import { drawerDTOs, ensureVault, holderBalance, lockHolder, postCashMovement } from '../cash/cash.service.js';
+import { drawerDTOs, ensureVault, getActiveDrawer, holderBalance, lockHolder, postCashMovement } from '../cash/cash.service.js';
 import { toUserDTO } from '../auth/auth.mapper.js';
 import * as branches from '../branches/branches.service.js';
 
@@ -43,7 +43,7 @@ const toVarianceDTO = (v) => ({
 
 const CUSTODY_TYPE = {
   BOOKING_ADVANCE: 'BOOKING_ADVANCE', BOOKING_REFUND: 'BOOKING_REFUND',
-  OPENING_FLOAT: 'OPENING_FLOAT', TRANSFER_IN: 'FLOAT_RECEIVED', CASH_SALE: 'POS_SALE', DUES_COLLECTION: 'DUES_COLLECTION',
+  OPENING_FLOAT: 'OPENING_FLOAT', TRANSFER_IN: 'FLOAT_RECEIVED', SETTLEMENT_IN: 'FLOAT_RECEIVED', CASH_SALE: 'POS_SALE', DUES_COLLECTION: 'DUES_COLLECTION',
   CASH_TIP: 'TIP_RECEIVED', EXPENSE: 'EXPENSE_PAID', PAYROLL_PAYOUT: 'EXPENSE_PAID', SALARY_ADVANCE: 'EXPENSE_PAID', COMMISSION_PAYOUT: 'EXPENSE_PAID',
   TIP_PAYOUT: 'EXPENSE_PAID', SUPPLIER_PAYMENT: 'EXPENSE_PAID', EXPENSE_REVERSAL: 'EXPENSE_REVERSAL_REFUND', REVERSAL: 'EXPENSE_REVERSAL_REFUND',
   SUPPLIER_REFUND: 'EXPENSE_REVERSAL_REFUND', CASH_REFUND: 'INVOICE_REFUND', SETTLEMENT_OUT: 'HANDOVER_SETTLEMENT',
@@ -147,11 +147,28 @@ export const custodyStatement = async (actor, { userId, branchId, drawerId, star
 export const listSettlements = async (actor, q = {}) => {
   if (actor.role === 'STAFF') throw forbidden('FORBIDDEN', 'Access Denied: Staff members cannot view account settlements.');
   const b = resolveReadBranch(actor, q.branchId);
+
+  // If reviewPendingOnly is requested:
+  // - Admin: incoming settlements submitted by ACCOUNTANT in their branch
+  // - Super Admin: incoming settlements submitted by ADMIN
+  const pendingFilter = q.reviewPendingOnly === 'true'
+    ? (actor.role === 'ADMIN'
+        ? { status: 'SUBMITTED', submittedByRole: 'ACCOUNTANT', submittedByUserId: { not: actor.id } }
+        : actor.role === 'SUPER_ADMIN'
+        ? { status: 'SUBMITTED', submittedByRole: 'ADMIN', submittedByUserId: { not: actor.id } }
+        : { submittedByUserId: actor.id })
+    : {};
+
   const rows = await prisma.settlement.findMany({
     where: {
-      ...(b ? { branchId: b } : {}), ...(actor.role === 'ACCOUNTANT' ? { submittedByUserId: actor.id } : {}),
-      ...(q.status ? { status: q.status } : {}), ...(q.submitterId ? { submittedByUserId: q.submitterId } : {}), ...(q.drawerId ? { drawerId: q.drawerId } : {}),
+      ...(b ? { branchId: b } : {}),
+      ...(actor.role === 'ACCOUNTANT' ? { submittedByUserId: actor.id } : {}),
+      ...(q.status ? { status: q.status } : {}),
+      ...(q.submitterId ? { submittedByUserId: q.submitterId } : {}),
+      ...(q.drawerId ? { drawerId: q.drawerId } : {}),
+      ...(q.submittedByRole ? { submittedByRole: q.submittedByRole } : {}),
       ...(q.startDate || q.endDate ? { date: { ...(q.startDate ? { gte: dateOnly(q.startDate) } : {}), ...(q.endDate ? { lte: dateOnly(q.endDate) } : {}) } } : {}),
+      ...pendingFilter,
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -201,12 +218,14 @@ export const submitSettlement = async (input, actor, { draft = false } = {}) => 
 
     const now = new Date();
     const today = await getBusinessDate(tx);
+    const destVaultId = input.destinationVaultId || (actor.role === 'ACCOUNTANT' ? `admin-${branchId}` : `vault-${branchId}`);
+    const destVaultName = input.destinationVaultName || (actor.role === 'ACCOUNTANT' ? `${branch.name} Branch Admin` : `${branch.name} Super Admin / Main Vault`);
     const s = await tx.settlement.create({
       data: {
         settlementNumber: await nextSequence(tx, branch.code, 'SET', Number(today.slice(0, 4))), branchId, drawerId: drawer.id,
         date: dateOnly(today), time: clockTime(now), expectedCash: expected, countedCash: counted, variance,
         varianceExplanation: input.varianceExplanation || null, handoverAmount: handover, retainedFloat: retained,
-        destinationVaultId: input.destinationVaultId || `vault-${branchId}`, destinationVaultName: input.destinationVaultName || `${branch.name} Main Safe`,
+        destinationVaultId: destVaultId, destinationVaultName: destVaultName,
         denominationBreakdown: input.denominationBreakdown ?? undefined, notes: input.notes || (draft ? 'Draft settlement record' : `Settlement submitted by ${actor.name}`),
         submittedByUserId: actor.id, submittedByName: actor.name, submittedByRole: actor.role,
         submittedAt: draft ? null : now, status: draft ? 'DRAFT' : 'SUBMITTED',
@@ -238,6 +257,17 @@ const loadForReview = async (tx, actor, id) => {
     throw forbidden('SELF_APPROVAL_NOT_ALLOWED', 'Access Denied: You cannot review your own settlement or a settlement for your own cash drawer. An independent administrator must review.');
   }
   if (s.status !== 'SUBMITTED') throw conflict('NOT_SUBMITTED', `Cannot review settlement with status '${s.status}'. Only SUBMITTED settlements can be reviewed.`);
+
+  // Routing hierarchy:
+  // Branch Admin reviews Accountant / Sales settlements from their branch.
+  // Super Admin reviews Admin settlements.
+  if (actor.role === 'ADMIN' && s.submittedByRole !== 'ACCOUNTANT') {
+    throw forbidden('FORBIDDEN', 'Access Denied: Branch Admins can only review settlements submitted by Branch Accountants.');
+  }
+  if (actor.role === 'SUPER_ADMIN' && s.submittedByRole === 'ACCOUNTANT') {
+    throw forbidden('FORBIDDEN', 'Access Denied: Accountant settlements must be reviewed by the Branch Admin first.');
+  }
+
   return s;
 };
 
@@ -292,10 +322,28 @@ export const approveSettlement = async (id, input, actor) =>
       });
     }
 
-    const vault = await ensureVault(tx, s.branchId);
+    // Custody Transfer:
+    // When Admin accepts Accountant's settlement -> money moves into the Branch Admin's active cash drawer.
+    // When Super Admin accepts Admin's settlement -> money moves into Super Admin's active cash drawer.
+    const receivingHolder = await getActiveDrawer(tx, actor, s.branchId, { autoOpen: true });
+
     if (handover.greaterThan(0)) {
-      await postCashMovement(tx, { ...common, holderId: s.drawerId, type: 'SETTLEMENT_OUT', direction: 'OUT', amount: handover, description: `Settlement handover to ${s.destinationVaultName} (${s.settlementNumber})` });
-      await postCashMovement(tx, { ...common, holderId: vault.id, type: 'SETTLEMENT_IN', direction: 'IN', amount: handover, description: `Handover received from ${s.submittedByName} (${s.settlementNumber})` });
+      await postCashMovement(tx, {
+        ...common,
+        holderId: s.drawerId,
+        type: 'SETTLEMENT_OUT',
+        direction: 'OUT',
+        amount: handover,
+        description: `Settlement handover to ${actor.name} (${s.settlementNumber})`
+      });
+      await postCashMovement(tx, {
+        ...common,
+        holderId: receivingHolder.id,
+        type: 'SETTLEMENT_IN',
+        direction: 'IN',
+        amount: handover,
+        description: `Handover received from ${s.submittedByName} (${s.settlementNumber})`
+      });
     }
 
     const now = new Date();
@@ -314,7 +362,13 @@ export const approveSettlement = async (id, input, actor) =>
     const updated = await tx.settlement.update({
       where: { id },
       data: {
-        status: 'APPROVED', receivedByUserId: actor.id, receivedByName: actor.name, reviewedAt: now, successorDrawerId: successor?.id ?? null,
+        status: 'APPROVED',
+        receivedByUserId: actor.id,
+        receivedByName: actor.name,
+        reviewedAt: now,
+        destinationVaultId: receivingHolder.id,
+        destinationVaultName: actor.role === 'ADMIN' ? `${actor.name} (Branch Admin Custody)` : `${actor.name} (Super Admin Custody)`,
+        successorDrawerId: successor?.id ?? null,
         varianceAdjustmentRecordId: varianceAdjustment?.id ?? null,
         ...(input.notes ? { notes: `${s.notes ? `${s.notes} | ` : ''}Review notes: ${input.notes}` } : {}),
       },

@@ -193,6 +193,9 @@ export const AccountSettlementPage: React.FC = () => {
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
+      const destinationVaultName = user.role === 'ACCOUNTANT'
+        ? 'Branch Admin'
+        : 'Super Admin / Main Vault';
       const payload: CreateSettlementInput = {
         drawerId: formDrawer.id,
         branchId: actionScope.branchId,
@@ -200,7 +203,7 @@ export const AccountSettlementPage: React.FC = () => {
         handoverAmount: handoverNum,
         retainedFloat: retainedNum,
         varianceExplanation: varianceExplanation.trim() || undefined,
-        destinationVaultName: 'Main Safe',
+        destinationVaultName,
         notes: settlementNotes.trim() || undefined,
       };
 
@@ -388,9 +391,28 @@ export const AccountSettlementPage: React.FC = () => {
 
   const hasUnsettledCash = activeDrawerExpectedCash > 0;
 
+  const canApproveSettlement = useCallback(
+    (s: Settlement) => {
+      if (s.status !== 'SUBMITTED' && s.status !== 'PENDING_VERIFICATION') return false;
+      if (s.submittedByUserId === user?.id) return false;
+
+      if (isSuperAdmin) {
+        return s.submittedByRole === 'ADMIN';
+      }
+      if (isAdmin) {
+        return (
+          s.submittedByRole === 'ACCOUNTANT' &&
+          (!selectedBranchId || selectedBranchId === 'ALL' || s.branchId === selectedBranchId)
+        );
+      }
+      return false;
+    },
+    [isSuperAdmin, isAdmin, user?.id, selectedBranchId]
+  );
+
   const pendingApprovalsCount = useMemo(() => {
-    return settlements.filter((s) => s.status === 'SUBMITTED' || s.status === 'PENDING_VERIFICATION').length;
-  }, [settlements]);
+    return settlements.filter(canApproveSettlement).length;
+  }, [settlements, canApproveSettlement]);
 
   const totalSettledAmount = useMemo(() => {
     return settlements
@@ -609,7 +631,7 @@ export const AccountSettlementPage: React.FC = () => {
                   {/* Handover Amount calculated */}
                   <div className="rounded-xl border border-[#B82E69]/20 bg-[#B82E69]/5 p-4">
                     <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                      Handover to Safe / Admin
+                      {user.role === 'ACCOUNTANT' ? 'Handover to Branch Admin' : 'Handover to Super Admin'}
                     </span>
                     <span className="text-lg font-extrabold text-[#B82E69] font-mono tabular-nums">
                       {formatPKR(handoverNum)}
@@ -815,28 +837,40 @@ export const AccountSettlementPage: React.FC = () => {
                     <tr key={s.id || idx} className="hover:bg-[#B82E69]/[0.02] transition-colors">
                       <td className="py-3 px-4 text-center text-slate-400 font-medium">{idx + 1}</td>
                       <td className="py-3 px-4 font-semibold text-slate-700">
-                        {s.submittedAt
-                          ? new Date(s.submittedAt).toLocaleDateString('en-US', {
-                              month: 'short',
-                              day: 'numeric',
-                              year: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })
-                          : s.date}
+                        <div>
+                          {s.submittedAt
+                            ? new Date(s.submittedAt).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : s.date}
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-normal mt-0.5">
+                          {s.submittedByName || 'User'} · <span className="font-medium text-slate-600">{s.submittedByRole === 'ACCOUNTANT' ? 'Sales / Cashier' : s.submittedByRole === 'ADMIN' ? 'Branch Admin' : s.submittedByRole}</span>
+                        </div>
                       </td>
                       <td className="py-3 px-4">
-                        <span
-                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
-                            s.status === 'APPROVED'
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : s.status === 'REJECTED'
-                              ? 'bg-rose-50 text-rose-700 border-rose-200'
-                              : 'bg-amber-50 text-amber-700 border-amber-200'
-                          }`}
-                        >
-                          {s.status}
-                        </span>
+                        <div className="flex flex-col gap-0.5">
+                          <span
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                              s.status === 'APPROVED'
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : s.status === 'REJECTED'
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : 'bg-amber-50 text-amber-700 border-amber-200'
+                            }`}
+                          >
+                            {s.status}
+                          </span>
+                          {(s.status === 'SUBMITTED' || s.status === 'PENDING_VERIFICATION') && (
+                            <span className="text-[9px] font-medium text-slate-500 whitespace-nowrap">
+                              {s.submittedByRole === 'ACCOUNTANT' ? '→ Route: Branch Admin' : '→ Route: Super Admin'}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3 px-4 text-right font-semibold text-slate-700 font-mono tabular-nums">
                         PKR {(s.expectedCash || 0).toLocaleString()}
@@ -881,7 +915,7 @@ export const AccountSettlementPage: React.FC = () => {
                             >
                               <Eye className="w-3.5 h-3.5" />
                             </button>
-                            {(s.status === 'SUBMITTED' || s.status === 'PENDING_VERIFICATION') && (
+                            {canApproveSettlement(s) && (
                               <>
                                 <button
                                   type="button"
@@ -927,9 +961,11 @@ export const AccountSettlementPage: React.FC = () => {
       {isApproveModalOpen && selectedSettlement && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-white rounded-[24px] max-w-md w-full p-6 shadow-2xl border border-white/90 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
-            <h3 className="text-base font-bold text-slate-900 mb-2">Approve Settlement</h3>
+            <h3 className="text-base font-bold text-slate-900 mb-2">
+              {isAdmin ? 'Approve Settlement (Accountant → Branch Admin Custody)' : 'Approve Settlement (Branch Admin → Super Admin Custody)'}
+            </h3>
             <p className="text-xs text-slate-500 mb-4">
-              Confirm cash handover from <span className="font-semibold text-slate-800">{selectedSettlement.submittedByName}</span> for settlement #{selectedSettlement.settlementNumber}.
+              Confirm cash handover from <span className="font-semibold text-slate-800">{selectedSettlement.submittedByName}</span> ({selectedSettlement.submittedByRole === 'ACCOUNTANT' ? 'Sales / Cashier' : 'Branch Admin'}) for settlement #{selectedSettlement.settlementNumber}.
             </p>
             <div className="bg-slate-50/80 border border-slate-100 p-4 rounded-xl mb-4 text-xs space-y-2">
               <div className="flex justify-between">

@@ -19,32 +19,36 @@ export const clientStats = async (clientIds, tx = prisma, actor) => {
   const stats = new Map(clientIds.map((id) => [id, { outstandingBalance: 0, totalVisits: 0, lastVisitDate: undefined }]));
   if (!clientIds.length) return stats;
 
+  if (actor?.role === 'STAFF') {
+    return stats;
+  }
+
   const ownSales = actor?.role === 'ACCOUNTANT' ? { processedByUserId: actor.id } : {};
-  const bookings = await tx.booking.findMany({ where: { ...(actor?.role === 'ACCOUNTANT' ? { createdById: actor.id } : {}), clientId: { in: clientIds }, status: { in: ['CONFIRMED', 'IN_PROGRESS'] }, invoice: null }, include: { payments: true } });
+  const bookings = (await tx.booking?.findMany?.({ where: { ...(actor?.role === 'ACCOUNTANT' ? { createdById: actor.id } : {}), clientId: { in: clientIds }, status: { in: ['CONFIRMED', 'IN_PROGRESS'] }, invoice: null }, include: { payments: true } })) || [];
   for (const b of bookings) {
     const s = stats.get(b.clientId);
-    const paid = b.payments.reduce((sum, p) => p.isRefund ? sum.minus(p.amount) : sum.plus(p.amount), toDec(0));
+    const paid = (b.payments || []).reduce((sum, p) => p.isRefund ? sum.minus(p.amount) : sum.plus(p.amount), toDec(0));
     s.activeBookingsCount = (s.activeBookingsCount || 0) + 1;
     s.bookingAdvanceBalance = toDec(s.bookingAdvanceBalance || 0).plus(paid).toNumber();
     s.bookingOutstandingBalance = toDec(s.bookingOutstandingBalance || 0).plus(toDec(b.totalAmount).minus(paid)).toNumber();
   }
 
   const branchId = actor ? resolveReadBranch(actor) : undefined;
-  const dues = await tx.invoice.findMany({
+  const dues = (await tx.invoice?.findMany?.({
     where: { clientId: { in: clientIds }, ...ownSales, ...(branchId ? { branchId } : {}), lifecycle: { not: 'VOIDED' } },
     include: { lines: { include: { components: true } }, payments: true, refunds: { include: { lines: true } } },
-  });
+  })) || [];
   for (const invoice of dues) {
     const stat = stats.get(invoice.clientId);
     stat.outstandingBalance = toDec(stat.outstandingBalance).plus(invoiceBalanceAsOf(invoice).outstanding).toNumber();
   }
 
-  const invoiceDays = await tx.invoice.findMany({
+  const invoiceDays = (await tx.invoice?.findMany?.({
     where: { clientId: { in: clientIds }, ...ownSales, lifecycle: { not: 'VOIDED' } }, select: { clientId: true, date: true }, distinct: ['clientId', 'date'],
-  });
-  const apptDays = actor?.role === 'ACCOUNTANT' ? [] : await tx.appointment.findMany({
+  })) || [];
+  const apptDays = actor?.role === 'ACCOUNTANT' ? [] : (await tx.appointment?.findMany?.({
     where: { clientId: { in: clientIds }, status: 'COMPLETED' }, select: { clientId: true, date: true }, distinct: ['clientId', 'date'],
-  });
+  })) || [];
   const days = new Map();
   for (const r of [...invoiceDays, ...apptDays]) {
     if (!days.has(r.clientId)) days.set(r.clientId, new Set());
@@ -76,7 +80,6 @@ const assertValidPhone = (raw) => {
 // ── Queries ──────────────────────────────────────────────────────────────────
 
 export const listClients = async (actor, { branchId, search, includeArchived } = {}) => {
-  assertNotStaff(actor);
   const b = resolveReadBranch(actor, branchId);
   const digits = search ? search.replace(/\D/g, '') : '';
   const where = {
@@ -95,7 +98,6 @@ export const listClients = async (actor, { branchId, search, includeArchived } =
 };
 
 export const getClient = async (actor, id) => {
-  assertNotStaff(actor);
   const c = await prisma.client.findUnique({ where: { id } });
   if (!c) return null;
   assertBranchAccess(actor, c.branchId, 'Access Denied: Cannot access customer records from another branch.');
@@ -104,7 +106,6 @@ export const getClient = async (actor, id) => {
 
 /** POS / booking quick search: by name or any part of the phone digits. Empty query → first 10. */
 export const searchClients = async (actor, { branchId, q }) => {
-  assertNotStaff(actor);
   const b = resolveReadBranch(actor, branchId);
   if (!b) throw badRequest('BRANCH_REQUIRED', 'Please select a specific branch to search customers.');
   const query = (q || '').trim();

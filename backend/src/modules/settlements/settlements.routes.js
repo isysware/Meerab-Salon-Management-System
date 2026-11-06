@@ -33,6 +33,8 @@ const rejectSchema = z.object({ reason: z.string().trim().min(1, 'A rejection re
 const listQuery = z.object({
   branchId: z.string().optional(), status: z.string().optional(), submitterId: z.string().optional(),
   drawerId: z.string().optional(), startDate: ymd.optional(), endDate: ymd.optional(),
+  reviewPendingOnly: z.enum(['true', 'false']).optional(),
+  submittedByRole: z.string().optional(),
 });
 const statementQuery = z.object({
   userId: z.string().optional(), branchId: z.string().optional(), drawerId: z.string().optional(),

@@ -125,8 +125,9 @@ function StaffSelect({ staff, value, onChange }: { staff: StaffMember[]; value?:
 }
 
 function BookingForm({ branchId, initialDate, existing, onSaved, onClose }: { branchId: string; initialDate?: string; existing?: Booking; onSaved: (b: Booking) => void; onClose: () => void }) {
-  const { demoDate, user, allBranches } = useAuth();
-  const [form, setForm] = useState<BookingInput>(() => existing ? asInput(existing) : ({ branchId: user?.role === 'SUPER_ADMIN' ? '' : user?.branchId || (branchId === 'ALL' ? '' : branchId), clientName: '', clientPhone: '', type: 'BRIDAL', eventDate: initialDate || demoDate || today(), serviceTime: '10:00', assignedStaffId: null, discountType: 'FIXED', discountValue: 0, items: [] }));
+  const { demoDate, user, allBranches, activeBranchId } = useAuth();
+  const defaultBranch = user?.role === 'SUPER_ADMIN' ? (branchId === 'ALL' ? '' : branchId) : (user?.branchId || (branchId === 'ALL' ? '' : branchId) || (activeBranchId !== 'ALL' ? activeBranchId : '') || allBranches[0]?.id || '');
+  const [form, setForm] = useState<BookingInput>(() => existing ? asInput(existing) : ({ branchId: defaultBranch, clientName: '', clientPhone: '', type: 'BRIDAL', eventDate: initialDate || demoDate || today(), serviceTime: '10:00', assignedStaffId: null, discountType: 'FIXED', discountValue: 0, items: [] }));
   const selectedBranchId = form.branchId;
   const [clients, setClients] = useState<Client[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
@@ -1142,7 +1143,8 @@ function PaymentDialog({ booking, mode, onSaved, onClose }: { booking: Booking; 
 }
 
 export function BookingsPage() {
-  const { user } = useAuth();
+  const { user, activeBranchId } = useAuth();
+  const effectiveUserBranch = user?.role === 'SUPER_ADMIN' ? '' : (user?.branchId || (activeBranchId !== 'ALL' ? activeBranchId : '') || '');
   const { navigate, currentRoute } = useRouter();
   const queryClientId = new URLSearchParams(currentRoute.split('?')[1] || '').get('clientId') || undefined;
   const queryBookingId = new URLSearchParams(currentRoute.split('?')[1] || '').get('bookingId');
@@ -1160,7 +1162,7 @@ export function BookingsPage() {
   const currentMonth = activeDate.getMonth();
 
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [branchId, setBranchId] = useState(user?.branchId || '');
+  const [branchId, setBranchId] = useState(effectiveUserBranch);
   const [rows, setRows] = useState<Booking[]>([]);
   const [selected, setSelected] = useState<Booking>();
   const [type, setType] = useState('');
@@ -1178,18 +1180,19 @@ export function BookingsPage() {
   const [confirmationBooking, setConfirmationBooking] = useState<Booking | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const admin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+  const canManage = ['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT', 'STAFF'].includes(user?.role || '');
+  const admin = canManage;
 
   useEffect(() => {
     let active = true;
     salonService.getBranches().then(b => {
       if (active) {
         setBranches(b);
-        setBranchId(v => v || b.find(x => x.isActive)?.id || '');
+        setBranchId(v => v || effectiveUserBranch || b.find(x => x.isActive)?.id || '');
       }
     }).catch(e => { if (active) setError(errorText(e)); });
     return () => { active = false; };
-  }, []);
+  }, [effectiveUserBranch]);
 
   const padZero = (n: number) => n < 10 ? `0${n}` : `${n}`;
   const todayStr = `${todayDate.getFullYear()}-${padZero(todayDate.getMonth() + 1)}-${padZero(todayDate.getDate())}`;

@@ -165,7 +165,7 @@ export const DetailedExpensesReportPage: React.FC = () => {
       ['Basis', 'Actual paid expenses; unpaid liabilities shown separately'],
       ...(reportData.liabilities ? [['Unpaid Salaries (branch, period end)', formatPKR(reportData.liabilities.unpaidSalaries)], ['Unpaid Commissions (branch, period end)', formatPKR(reportData.liabilities.unpaidCommissions)]] as [string, string][] : []),
       ['Paid Operating Expenses', formatPKR(reportData.kpis.totalExpenses)],
-      ['Supplier / Vendor Payments — Inventory Cash Outflow', formatPKR(reportData.kpis.supplierPayments ?? 0)],
+      ['Supplier / Vendor Payments — Inventory Cash Outflow (Net of Reversals & Refunds)', formatPKR(reportData.kpis.supplierPayments ?? 0)],
       ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.nonOperatingCashOutflow ?? 0)],
       ['Total Cash Outflow', formatPKR(reportData.kpis.totalCashOutflow ?? reportData.totals.amount)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
@@ -210,7 +210,7 @@ export const DetailedExpensesReportPage: React.FC = () => {
     const meta: [string, string][] = [
       ['Report', 'Detailed Expenses Report'],
       ['Paid Operating Expenses', formatPKR(reportData.kpis.totalExpenses)],
-      ['Supplier / Vendor Payments — Inventory Cash Outflow', formatPKR(reportData.kpis.supplierPayments ?? 0)],
+      ['Supplier / Vendor Payments — Inventory Cash Outflow (Net of Reversals & Refunds)', formatPKR(reportData.kpis.supplierPayments ?? 0)],
       ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.nonOperatingCashOutflow ?? 0)],
       ['Total Cash Outflow', formatPKR(reportData.kpis.totalCashOutflow ?? reportData.totals.amount)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
@@ -257,7 +257,7 @@ export const DetailedExpensesReportPage: React.FC = () => {
     }
     const meta: [string, string][] = [
       ['Paid Operating Expenses', formatPKR(reportData.kpis.totalExpenses)],
-      ['Supplier / Vendor Payments — Inventory Cash Outflow', formatPKR(reportData.kpis.supplierPayments ?? 0)],
+      ['Supplier / Vendor Payments — Inventory Cash Outflow (Net of Reversals & Refunds)', formatPKR(reportData.kpis.supplierPayments ?? 0)],
       ['Staff Loan Disbursements - Non-Operating (Net of Reversals)', formatPKR(reportData.kpis.nonOperatingCashOutflow ?? 0)],
       ['Total Cash Outflow', formatPKR(reportData.kpis.totalCashOutflow ?? reportData.totals.amount)],
       ['Branch', selectedBranch === 'ALL' ? 'All Branches' : reportData.meta.branchName || selectedBranch],
@@ -457,8 +457,21 @@ export const DetailedExpensesReportPage: React.FC = () => {
                 PKR {formatPKR(reportData.kpis.supplierPayments ?? 0)}
               </span>
               <span className="text-xs text-[#78616C] font-medium mt-1 block">
-                Supplier / Vendor inventory payments
+                Net supplier inventory outflow
               </span>
+              {(((reportData.kpis as any).supplierRefunds ?? 0) > 0 || ((reportData.kpis as any).supplierReversals ?? 0) > 0) && (
+                <div className="text-[11px] text-[#78616C] font-medium mt-1 space-y-0.5">
+                  {((reportData.kpis as any).supplierGrossPayments ?? 0) > 0 && (
+                    <div>Paid: PKR {formatPKR((reportData.kpis as any).supplierGrossPayments)}</div>
+                  )}
+                  {((reportData.kpis as any).supplierReversals ?? 0) > 0 && (
+                    <div className="text-rose-600 font-semibold">Reversed: -PKR {formatPKR((reportData.kpis as any).supplierReversals)}</div>
+                  )}
+                  {((reportData.kpis as any).supplierRefunds ?? 0) > 0 && (
+                    <div className="text-emerald-700 font-semibold">Refunds Received: -PKR {formatPKR((reportData.kpis as any).supplierRefunds)}</div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -675,7 +688,11 @@ export const DetailedExpensesReportPage: React.FC = () => {
 
                         {/* 8. Status */}
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                          {isPosted ? (
+                          {row.sourceType === 'SUPPLIER_REFUND' ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              REFUND RECEIVED
+                            </span>
+                          ) : isPosted ? (
                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#FDF2F5] text-[#9D2558] border border-[#F1DEE3]">
                               POSTED
                             </span>
@@ -697,7 +714,9 @@ export const DetailedExpensesReportPage: React.FC = () => {
 
                         {/* 10. Amount */}
                         <td className="py-3.5 px-4 text-right font-mono tabular-nums font-bold whitespace-nowrap text-[13px]">
-                          {isReversed ? (
+                          {row.sourceType === 'SUPPLIER_REFUND' ? (
+                            <span className="text-emerald-700 font-semibold">PKR {formatPKR(row.amount)}</span>
+                          ) : isReversed ? (
                             <span className="text-rose-600">PKR {formatPKR(row.amount)}</span>
                           ) : (
                             <span className="text-slate-900">PKR {formatPKR(row.amount)}</span>
@@ -730,7 +749,7 @@ export const DetailedExpensesReportPage: React.FC = () => {
                 {/* Row 2: Supplier Payments (Inventory Outflows) */}
                 <tr className="border-b border-white/60">
                   <td colSpan={9} className="py-3 px-4 text-right font-semibold text-slate-700">
-                    Supplier / Vendor Payments — Inventory Cash Outflow (Net of Reversals)
+                    Supplier / Vendor Payments — Inventory Cash Outflow (Net of Reversals & Refunds)
                   </td>
                   <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-amber-700">
                     PKR {formatPKR(reportData?.kpis.supplierPayments ?? 0)}
