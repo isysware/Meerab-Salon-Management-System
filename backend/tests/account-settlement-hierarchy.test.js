@@ -366,4 +366,19 @@ describe('Account Settlement Hierarchy · Accountant → Admin → Super Admin',
     );
     expect(prisma.drawerMovement.create).not.toHaveBeenCalled();
   });
+
+  it('8. Super Admin cannot submit outgoing settlements (blocked at service and API layer)', async () => {
+    await expect(
+      settlementService.submitSettlement(
+        {
+          drawerId: superAdminDrawer.id,
+          branchId,
+          countedCash: 5000,
+          handoverAmount: 5000,
+          retainedFloat: 0,
+        },
+        superAdminActor
+      )
+    ).rejects.toThrow(/Super Admin is the final receiver in the settlement hierarchy and cannot submit outgoing settlements/i);
+  });
 });

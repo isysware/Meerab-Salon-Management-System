@@ -58,7 +58,7 @@ settlementRoutes.get('/:id', send(async (req) => {
   if (!r) throw notFound('SETTLEMENT_NOT_FOUND', `Settlement '${req.params.id}' not found.`);
   return r;
 }));
-settlementRoutes.post('/drafts', validate(submitSchema), send((req) => s.submitSettlement(req.body, req.user, { draft: true }), 201));
-settlementRoutes.post('/', idempotency, validate(submitSchema), send((req) => s.submitSettlement(req.body, req.user, { draft: !!req.body.isDraft }), 201));
+settlementRoutes.post('/drafts', authorize('ADMIN', 'ACCOUNTANT'), validate(submitSchema), send((req) => s.submitSettlement(req.body, req.user, { draft: true }), 201));
+settlementRoutes.post('/', authorize('ADMIN', 'ACCOUNTANT'), idempotency, validate(submitSchema), send((req) => s.submitSettlement(req.body, req.user, { draft: !!req.body.isDraft }), 201));
 settlementRoutes.put('/:id/approve', authorize('SUPER_ADMIN', 'ADMIN'), validate(approveSchema), send((req) => s.approveSettlement(req.params.id, req.body, req.user)));
 settlementRoutes.put('/:id/reject', authorize('SUPER_ADMIN', 'ADMIN'), validate(rejectSchema), send((req) => s.rejectSettlement(req.params.id, req.body.reason, req.user)));

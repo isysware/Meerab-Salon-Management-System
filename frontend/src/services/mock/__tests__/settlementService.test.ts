@@ -590,9 +590,9 @@ async function runSettlementTests() {
     const { superAdminUser, adminUser, accountantUser } = setupTestEnvironment('SUPER_ADMIN');
     const store = mockStorage.getStore();
 
-    // Prepare a submitted settlement by Super Admin
-    const saDrawer: CashDrawer = {
-      id: `drawer-sa-${Date.now()}`,
+    // Prepare a submitted settlement by Admin
+    const adminDrawer: CashDrawer = {
+      id: `drawer-admin-${Date.now()}`,
       branchId: 'branch-1',
       date: '2026-09-29',
       openingCash: 1000,
@@ -602,34 +602,50 @@ async function runSettlementTests() {
       expectedInDrawer: 1000,
       actualInDrawer: 1000,
       variance: 0,
-      custodianUserId: superAdminUser.id,
-      custodianName: superAdminUser.name,
+      custodianUserId: adminUser.id,
+      custodianName: adminUser.name,
       status: 'OPEN',
     };
-    store.cashDrawers.push(saDrawer);
+    store.cashDrawers.push(adminDrawer);
     mockStorage.saveStore(store);
 
-    const saSettlement = await mockSalonService.submitSettlement(
+    // 0. Super Admin attempts to submit outgoing settlement -> MUST THROW!
+    await assertAsyncThrows(
+      () =>
+        mockSalonService.submitSettlement(
+          {
+            drawerId: adminDrawer.id,
+            branchId: 'branch-1',
+            countedCash: 1000,
+            handoverAmount: 1000,
+            retainedFloat: 0,
+          },
+          superAdminUser
+        ),
+      'Super Admin is the final receiver in the settlement hierarchy'
+    );
+
+    const adminSettlement = await mockSalonService.submitSettlement(
       {
-        drawerId: saDrawer.id,
+        drawerId: adminDrawer.id,
         branchId: 'branch-1',
         countedCash: 1000,
         handoverAmount: 1000,
         retainedFloat: 0,
       },
-      superAdminUser
+      adminUser
     );
 
-    // 1. Super Admin attempts to approve their OWN settlement -> MUST THROW!
+    // 1. Admin attempts to approve their OWN settlement -> MUST THROW!
     await assertAsyncThrows(
       () =>
         mockSalonService.approveSettlement(
-          saSettlement.id,
+          adminSettlement.id,
           {
             actualCashReceived: 1000,
             acceptVariance: true,
           },
-          superAdminUser
+          adminUser
         ),
       'cannot approve your own settlement'
     );

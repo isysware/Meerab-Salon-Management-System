@@ -5620,6 +5620,9 @@ class MockSalonService implements SalonServiceContract {
     if (authenticatedActor.role === 'STAFF') {
       throw new Error('Access Denied: Staff members cannot create settlements.');
     }
+    if (authenticatedActor.role === 'SUPER_ADMIN') {
+      throw new Error('Access Denied: Super Admin is the final receiver in the settlement hierarchy and cannot submit outgoing settlements.');
+    }
 
     let branchId = input.branchId;
     if (authenticatedActor.role === 'ADMIN' || authenticatedActor.role === 'ACCOUNTANT') {
@@ -5688,6 +5691,9 @@ class MockSalonService implements SalonServiceContract {
     if (authenticatedActor.role === 'STAFF') {
       throw new Error('Access Denied: Staff members cannot submit account settlements.');
     }
+    if (authenticatedActor.role === 'SUPER_ADMIN') {
+      throw new Error('Access Denied: Super Admin is the final receiver in the settlement hierarchy and cannot submit outgoing settlements.');
+    }
 
     let branchId = input.branchId;
     if (authenticatedActor.role === 'ADMIN' || authenticatedActor.role === 'ACCOUNTANT') {
@@ -5704,7 +5710,7 @@ class MockSalonService implements SalonServiceContract {
     if (!drawer) {
       throw new Error(`Cash drawer '${input.drawerId}' not found.`);
     }
-    if (drawer.custodianUserId !== authenticatedActor.id && authenticatedActor.role !== 'SUPER_ADMIN') {
+    if (drawer.custodianUserId !== authenticatedActor.id) {
       throw new Error('Access Denied: You can only submit settlements for your own cash drawer.');
     }
     if (drawer.status === 'SETTLEMENT_PENDING') {

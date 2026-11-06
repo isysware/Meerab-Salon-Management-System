@@ -164,6 +164,12 @@ export const AccountSettlementPage: React.FC = () => {
   // Handle inline submit settlement
   const handleInlineSubmitSettlement = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSuperAdmin) {
+      const msg = 'Super Admin is the final receiver in the settlement hierarchy and cannot submit outgoing settlements.';
+      setErrorMessage(msg);
+      toast.error(msg);
+      return;
+    }
     if (!actionScope.validate()) return;
     if (!formDrawer) {
       const msg = 'No active cash drawer found for settlement.';
@@ -541,167 +547,191 @@ export const AccountSettlementPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. Settle Current Shift Card */}
-      <div className="rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] overflow-hidden">
-        <div className="bg-gradient-to-r from-[#B82E69] to-[#9D2558] text-white px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <ArrowRightLeft className="w-4 h-4 text-white/90" />
-            <h2 className="text-xs font-bold uppercase tracking-wider">
-              Settle Current Shift Cash Drawer
-            </h2>
-          </div>
-          <span className="text-[11px] font-mono text-white/80">Custodian Handover</span>
-        </div>
-
-        <div className="p-6">
-          {!isSuperAdmin && !hasUnsettledCash && !showSettleForm ? (
-            <div className="py-8 text-center text-slate-500 text-xs font-medium">
-              Nothing to settle — you have no unsettled physical cash in custody right now.
+      {/* 3. Settle Current Shift Card (Only for Custodians: Accountant / Sales & Branch Admin) */}
+      {!isSuperAdmin ? (
+        <div className="rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] overflow-hidden">
+          <div className="bg-gradient-to-r from-[#B82E69] to-[#9D2558] text-white px-6 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <ArrowRightLeft className="w-4 h-4 text-white/90" />
+              <h2 className="text-xs font-bold uppercase tracking-wider">
+                Settle Current Shift Cash Drawer
+              </h2>
             </div>
-          ) : (
-            <form onSubmit={handleInlineSubmitSettlement} className="space-y-5">
-              <BranchActionField
-                value={actionScope.branchId}
-                disabled={isSubmitting}
-                onChange={(id) => {
-                  actionScope.setBranchId(id);
-                  setCountedCashInput('');
-                  setRetainedFloatInput('0');
-                  setVarianceExplanation('');
-                }}
-              />
-              {actionScope.error && (
-                <p role="alert" className="text-xs text-rose-600 font-medium">
-                  {actionScope.error}
-                </p>
-              )}
-              {actionScope.ready && !formDrawer && (
-                <p role="status" className="text-xs text-slate-500">
-                  No open cash drawer in your custody for this branch.
-                </p>
-              )}
-              <fieldset
-                disabled={!actionScope.ready || !formDrawer}
-                className="space-y-4 disabled:opacity-50"
-              >
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                  {/* Expected Cash in drawer */}
-                  <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
-                    <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                      Expected Cash in Drawer
-                    </span>
-                    <span className="text-lg font-extrabold text-emerald-700 font-mono tabular-nums">
-                      {formatPKR(formExpectedCash)}
-                    </span>
-                  </div>
+            <span className="text-[11px] font-mono text-white/80">Custodian Handover</span>
+          </div>
 
-                  {/* Counted Cash input */}
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1">
-                      Counted Cash (PKR) *
-                    </label>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      placeholder="Enter counted amount"
-                      value={countedCashInput}
-                      onChange={(e) => setCountedCashInput(e.target.value)}
-                      required
-                      className="w-full text-xs font-mono font-semibold border border-slate-200 rounded-xl px-3.5 py-2.5 bg-white text-slate-800 shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/30"
-                    />
-                  </div>
-
-                  {/* Retained Float input */}
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1">
-                      Retained Float (PKR)
-                    </label>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      placeholder="Cash left in drawer (usually 0)"
-                      value={retainedFloatInput}
-                      onChange={(e) => setRetainedFloatInput(e.target.value)}
-                      className="w-full text-xs font-mono font-semibold border border-slate-200 rounded-xl px-3.5 py-2.5 bg-white text-slate-800 shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/30"
-                    />
-                  </div>
-
-                  {/* Handover Amount calculated */}
-                  <div className="rounded-xl border border-[#B82E69]/20 bg-[#B82E69]/5 p-4">
-                    <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                      {user.role === 'ACCOUNTANT' ? 'Handover to Branch Admin' : 'Handover to Super Admin'}
-                    </span>
-                    <span className="text-lg font-extrabold text-[#B82E69] font-mono tabular-nums">
-                      {formatPKR(handoverNum)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Difference Indicator */}
-                {countedCashInput && (
-                  <div
-                    className={`text-xs p-3.5 rounded-xl border flex items-center justify-between font-mono ${
-                      varianceNum === 0
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                        : varianceNum > 0
-                        ? 'bg-amber-50 text-amber-800 border-amber-200'
-                        : 'bg-rose-50 text-rose-800 border-rose-200'
-                    }`}
-                  >
-                    <span className="font-bold">
-                      Difference / Variance:{' '}
-                      {varianceNum === 0
-                        ? 'Exact Match (Rs. 0)'
-                        : varianceNum > 0
-                        ? `Cash Overage (+${formatPKR(varianceNum)})`
-                        : `Cash Shortage (-${formatPKR(Math.abs(varianceNum))})`}
-                    </span>
-                  </div>
+          <div className="p-6">
+            {!hasUnsettledCash && !showSettleForm ? (
+              <div className="py-8 text-center text-slate-500 text-xs font-medium">
+                Nothing to settle — you have no unsettled physical cash in custody right now.
+              </div>
+            ) : (
+              <form onSubmit={handleInlineSubmitSettlement} className="space-y-5">
+                <BranchActionField
+                  value={actionScope.branchId}
+                  disabled={isSubmitting}
+                  onChange={(id) => {
+                    actionScope.setBranchId(id);
+                    setCountedCashInput('');
+                    setRetainedFloatInput('0');
+                    setVarianceExplanation('');
+                  }}
+                />
+                {actionScope.error && (
+                  <p role="alert" className="text-xs text-rose-600 font-medium">
+                    {actionScope.error}
+                  </p>
                 )}
-
-                {/* Variance reason if mismatch */}
-                {Math.abs(varianceNum) > 0.001 && countedCashInput && (
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1">
-                      Variance Explanation *
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Reason for cash difference..."
-                      value={varianceExplanation}
-                      onChange={(e) => setVarianceExplanation(e.target.value)}
-                      required
-                      className="w-full text-xs border border-slate-200 rounded-xl px-3.5 py-2 bg-white text-slate-800 shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/30"
-                    />
-                  </div>
+                {actionScope.ready && !formDrawer && (
+                  <p role="status" className="text-xs text-slate-500">
+                    No open cash drawer in your custody for this branch.
+                  </p>
                 )}
+                <fieldset
+                  disabled={!actionScope.ready || !formDrawer}
+                  className="space-y-4 disabled:opacity-50"
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                    {/* Expected Cash in drawer */}
+                    <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
+                      <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                        Expected Cash in Drawer
+                      </span>
+                      <span className="text-lg font-extrabold text-emerald-700 font-mono tabular-nums">
+                        {formatPKR(formExpectedCash)}
+                      </span>
+                    </div>
 
-                {/* Submit Buttons */}
-                <div className="flex items-center gap-3 pt-2">
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="rounded-xl bg-gradient-to-r from-[#B82E69] to-[#9D2558] px-5 py-2.5 text-xs font-bold text-white shadow-xs hover:opacity-95 cursor-pointer disabled:opacity-50"
-                  >
-                    {isSubmitting ? 'Submitting Handover...' : 'Submit Settlement Handover'}
-                  </button>
-                  {showSettleForm && (
-                    <button
-                      type="button"
-                      onClick={() => setShowSettleForm(false)}
-                      className="text-xs text-slate-500 hover:text-slate-700 px-3 py-2 cursor-pointer font-semibold"
+                    {/* Counted Cash input */}
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1">
+                        Counted Cash (PKR) *
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        placeholder="Enter counted amount"
+                        value={countedCashInput}
+                        onChange={(e) => setCountedCashInput(e.target.value)}
+                        required
+                        className="w-full text-xs font-mono font-semibold border border-slate-200 rounded-xl px-3.5 py-2.5 bg-white text-slate-800 shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/30"
+                      />
+                    </div>
+
+                    {/* Retained Float input */}
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1">
+                        Retained Float (PKR)
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        placeholder="Cash left in drawer (usually 0)"
+                        value={retainedFloatInput}
+                        onChange={(e) => setRetainedFloatInput(e.target.value)}
+                        className="w-full text-xs font-mono font-semibold border border-slate-200 rounded-xl px-3.5 py-2.5 bg-white text-slate-800 shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/30"
+                      />
+                    </div>
+
+                    {/* Handover Amount calculated */}
+                    <div className="rounded-xl border border-[#B82E69]/20 bg-[#B82E69]/5 p-4">
+                      <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                        {user.role === 'ACCOUNTANT' ? 'Handover to Branch Admin' : 'Handover to Super Admin'}
+                      </span>
+                      <span className="text-lg font-extrabold text-[#B82E69] font-mono tabular-nums">
+                        {formatPKR(handoverNum)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Difference Indicator */}
+                  {countedCashInput && (
+                    <div
+                      className={`text-xs p-3.5 rounded-xl border flex items-center justify-between font-mono ${
+                        varianceNum === 0
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : varianceNum > 0
+                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                          : 'bg-rose-50 text-rose-800 border-rose-200'
+                      }`}
                     >
-                      Cancel
-                    </button>
+                      <span className="font-bold">
+                        Difference / Variance:{' '}
+                        {varianceNum === 0
+                          ? 'Exact Match (Rs. 0)'
+                          : varianceNum > 0
+                          ? `Cash Overage (+${formatPKR(varianceNum)})`
+                          : `Cash Shortage (-${formatPKR(Math.abs(varianceNum))})`}
+                      </span>
+                    </div>
                   )}
-                </div>
-              </fieldset>
-            </form>
+
+                  {/* Variance reason if mismatch */}
+                  {Math.abs(varianceNum) > 0.001 && countedCashInput && (
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 mb-1">
+                        Variance Explanation *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Reason for cash difference..."
+                        value={varianceExplanation}
+                        onChange={(e) => setVarianceExplanation(e.target.value)}
+                        required
+                        className="w-full text-xs border border-slate-200 rounded-xl px-3.5 py-2 bg-white text-slate-800 shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-[#B82E69]/30"
+                      />
+                    </div>
+                  )}
+
+                  {/* Submit Buttons */}
+                  <div className="flex items-center gap-3 pt-2">
+                    <button
+                      type="submit"
+                      disabled={isSubmitting}
+                      className="rounded-xl bg-gradient-to-r from-[#B82E69] to-[#9D2558] px-5 py-2.5 text-xs font-bold text-white shadow-xs hover:opacity-95 cursor-pointer disabled:opacity-50"
+                    >
+                      {isSubmitting ? 'Submitting Handover...' : 'Submit Settlement Handover'}
+                    </button>
+                    {showSettleForm && (
+                      <button
+                        type="button"
+                        onClick={() => setShowSettleForm(false)}
+                        className="text-xs text-slate-500 hover:text-slate-700 px-3 py-2 cursor-pointer font-semibold"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </fieldset>
+              </form>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-[20px] border border-blue-100 bg-blue-50/60 p-4.5 backdrop-blur-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-100 text-blue-700 shrink-0">
+              <ShieldCheck className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                Terminal Settlement Receiver
+              </h3>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Super Admin is the final recipient in the settlement hierarchy. Review, approve, return, or reject incoming branch settlements below.
+              </p>
+            </div>
+          </div>
+          {pendingApprovalsCount > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 shrink-0 self-start sm:self-auto">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
+              {pendingApprovalsCount} Awaiting Review
+            </span>
           )}
         </div>
-      </div>
+      )}
 
       {/* 4. Settlement History Section */}
       <div className="space-y-3">
@@ -1011,7 +1041,7 @@ export const AccountSettlementPage: React.FC = () => {
           <div className="bg-white rounded-[24px] max-w-md w-full p-6 shadow-2xl border border-white/90 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
             <h3 className="text-base font-bold text-rose-700 mb-2">Reject Settlement</h3>
             <p className="text-xs text-slate-500 mb-4">
-              Return settlement #{selectedSettlement.settlementNumber} to cashier for recount or correction.
+              Return settlement #{selectedSettlement.settlementNumber} to {selectedSettlement.submittedByRole === 'ADMIN' ? 'Branch Admin' : 'cashier'} for recount or correction.
             </p>
             <textarea
               placeholder="Reason for rejection (e.g. cash count mismatch)..."

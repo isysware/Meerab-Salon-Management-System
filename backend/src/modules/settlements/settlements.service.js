@@ -196,6 +196,9 @@ const validateSplit = ({ countedCash, handoverAmount, retainedFloat }) => {
 
 export const submitSettlement = async (input, actor, { draft = false } = {}) => {
   if (actor.role === 'STAFF') throw forbidden('FORBIDDEN', 'Access Denied: Staff members cannot submit account settlements.');
+  if (actor.role === 'SUPER_ADMIN') {
+    throw forbidden('FORBIDDEN', 'Access Denied: Super Admin is the final receiver in the settlement hierarchy and cannot submit outgoing settlements.');
+  }
   const branchId = resolveWriteBranch(actor, input.branchId);
   const { counted, handover, retained } = validateSplit(input);
 
@@ -204,7 +207,7 @@ export const submitSettlement = async (input, actor, { draft = false } = {}) => 
     if (!branch?.isActive) throw badRequest('BRANCH_INACTIVE', `Branch '${branchId}' is invalid or deactivated.`);
     const drawer = await lockHolder(tx, input.drawerId);
     if (drawer.kind !== 'DRAWER' || drawer.branchId !== branchId) throw badRequest('DRAWER_INVALID', 'Select a cash drawer of this branch.');
-    if (drawer.custodianUserId !== actor.id && actor.role !== 'SUPER_ADMIN') {
+    if (drawer.custodianUserId !== actor.id) {
       throw forbidden('FORBIDDEN', 'Access Denied: You can only submit settlements for your own cash drawer.');
     }
     if (drawer.status === 'SETTLEMENT_PENDING') throw conflict('DRAWER_LOCKED', 'This cash drawer is already locked pending settlement review. Overlapping submissions are prevented.');
