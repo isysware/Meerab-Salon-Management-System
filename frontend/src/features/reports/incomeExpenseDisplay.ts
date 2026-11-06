@@ -39,6 +39,9 @@ export function incomeExpenseEntryType(row: IncomeExpenseReportRow): string {
   if (row.source === 'Staff Loan') return 'Staff Loan';
   if (row.source === 'Sales Refund') return 'Refund';
   if (row.type === 'SUPPLIER_PAYMENT' || row.source === 'Supplier Payment') return 'Supplier Payment';
+  if (row.source === 'BOOKING') {
+    return row.paymentEventType === 'BOOKING_REFUND' ? 'Booking Advance Refund' : 'Booking Advance Collection';
+  }
   if (row.type === 'SETTLEMENT') return 'Settlement';
   return row.type === 'INCOME' ? 'Income' : 'Expense';
 }

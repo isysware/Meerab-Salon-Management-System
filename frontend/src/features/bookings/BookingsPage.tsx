@@ -956,7 +956,7 @@ function BookingForm({ branchId, initialDate, existing, onSaved, onClose }: { br
   );
 }
 
-function PaymentDialog({ booking, mode, onSaved, onClose }: { booking: Booking; mode: 'payment' | 'refund' | 'cancel' | 'no-show'; onSaved: (b: Booking) => void; onClose: () => void }) {
+function PaymentDialog({ booking, mode, onSaved, onClose }: { booking: Booking; mode: 'payment' | 'refund' | 'cancel' | 'no-show'; onSaved: (b: Booking, targetPaymentId?: string) => void; onClose: () => void }) {
   const { demoDate } = useAuth();
   const [payment, setPayment] = useState<BookingPaymentInput>({ amount: mode === 'payment' ? booking.remainingBalance : booking.advancePaid, date: demoDate, method: 'CASH' });
   const [accounts, setAccounts] = useState<PaymentAccount[]>([]);
@@ -993,6 +993,7 @@ function PaymentDialog({ booking, mode, onSaved, onClose }: { booking: Booking; 
 
     setBusy(true);
     try {
+      const previousPaymentIds = new Set((booking.payments || []).map(p => p.id));
       const result = cancellation
         ? await salonService.cancelBooking(booking.id, {
             status: mode === 'no-show' ? 'NO_SHOW' : 'CANCELLED',
@@ -1012,7 +1013,8 @@ function PaymentDialog({ booking, mode, onSaved, onClose }: { booking: Booking; 
           ? 'Advance refunded successfully'
           : 'Installment recorded successfully'
       );
-      onSaved(result);
+      const newPayment = (result.payments || []).find(p => !previousPaymentIds.has(p.id)) || (result.payments || [])[(result.payments || []).length - 1];
+      onSaved(result, newPayment?.id);
     } catch (e) {
       toast.error(errorText(e));
     } finally {
@@ -1177,6 +1179,7 @@ export function BookingsPage() {
   const [ledger, setLedger] = useState<BookingLedger>();
   const [printReceipt, setPrintReceipt] = useState<Booking>();
   const [invoiceBooking, setInvoiceBooking] = useState<Booking | null>(null);
+  const [invoicePaymentId, setInvoicePaymentId] = useState<string | null>(null);
   const [confirmationBooking, setConfirmationBooking] = useState<Booking | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -2411,7 +2414,11 @@ export function BookingsPage() {
         <PaymentDialog
           booking={selected}
           mode={mode}
-          onSaved={b => { saved(b); setInvoiceBooking(b); }}
+          onSaved={(b, targetPaymentId) => {
+            saved(b);
+            setInvoicePaymentId(targetPaymentId || null);
+            setInvoiceBooking(b);
+          }}
           onClose={() => setMode(undefined)}
         />
       )}
@@ -2462,12 +2469,14 @@ export function BookingsPage() {
         onClose={() => {
           setInvoiceBooking(null);
           setPrintReceipt(undefined);
+          setInvoicePaymentId(null);
         }}
         invoice={
           (invoiceBooking || printReceipt)
             ? bookingToInvoice(
                 (invoiceBooking || printReceipt)!,
-                branches.find(b => b.id === (invoiceBooking || printReceipt)?.branchId) || null
+                branches.find(b => b.id === (invoiceBooking || printReceipt)?.branchId) || null,
+                invoicePaymentId
               )
             : null
         }

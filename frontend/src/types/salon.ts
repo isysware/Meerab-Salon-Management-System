@@ -1031,6 +1031,9 @@ export interface Invoice {
   payments: PaymentRecord[];
   isBookingInvoice?: boolean;
   bookingType?: string;
+  bookingReceiptNumber?: string;
+  currentPaymentAmount?: number;
+  totalAdvanceReceived?: number;
   processedByUserId: string;
   processedByName: string;
   idempotencyKey?: string;
@@ -2190,6 +2193,7 @@ export interface DetailedIncomePayment {
   date: string;
   time: string;
   kind?: string;
+  processedByName?: string;
 }
 
 export interface ReportRefundHistory {
@@ -2216,6 +2220,8 @@ export interface DetailedIncomeRow {
   id: string;
   invoiceId: string;
   invoiceNumber: string;
+  bookingNumber?: string;
+  bookingReference?: string;
   date: string;
   time: string;
   branchId: string;
@@ -2484,6 +2490,8 @@ export interface TaxReportServiceRow {
   id: string;
   invoiceId: string;
   invoiceNumber: string;
+  bookingNumber?: string;
+  bookingReference?: string;
   date: string;
   time: string;
   branchId: string;

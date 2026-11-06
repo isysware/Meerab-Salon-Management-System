@@ -43,7 +43,8 @@ export async function detailedIncomeReport(actor, query = {}) {
     const fraction = toDec(line.netSales).gt(0) ? net.div(line.netSales) : toDec(0);
     const discount = round2(toDec(line.discountAllocated).times(fraction));
     rows.push({
-      id: e.id, invoiceId: inv.id, invoiceNumber: inv.invoiceNumber, date: e.date, time: e.record.time || '',
+      id: e.id, invoiceId: inv.id, invoiceNumber: inv.invoiceNumber, bookingNumber: inv.booking?.bookingNumber || undefined,
+      bookingReference: inv.booking?.bookingNumber || undefined, date: e.date, time: e.record.time || '',
       lineId: line.id, originalInvoiceDate: snapshot.originalDate,
       originalNetAmount: n(line.netSales), originalBillAmount: n(toDec(line.netSales).plus(line.tax || 0)),
       refundHistory: snapshot.refundHistory,
@@ -57,11 +58,13 @@ export async function detailedIncomeReport(actor, query = {}) {
       recognizedNet: n(net), collectedNet: n(net), taxRate: n(toDec(line.taxRate).times(100)),
       tax: n(tax), netTax: n(tax), total: n(net.plus(tax)), tip: n(tip), outstanding: snapshot.outstanding,
       paymentStatus: snapshot.status, lifecycle: snapshot.lifecycle, createdByName: inv.processedByName,
+      collectedByName: e.record.processedByName || inv.processedByName,
       payments: [{ id: e.id, receiptNumber: e.record.receiptNumber || e.record.refundNumber,
         amount: n(net.plus(tax).plus(tip)), method: e.record.method || 'CASH',
         paymentAccountId: e.record.paymentAccountId || e.record.accountId,
         paymentAccountName: e.record.paymentAccountName || (e.record.method === 'CASH' ? 'Cash Drawer' : 'Online Account'),
-        date: e.date, time: e.record.time || '', kind: e.kind }],
+        date: e.date, time: e.record.time || '', kind: e.kind,
+        processedByName: e.record.processedByName || inv.processedByName }],
       refunds: e.kind === 'REFUND' ? [{ ...e.record, refundDate: e.date,
         netReversed: n(e.record.netReversed), taxReversed: n(e.record.taxReversed), tipReversed: n(e.record.tipReversed),
         cashOut: n(e.record.cashOut), receivableCancelled: n(e.record.receivableCancelled),

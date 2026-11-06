@@ -1057,7 +1057,9 @@ export const incomeExpenseReport = async (actor, query = {}) => {
         });
       } else {
         rawRows.push({
-          id: movement.id, date: toDateString(movement.createdAt), type: 'SETTLEMENT', category: movement.sourceModule === 'BOOKING' ? (movement.type === 'BOOKING_REFUND' ? 'Booking Advance Refunds' : 'Booking Advances / Deposits') : movement.sourceModule === 'POS' ? 'Client Collections' : 'Supplier Payments',
+          id: movement.id, date: toDateString(movement.createdAt), type: 'SETTLEMENT',
+          category: movement.sourceModule === 'BOOKING' ? (movement.type === 'BOOKING_REFUND' ? 'Booking Advance Refunds' : 'Booking Advance Collections') : movement.sourceModule === 'POS' ? 'Client Collections' : 'Supplier Payments',
+          recordTypeLabel: movement.sourceModule === 'BOOKING' ? (movement.type === 'BOOKING_REFUND' ? 'Booking Advance Refund' : 'Booking Advance Collection') : undefined,
           source: movement.sourceModule, reference: movement.reference, branchId: movement.branchId, branchName: branchMap.get(movement.branchId),
           userOrPayee: movement.userName, description: movement.description, income: 0, expense: 0, paid: 0, discount: 0, remaining: 0,
           cashFlow: n(toDec(movement.amount).times(movement.direction === 'IN' ? 1 : -1)), paymentMethod: method, paymentEventType: movement.type, status: 'POSTED',

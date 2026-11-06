@@ -163,13 +163,21 @@ export function generateThermalReceiptHtml(invoice: Invoice, branch: Branch | nu
   <table class="meta-table">
     <tr>
       <td colspan="2" style="text-align: center; font-weight: bold; font-size: 10.5px; padding-bottom: 2px;">
-        ${isBkg ? 'BOOKING ADVANCE INVOICE' : branch?.taxRegistrationNumber ? 'TAX INVOICE' : 'RETAIL INVOICE'}
+        ${isBkg ? (invoice.currentPaymentAmount !== undefined ? 'BOOKING ADVANCE PAYMENT RECEIPT' : 'BOOKING ADVANCE INVOICE') : branch?.taxRegistrationNumber ? 'TAX INVOICE' : 'RETAIL INVOICE'}
       </td>
     </tr>
-    <tr>
-      <td style="width: 50%;"><strong>${isBkg ? 'Booking #:' : 'Inv #:'}</strong> ${escapeHtml(invoice.invoiceNumber)}</td>
-      <td style="text-align: right; width: 50%;">${isBkg ? 'Event: ' : ''}${escapeHtml(invoice.date)}${invoice.time ? ` ${escapeHtml(invoice.time)}` : ''}</td>
-    </tr>
+    ${isBkg && invoice.bookingReceiptNumber
+      ? `<tr>
+           <td style="width: 50%;"><strong>Receipt #:</strong> ${escapeHtml(invoice.bookingReceiptNumber)}</td>
+           <td style="text-align: right; width: 50%;"><strong>Booking Ref:</strong> ${escapeHtml(invoice.invoiceNumber)}</td>
+         </tr>
+         <tr>
+           <td colspan="2"><strong>Date:</strong> ${escapeHtml(invoice.date)}${invoice.time ? ` ${escapeHtml(invoice.time)}` : ''}</td>
+         </tr>`
+      : `<tr>
+           <td style="width: 50%;"><strong>${isBkg ? 'Booking #:' : 'Inv #:'}</strong> ${escapeHtml(invoice.invoiceNumber)}</td>
+           <td style="text-align: right; width: 50%;">${isBkg ? 'Event: ' : ''}${escapeHtml(invoice.date)}${invoice.time ? ` ${escapeHtml(invoice.time)}` : ''}</td>
+         </tr>`}
     ${isBkg ? `<tr><td colspan="2"><strong>Type:</strong> ${escapeHtml(bkgTypeLabel)}</td></tr>` : ''}
     <tr>
       <td colspan="2"><strong>Client:</strong> ${escapeHtml(invoice.clientName || 'Walk-in Customer')}${invoice.clientPhone && invoice.clientPhone !== 'N/A' ? ` (${escapeHtml(invoice.clientPhone)})` : ''}</td>
@@ -193,13 +201,46 @@ export function generateThermalReceiptHtml(invoice: Invoice, branch: Branch | nu
     ${taxRow}
     ${tipRow}
     <tr>
-      <td style="text-align: left; font-weight: bold;">${isBkg ? 'Total Quoted Price:' : 'Total Payable:'}</td>
+      <td style="text-align: left; font-weight: bold;">${isBkg ? 'Total Quoted Price:' : 'Total Bill:'}</td>
       <td style="text-align: right; font-weight: bold;">${formatPkr(invoice.total)}</td>
     </tr>
-    <tr>
-      <td style="text-align: left; font-weight: bold;">${isBkg ? 'Advance Paid' : 'Paid Amount'} (${escapeHtml(methodSummary)}):</td>
-      <td style="text-align: right; font-weight: bold;">${formatPkr(invoice.amountPaid)}</td>
-    </tr>
+    ${isBkg ? (
+      invoice.currentPaymentAmount !== undefined ? `
+        <tr>
+          <td style="text-align: left; font-weight: bold;">Payment Received (${escapeHtml(methodSummary)}):</td>
+          <td style="text-align: right; font-weight: bold;">${formatPkr(invoice.currentPaymentAmount)}</td>
+        </tr>
+        <tr>
+          <td style="text-align: left; font-size: 10px; color: #444;">Total Advance to Date:</td>
+          <td style="text-align: right; font-size: 10px; font-weight: bold;">${formatPkr(invoice.totalAdvanceReceived ?? invoice.amountPaid)}</td>
+        </tr>` : `
+        <tr>
+          <td style="text-align: left; font-weight: bold;">Total Advance Paid (${escapeHtml(methodSummary)}):</td>
+          <td style="text-align: right; font-weight: bold;">${formatPkr(invoice.totalAdvanceReceived ?? invoice.amountPaid)}</td>
+        </tr>`
+    ) : (
+      invoice.advanceAdjusted && invoice.advanceAdjusted > 0 ? `
+        <tr>
+          <td style="text-align: left; font-size: 10px; color: #166534;">Booking Advance Applied:</td>
+          <td style="text-align: right; font-size: 10px; font-weight: bold; color: #166534;">- ${formatPkr(invoice.advanceAdjusted)}</td>
+        </tr>
+        <tr>
+          <td style="text-align: left; font-size: 10px; color: #444;">Remaining Payable:</td>
+          <td style="text-align: right; font-size: 10px; font-weight: bold;">${formatPkr(Math.max(0, invoice.total - invoice.advanceAdjusted))}</td>
+        </tr>
+        <tr>
+          <td style="text-align: left; font-weight: bold;">Checkout Payment (${escapeHtml(methodSummary)}):</td>
+          <td style="text-align: right; font-weight: bold;">${formatPkr(Math.max(0, invoice.amountPaid - invoice.advanceAdjusted))}</td>
+        </tr>
+        <tr>
+          <td style="text-align: left; font-size: 10px; font-weight: bold; border-top: 1px dashed #ccc;">Total Settled:</td>
+          <td style="text-align: right; font-size: 10px; font-weight: bold; border-top: 1px dashed #ccc;">${formatPkr(invoice.amountPaid)}</td>
+        </tr>` : `
+        <tr>
+          <td style="text-align: left; font-weight: bold;">Paid Amount (${escapeHtml(methodSummary)}):</td>
+          <td style="text-align: right; font-weight: bold;">${formatPkr(invoice.amountPaid)}</td>
+        </tr>`
+    )}
     <tr>
       <td style="text-align: left; font-weight: bold; ${invoice.amountDue > 0 ? 'color: #b91c1c;' : ''}">${isBkg ? 'Remaining Balance (Due on Event):' : 'Outstanding Balance:'}</td>
       <td style="text-align: right; font-weight: bold; ${invoice.amountDue > 0 ? 'color: #b91c1c;' : ''}">${formatPkr(invoice.amountDue)}</td>
@@ -307,10 +348,16 @@ export async function generateReceiptPdf(
   if (taxReg) { pdf.text(taxReg, center, y, { align: 'center' }); y += 3.2; }
   pdf.text(dashLine, center, y, { align: 'center' }); y += 3.5;
   pdf.setFont('courier', 'bold'); pdf.setFontSize(8.5);
-  pdf.text(isBkg ? 'BOOKING ADVANCE INVOICE' : branch?.taxRegistrationNumber ? 'TAX INVOICE' : 'RETAIL INVOICE', center, y, { align: 'center' }); y += 3.5;
+  pdf.text(isBkg ? (invoice.currentPaymentAmount !== undefined ? 'BOOKING ADVANCE PAYMENT RECEIPT' : 'BOOKING ADVANCE INVOICE') : branch?.taxRegistrationNumber ? 'TAX INVOICE' : 'RETAIL INVOICE', center, y, { align: 'center' }); y += 3.5;
   pdf.setFont('courier', 'normal'); pdf.setFontSize(7.2);
-  pdf.text(`${isBkg ? 'Booking #:' : 'Inv #: '} ${invoice.invoiceNumber}`, leftMargin, y);
-  pdf.text(`${isBkg ? 'Event: ' : ''}${invoice.date}${invoice.time ? ` ${invoice.time}` : ''}`, rightMargin, y, { align: 'right' }); y += 3.2;
+  if (isBkg && invoice.bookingReceiptNumber) {
+    pdf.text(`Receipt #: ${invoice.bookingReceiptNumber}`, leftMargin, y);
+    pdf.text(`Booking Ref: ${invoice.invoiceNumber}`, rightMargin, y, { align: 'right' }); y += 3.2;
+    pdf.text(`Event: ${invoice.date}${invoice.time ? ` ${invoice.time}` : ''}`, leftMargin, y); y += 3.2;
+  } else {
+    pdf.text(`${isBkg ? 'Booking #:' : 'Inv #: '} ${invoice.invoiceNumber}`, leftMargin, y);
+    pdf.text(`${isBkg ? 'Event: ' : ''}${invoice.date}${invoice.time ? ` ${invoice.time}` : ''}`, rightMargin, y, { align: 'right' }); y += 3.2;
+  }
   if (isBkg) {
     pdf.text(`Type: ${bkgTypeLabel}`, leftMargin, y); y += 3.2;
   }
@@ -349,13 +396,29 @@ export async function generateReceiptPdf(
   if (invoice.discount > 0) printRow('Discount:', `- ${formatPkr(invoice.discount)}`);
   if (invoice.tax > 0) printRow(`Sales Tax:`, formatPkr(invoice.tax));
   if (invoice.tip > 0) printRow('Staff Gratuity / Tip:', formatPkr(invoice.tip));
-  printRow(isBkg ? 'Total Quoted Price:' : 'Total Payable:', formatPkr(invoice.total), true);
-  printRow(`${isBkg ? 'Advance Paid' : 'Paid Amount'} (${methodSummary}):`, formatPkr(invoice.amountPaid), true);
+  printRow(isBkg ? 'Total Quoted Price:' : 'Total Bill:', formatPkr(invoice.total), true);
+  if (isBkg) {
+    if (invoice.currentPaymentAmount !== undefined) {
+      printRow(`Payment Received (${methodSummary}):`, formatPkr(invoice.currentPaymentAmount), true);
+      printRow('Total Advance to Date:', formatPkr(invoice.totalAdvanceReceived ?? invoice.amountPaid), false);
+    } else {
+      printRow(`Total Advance Paid (${methodSummary}):`, formatPkr(invoice.totalAdvanceReceived ?? invoice.amountPaid), true);
+    }
+  } else {
+    if (invoice.advanceAdjusted && invoice.advanceAdjusted > 0) {
+      printRow('Booking Advance Applied:', `- ${formatPkr(invoice.advanceAdjusted)}`, false);
+      printRow('Remaining Payable:', formatPkr(Math.max(0, invoice.total - invoice.advanceAdjusted)), false);
+      printRow(`Checkout Payment (${methodSummary}):`, formatPkr(Math.max(0, invoice.amountPaid - invoice.advanceAdjusted)), true);
+      printRow('Total Settled:', formatPkr(invoice.amountPaid), true);
+    } else {
+      printRow(`Paid Amount (${methodSummary}):`, formatPkr(invoice.amountPaid), true);
+    }
+  }
   printRow(isBkg ? 'Remaining Balance (Due on Event):' : 'Outstanding Balance:', formatPkr(invoice.amountDue), true);
   pdf.setFont('courier', 'normal'); pdf.setFontSize(6.8);
   pdf.text(dashLine, center, y, { align: 'center' }); y += 3.2;
   if (isBkg) {
-    pdf.text('* Advance payment receipt. Remaining due on event.', center, y, { align: 'center' }); y += 2.8;
+    pdf.text(invoice.currentPaymentAmount !== undefined ? '* Advance payment installment receipt. Balance due on event.' : '* Advance payment receipt. Remaining due on event.', center, y, { align: 'center' }); y += 2.8;
   }
   pdf.text(`Thank you for choosing ${branchName}!`, center, y, { align: 'center' }); y += 2.8;
   pdf.text('Powered by Isysware Software Solutions', center, y, { align: 'center' });
@@ -385,8 +448,12 @@ export async function shareReceiptPdfViaWhatsApp({ invoice, branch, targetPhone 
   const methodSummary = getPaymentMethodSummary(invoice);
   const isBkg = Boolean(invoice.isBookingInvoice || invoice.invoiceNumber?.startsWith('BKG'));
   const summaryText = isBkg
-    ? `*${branchName} — BOOKING ADVANCE INVOICE*\nBooking Ref: *${invoice.invoiceNumber}*\nEvent Date: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Quoted Price:* ${formatCurrency(invoice.total)}\n*Advance Paid (${methodSummary}):* ${formatCurrency(invoice.amountPaid)}\n*Remaining Balance (Due on Event):* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official Booking Advance Receipt PDF attached above._\nThank you for choosing ${branchName}!`
-    : `*${branchName} — OFFICIAL RECEIPT*\nInvoice No: *${invoice.invoiceNumber}*\nDate: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Payable:* ${formatCurrency(invoice.total)}\n*Paid Amount (${methodSummary}):* ${formatCurrency(invoice.amountPaid)}\n*Outstanding Balance:* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official PDF Receipt attached above._\nThank you for visiting!`;
+    ? (invoice.currentPaymentAmount !== undefined
+        ? `*${branchName} — BOOKING ADVANCE PAYMENT RECEIPT*\nReceipt No: *${invoice.bookingReceiptNumber || invoice.invoiceNumber}*\nBooking Ref: *${invoice.invoiceNumber}*\nEvent Date: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Quoted Price:* ${formatCurrency(invoice.total)}\n*Payment Received (${methodSummary}):* ${formatCurrency(invoice.currentPaymentAmount)}\n*Total Advance to Date:* ${formatCurrency(invoice.totalAdvanceReceived ?? invoice.amountPaid)}\n*Remaining Balance (Due on Event):* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official Booking Advance Receipt PDF attached above._\nThank you for choosing ${branchName}!`
+        : `*${branchName} — BOOKING ADVANCE INVOICE*\nBooking Ref: *${invoice.invoiceNumber}*\nEvent Date: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Quoted Price:* ${formatCurrency(invoice.total)}\n*Total Advance Paid (${methodSummary}):* ${formatCurrency(invoice.totalAdvanceReceived ?? invoice.amountPaid)}\n*Remaining Balance (Due on Event):* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official Booking Advance Invoice PDF attached above._\nThank you for choosing ${branchName}!`)
+    : (invoice.advanceAdjusted && invoice.advanceAdjusted > 0
+        ? `*${branchName} — OFFICIAL RECEIPT*\nInvoice No: *${invoice.invoiceNumber}*\nDate: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Bill:* ${formatCurrency(invoice.total)}\nBooking Advance Applied: - ${formatCurrency(invoice.advanceAdjusted)}\nRemaining Payable: ${formatCurrency(Math.max(0, invoice.total - invoice.advanceAdjusted))}\n*Checkout Payment (${methodSummary}):* ${formatCurrency(Math.max(0, invoice.amountPaid - invoice.advanceAdjusted))}\n*Total Settled:* ${formatCurrency(invoice.amountPaid)}\n*Outstanding Balance:* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official PDF Receipt attached above._\nThank you for visiting!`
+        : `*${branchName} — OFFICIAL RECEIPT*\nInvoice No: *${invoice.invoiceNumber}*\nDate: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Payable:* ${formatCurrency(invoice.total)}\n*Paid Amount (${methodSummary}):* ${formatCurrency(invoice.amountPaid)}\n*Outstanding Balance:* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official PDF Receipt attached above._\nThank you for visiting!`);
   const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(summaryText)}`;
   window.open(waUrl, '_blank', 'noopener,noreferrer');
   return { sharedDirectly: false, downloaded: true, fileName: generated.fileName, phone: cleanPhone, file: generated.file };

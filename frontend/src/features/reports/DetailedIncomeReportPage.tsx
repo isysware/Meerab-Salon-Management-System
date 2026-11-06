@@ -603,7 +603,10 @@ export const DetailedIncomeReportPage: React.FC = () => {
 
                             {/* Invoice # */}
                             <td className="py-3.5 px-3 font-semibold text-[#9D2558] whitespace-nowrap">
-                              {row.invoiceNumber}
+                              <div>{row.invoiceNumber}</div>
+                              {row.bookingNumber && (
+                                <div className="text-[10px] text-slate-500 font-normal">Booking: {row.bookingNumber}</div>
+                              )}
                             </td>
 
                             {/* Source Type Badge */}
@@ -747,9 +750,15 @@ export const DetailedIncomeReportPage: React.FC = () => {
                                           <div key={p.id} className="px-3 py-1.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
                                             <CreditCard className="w-3.5 h-3.5 text-emerald-600" />
                                             <span>{p.date}</span>
+                                            {p.receiptNumber && <span className="font-mono font-bold">{p.receiptNumber}</span>}
                                             <span className="font-semibold">{p.paymentAccountName} ({p.method})</span>
                                             <span className="font-bold text-emerald-700">PKR {formatPKR(p.amount)}</span>
-                                            {p.kind && <span className="text-[10px] bg-emerald-200/60 px-1 rounded uppercase font-semibold">{p.kind}</span>}
+                                            {p.processedByName && <span className="text-[10px] text-slate-500">by {p.processedByName}</span>}
+                                            {p.kind && (
+                                              <span className="text-[10px] bg-emerald-200/60 px-1 rounded uppercase font-semibold">
+                                                {p.kind === 'BOOKING_PAYMENT' ? 'Booking Advance' : p.kind}
+                                              </span>
+                                            )}
                                           </div>
                                         ))}
                                       </div>

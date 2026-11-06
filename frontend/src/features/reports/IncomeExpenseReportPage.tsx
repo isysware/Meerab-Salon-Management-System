@@ -920,8 +920,16 @@ export const IncomeExpenseReportPage: React.FC = () => {
                               Commission
                             </span>
                           ) : row.type === 'SETTLEMENT' ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
-                              {row.source === 'Staff Loan' ? 'Staff Loan' : 'Settlement'}
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              row.source === 'BOOKING'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-purple-50 text-purple-700 border border-purple-200'
+                            }`}>
+                              {row.source === 'Staff Loan'
+                                ? 'Staff Loan'
+                                : row.source === 'BOOKING'
+                                ? (row.paymentEventType === 'BOOKING_REFUND' ? 'Booking Advance Refund' : 'Booking Advance Collection')
+                                : 'Settlement'}
                             </span>
                           ) : row.type === 'SUPPLIER_PAYMENT' || row.source === 'Supplier Payment' ? (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">

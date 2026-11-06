@@ -128,6 +128,29 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
         : 'Salon Reservation';
 
     if (isBkg) {
+      if (invoice.currentPaymentAmount !== undefined) {
+        return `${headerLines}
+================================
+*BOOKING ADVANCE PAYMENT RECEIPT*
+Receipt No: ${invoice.bookingReceiptNumber || invoice.invoiceNumber}
+Booking Ref: ${invoice.invoiceNumber}
+Event Type: ${bkgType}
+Event Date: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}
+Customer: ${invoice.clientName || 'Valued Customer'}${invoice.clientPhone && invoice.clientPhone !== 'N/A' ? ` (${invoice.clientPhone})` : ''}
+================================
+*RESERVED SERVICES:*
+${items}
+--------------------------------
+Total Quoted Price: ${formatCurrency(invoice.total)}${discounts}
+*Payment Received (${methodSummary}): ${formatCurrency(invoice.currentPaymentAmount)}*
+*Total Advance Received: ${formatCurrency(invoice.totalAdvanceReceived ?? invoice.amountPaid)}*
+*Remaining Balance (Due on Event): ${formatCurrency(invoice.amountDue)}*
+================================
+* Advance payment installment received with thanks.
+* Please settle remaining balance on the event date.
+Thank you for choosing ${branch?.name || 'Meerub Salon & Spa'}!`;
+      }
+
       return `${headerLines}
 ================================
 *BOOKING ADVANCE INVOICE*
@@ -140,13 +163,20 @@ Customer: ${invoice.clientName || 'Valued Customer'}${invoice.clientPhone && inv
 ${items}
 --------------------------------
 Total Quoted Price: ${formatCurrency(invoice.total)}${discounts}
-*Advance Paid (${methodSummary}): ${formatCurrency(invoice.amountPaid)}*
+*Total Advance Received (${methodSummary}): ${formatCurrency(invoice.totalAdvanceReceived ?? invoice.amountPaid)}*
 *Remaining Balance (Due on Event): ${formatCurrency(invoice.amountDue)}*
 ================================
 * Advance payment received with thanks.
 * Please settle remaining balance on the event date.
 Thank you for choosing ${branch?.name || 'Meerub Salon & Spa'}!`;
     }
+
+    const hasAdvance = Boolean(invoice.advanceAdjusted && invoice.advanceAdjusted > 0);
+    const checkoutPaid = hasAdvance ? Math.max(0, invoice.amountPaid - (invoice.advanceAdjusted || 0)) : invoice.amountPaid;
+    const remainingPayable = hasAdvance ? Math.max(0, invoice.total - (invoice.advanceAdjusted || 0)) : invoice.total;
+    const advanceLines = hasAdvance
+      ? `\nBooking Advance Applied: - ${formatCurrency(invoice.advanceAdjusted || 0)}\nRemaining Payable: ${formatCurrency(remainingPayable)}\n*Checkout Payment (${methodSummary}): ${formatCurrency(checkoutPaid)}*\n*Total Settled: ${formatCurrency(invoice.amountPaid)}*`
+      : `\n*Paid Amount (${methodSummary}): ${formatCurrency(invoice.amountPaid)}*`;
 
     return `${headerLines}
 ================================
@@ -159,8 +189,7 @@ ${invoice.processedByName ? `Cashier: ${invoice.processedByName}\n` : ''}=======
 ${items}
 --------------------------------
 Gross Subtotal: ${formatCurrency(invoice.subtotal)}${discounts}${netSales}${tax}${tip}
-*Total Payable: ${formatCurrency(invoice.total)}*
-*Paid Amount (${methodSummary}): ${formatCurrency(invoice.amountPaid)}*
+*Total Bill: ${formatCurrency(invoice.total)}*${advanceLines}
 *Outstanding Balance: ${formatCurrency(invoice.amountDue)}*
 ================================
 Thank you for your visit!
@@ -252,7 +281,7 @@ Powered by Isysware Software Solutions`;
             <span className="w-6 h-6 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 border border-emerald-200/60">
               <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
             </span>
-            <span>{isBkg ? 'Booking Advance Invoice' : 'Transaction Receipt'}</span>
+            <span>{isBkg ? (invoice.currentPaymentAmount !== undefined ? 'Booking Advance Payment Receipt' : 'Booking Advance Invoice') : 'Transaction Receipt'}</span>
           </DialogTitle>
           <div className="flex items-center gap-2 pr-6">
             <Badge
@@ -398,8 +427,11 @@ Powered by Isysware Software Solutions`;
             {/* Invoice Meta */}
             <div className="grid grid-cols-2 gap-2 text-[11px] py-1 border-b border-slate-100">
               <div>
-                <span className="text-slate-400 block text-[10px]">{isBkg ? 'Booking Ref' : 'Invoice No.'}</span>
-                <span className="font-mono font-bold text-slate-900">{invoice.invoiceNumber}</span>
+                <span className="text-slate-400 block text-[10px]">{isBkg ? (invoice.bookingReceiptNumber ? 'Receipt No.' : 'Booking Ref') : 'Invoice No.'}</span>
+                <span className="font-mono font-bold text-slate-900">{invoice.bookingReceiptNumber || invoice.invoiceNumber}</span>
+                {isBkg && invoice.bookingReceiptNumber && (
+                  <span className="text-[10px] text-slate-500 block font-mono">Booking Ref: {invoice.invoiceNumber}</span>
+                )}
               </div>
               <div className="text-right">
                 <span className="text-slate-400 block text-[10px]">{isBkg ? 'Event Date & Time' : 'Date & Time'}</span>
@@ -490,14 +522,55 @@ Powered by Isysware Software Solutions`;
               )}
 
               <div className="flex justify-between items-center text-slate-900 font-bold pt-1 border-t border-slate-200">
-                <span>{isBkg ? 'Total Quoted Price:' : 'Total Payable:'}</span>
+                <span>{isBkg ? 'Total Quoted Price:' : 'Total Bill:'}</span>
                 <span className="font-mono text-sm font-extrabold">{formatCurrency(invoice.total)}</span>
               </div>
 
-              <div className="flex justify-between items-center text-slate-900 font-bold">
-                <span>{isBkg ? 'Advance Paid' : 'Paid Amount'} ({getPaymentMethodSummary(invoice)}):</span>
-                <span className="font-mono text-emerald-700">{formatCurrency(invoice.amountPaid)}</span>
-              </div>
+              {isBkg ? (
+                invoice.currentPaymentAmount !== undefined ? (
+                  <>
+                    <div className="flex justify-between items-center text-slate-900 font-bold">
+                      <span>Payment Received ({getPaymentMethodSummary(invoice)}):</span>
+                      <span className="font-mono text-emerald-700">{formatCurrency(invoice.currentPaymentAmount)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-600 text-[11px]">
+                      <span>Total Advance to Date:</span>
+                      <span className="font-mono font-semibold">{formatCurrency(invoice.totalAdvanceReceived ?? invoice.amountPaid)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex justify-between items-center text-slate-900 font-bold">
+                    <span>Total Advance Paid ({getPaymentMethodSummary(invoice)}):</span>
+                    <span className="font-mono text-emerald-700">{formatCurrency(invoice.totalAdvanceReceived ?? invoice.amountPaid)}</span>
+                  </div>
+                )
+              ) : (
+                invoice.advanceAdjusted && invoice.advanceAdjusted > 0 ? (
+                  <>
+                    <div className="flex justify-between items-center text-slate-600 text-[11px]">
+                      <span>Booking Advance Applied:</span>
+                      <span className="font-mono font-semibold text-emerald-700">- {formatCurrency(invoice.advanceAdjusted)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-700 text-[11px]">
+                      <span>Remaining Payable:</span>
+                      <span className="font-mono font-semibold">{formatCurrency(Math.max(0, invoice.total - invoice.advanceAdjusted))}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-900 font-bold">
+                      <span>Checkout Payment ({getPaymentMethodSummary(invoice)}):</span>
+                      <span className="font-mono text-emerald-700">{formatCurrency(Math.max(0, invoice.amountPaid - invoice.advanceAdjusted))}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-slate-700 text-[11px] font-semibold border-t border-slate-100 pt-0.5">
+                      <span>Total Settled:</span>
+                      <span className="font-mono">{formatCurrency(invoice.amountPaid)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex justify-between items-center text-slate-900 font-bold">
+                    <span>Paid Amount ({getPaymentMethodSummary(invoice)}):</span>
+                    <span className="font-mono text-emerald-700">{formatCurrency(invoice.amountPaid)}</span>
+                  </div>
+                )
+              )}
 
               <div className={`flex justify-between items-center font-bold ${invoice.amountDue > 0 ? 'text-rose-600' : 'text-slate-800'}`}>
                 <span>{isBkg ? 'Remaining Balance (Due on Event):' : 'Outstanding Balance:'}</span>
@@ -508,7 +581,11 @@ Powered by Isysware Software Solutions`;
             {/* Footer Brand Note */}
             <div className="text-center text-[10px] text-slate-400 pt-2 border-t border-dashed border-slate-200 space-y-0.5">
               {isBkg && (
-                <p className="font-semibold text-emerald-800 text-[11px]">* Advance payment receipt. Remaining balance payable on event date.</p>
+                <p className="font-semibold text-emerald-800 text-[11px]">
+                  {invoice.currentPaymentAmount !== undefined
+                    ? '* Advance payment installment receipt. Remaining balance payable on event date.'
+                    : '* Advance payment receipt. Remaining balance payable on event date.'}
+                </p>
               )}
               <p>Thank you for choosing {branch?.name || 'Meerub Salon & Spa'}!</p>
               <p className="font-mono text-[9px] text-slate-400">Powered by Isysware Software Solutions</p>

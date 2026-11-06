@@ -12,6 +12,7 @@ export default defineConfig({
       'tests/booking-appointments-role-access.test.js',
       'tests/detailed-expenses-supplier-reversal-refund.test.js',
       'tests/account-settlement-hierarchy.test.js',
+      'tests/booking-advance-reporting.test.js',
     ],
   },
 });
