@@ -92,7 +92,7 @@ export const AppRouter: React.FC = () => {
 
   // Helper to render the main content according to current pathname
   const renderContent = () => {
-    if (canAccessRoute(user, pathname) && pathname === '/operations/bookings') return <BookingsPage />;
+    if (canAccessRoute(user, pathname) && (pathname === '/operations/bookings' || pathname === '/bookings')) return <BookingsPage />;
     // 1. Check authorization
     const isAuthorized = canAccessRoute(user, pathname);
     if (!isAuthorized) {

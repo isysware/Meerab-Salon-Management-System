@@ -359,6 +359,10 @@ export interface PurchaseLineItem {
   expiryDate?: string;
   mfgDate?: string;
   batchId?: string;
+  returnedQuantity?: number;
+  remainingEligibleQuantity?: number;
+  currentBatchRemainingQuantity?: number;
+  maxReturnableQuantity?: number;
 }
 
 export interface Purchase {
@@ -378,6 +382,8 @@ export interface Purchase {
   paidAmount: number;
   balanceDue: number;
   balanceAmount?: number; // alias for balanceDue
+  totalReturnedAmount?: number;
+  returns?: SupplierReturn[];
   paymentMethod: PurchasePaymentMethod;
   paymentStatus: PurchasePaymentStatus;
   paymentAccountId?: string;

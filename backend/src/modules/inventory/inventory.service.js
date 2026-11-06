@@ -478,15 +478,79 @@ export const listPurchases = async (actor, { branchId, startDate, endDate } = {}
     include: { lines: true },
     orderBy: [{ purchaseDate: 'desc' }, { createdAt: 'desc' }],
   });
+
+  const purchaseIds = purchases.map((p) => p.id);
+  const returns = purchaseIds.length > 0
+    ? await prisma.supplierReturn.findMany({
+        where: { purchaseId: { in: purchaseIds } },
+        select: { id: true, purchaseId: true, totalAmount: true },
+      })
+    : [];
+
+  const returnTotals = new Map();
+  for (const r of returns) {
+    if (r.purchaseId) {
+      returnTotals.set(r.purchaseId, (returnTotals.get(r.purchaseId) || toDec(0)).plus(r.totalAmount || 0));
+    }
+  }
+
+  for (const p of purchases) {
+    p.totalReturnedAmount = (returnTotals.get(p.id) || toDec(0)).toNumber();
+  }
+
   const accounts = await prisma.paymentAccount.findMany({ select: { id: true, name: true } });
   const names = new Map(accounts.map((a) => [a.id, a.name]));
   return purchases.map((p) => toPurchaseDTO(p, names.get(p.paymentAccountId)));
 };
 
 export const getPurchase = async (actor, id) => {
-  const p = await prisma.purchase.findUnique({ where: { id }, include: { lines: true } });
+  const p = await prisma.purchase.findUnique({
+    where: { id },
+    include: { lines: true },
+  });
   if (!p) throw notFound('PURCHASE_NOT_FOUND', `Purchase '${id}' not found.`);
   assertBranchAccess(actor, p.branchId);
+
+  // Load existing returns on this purchase
+  const returns = await prisma.supplierReturn.findMany({
+    where: { purchaseId: p.id },
+    include: { lines: true },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  const returnedByBatch = new Map();
+  let totalReturnedAmount = toDec(0);
+  for (const r of returns) {
+    totalReturnedAmount = totalReturnedAmount.plus(r.totalAmount || 0);
+    for (const rl of r.lines) {
+      if (rl.batchId) {
+        returnedByBatch.set(rl.batchId, (returnedByBatch.get(rl.batchId) || toDec(0)).plus(rl.quantity));
+      }
+    }
+  }
+
+  // Load current batches to know available physical stock
+  const batchIds = p.lines.map((l) => l.batchId).filter(Boolean);
+  const batches = batchIds.length > 0 ? await prisma.inventoryBatch.findMany({ where: { id: { in: batchIds } } }) : [];
+  const batchMap = new Map(batches.map((b) => [b.id, b]));
+
+  for (const line of p.lines) {
+    const batch = batchMap.get(line.batchId);
+    const returnedQty = returnedByBatch.get(line.batchId) || toDec(0);
+    const lineQty = toDec(line.quantity);
+    const eligibleQty = lineQty.minus(returnedQty).greaterThan(0) ? lineQty.minus(returnedQty) : toDec(0);
+    const physicalRemaining = batch ? toDec(batch.remainingQuantity) : toDec(0);
+    const maxReturnable = eligibleQty.lessThan(physicalRemaining) ? eligibleQty : physicalRemaining;
+
+    line.returnedQuantity = returnedQty.toNumber();
+    line.remainingEligibleQuantity = eligibleQty.toNumber();
+    line.currentBatchRemainingQuantity = physicalRemaining.toNumber();
+    line.maxReturnableQuantity = maxReturnable.greaterThan(0) ? maxReturnable.toNumber() : 0;
+  }
+
+  p.returns = returns;
+  p.totalReturnedAmount = totalReturnedAmount.toNumber();
+
   return toPurchaseDTO(p, await accountName(prisma, p.paymentAccountId));
 };
 
@@ -621,8 +685,24 @@ export const createReturn = async (input, actor) => {
     const branch = await activeBranch(tx, branchId);
     const supplier = await loadSupplier(tx, actor, input.supplierId);
     const purchaseId = input.purchaseId ?? input.originalPurchaseId ?? null;
-    const purchase = purchaseId ? await tx.purchase.findFirst({ where: { id: purchaseId, branchId, supplierId: supplier.id } }) : null;
+    const purchase = purchaseId
+      ? await tx.purchase.findFirst({ where: { id: purchaseId, branchId, supplierId: supplier.id }, include: { lines: true } })
+      : null;
     if (purchaseId && !purchase) throw badRequest('PURCHASE_INVALID', 'Original purchase not found for this supplier and branch.');
+
+    // If linked to a purchase, compute previous returns to validate remaining returnable quantity
+    const prevReturns = purchase
+      ? await tx.supplierReturn.findMany({ where: { purchaseId: purchase.id }, include: { lines: true } })
+      : [];
+
+    const returnedByBatch = new Map();
+    for (const pr of prevReturns) {
+      for (const rl of pr.lines) {
+        if (rl.batchId) {
+          returnedByBatch.set(rl.batchId, (returnedByBatch.get(rl.batchId) || toDec(0)).plus(rl.quantity));
+        }
+      }
+    }
 
     const returnNumber = await nextSequence(tx, branch.code, 'PR');
     const returnDate = dateOnly(input.returnDate || (await getBusinessDate(tx)));
@@ -638,8 +718,26 @@ export const createReturn = async (input, actor) => {
     for (const l of input.lines) {
       const item = await tx.inventoryItem.findUnique({ where: { id: l.itemId } });
       if (!item) throw badRequest('ITEM_INVALID', `Item '${l.itemId}' not found.`);
+
+      // Find matching purchase line if purchase is specified
+      const pLine = purchase
+        ? purchase.lines.find((pl) => (l.batchId && pl.batchId === l.batchId) || (l.batchNumber && pl.batchNumber === l.batchNumber) || pl.itemId === l.itemId)
+        : null;
+
+      if (pLine) {
+        const alreadyReturned = returnedByBatch.get(pLine.batchId) || toDec(0);
+        const eligiblePurchasedQty = toDec(pLine.quantity).minus(alreadyReturned);
+        if (toDec(l.quantity).greaterThan(eligiblePurchasedQty)) {
+          throw badRequest(
+            'EXCEEDS_PURCHASED_QTY',
+            `Cannot return ${l.quantity} units of '${pLine.itemName}'. Only ${eligiblePurchasedQty.toNumber()} units remain eligible from original purchase.`
+          );
+        }
+      }
+
       // Returns leave from a specific cost layer (the batch received from this supplier).
       let batch = l.batchId ? await tx.inventoryBatch.findFirst({ where: { id: l.batchId, itemId: item.id, branchId } }) : null;
+      if (!batch && pLine) batch = await tx.inventoryBatch.findFirst({ where: { id: pLine.batchId } });
       if (!batch && l.batchNumber) batch = await tx.inventoryBatch.findFirst({ where: { batchNumber: l.batchNumber, itemId: item.id, branchId } });
       if (!batch) {
         batch = await tx.inventoryBatch.findFirst({
@@ -648,15 +746,26 @@ export const createReturn = async (input, actor) => {
         });
       }
       if (!batch) throw conflict('INSUFFICIENT_STOCK', `No batch of '${item.name}' holds ${l.quantity} units to return.`);
+      if (toDec(l.quantity).greaterThan(batch.remainingQuantity)) {
+        throw conflict(
+          'INSUFFICIENT_STOCK',
+          `Cannot return ${l.quantity} units of '${item.name}'. Only ${toDec(batch.remainingQuantity).toNumber()} units currently remain in physical batch stock (Batch: ${batch.batchNumber}).`
+        );
+      }
 
-      const unitCost = l.unitCost !== undefined ? toDec(l.unitCost) : toDec(batch.unitCost);
+      // Snapshot unit cost directly from original purchase line landedUnitCost/unitPurchaseCost
+      const unitCost = pLine
+        ? toDec(pLine.landedUnitCost || pLine.unitPurchaseCost)
+        : (l.unitCost !== undefined ? toDec(l.unitCost) : toDec(batch.unitCost));
       const lineTotal = round2(qty(l.quantity).times(unitCost));
       total = total.plus(lineTotal);
+
       await postStockMovement(tx, {
         branchCode: branch.code, branchId, itemId: item.id, batch, movementType: 'SUPPLIER_RETURN_OUT', quantity: l.quantity,
         unitCost: batch.unitCost, sourceReferenceType: 'RETURN', sourceReferenceId: ret.id, sourceReferenceNumber: returnNumber,
         reason: input.reason || 'Supplier Return', actor,
       });
+
       await tx.supplierReturnLine.create({
         data: {
           returnId: ret.id, itemId: item.id, itemName: item.name, itemSku: item.sku, batchId: batch.id, batchNumber: batch.batchNumber,
@@ -666,10 +775,29 @@ export const createReturn = async (input, actor) => {
     }
     total = round2(total);
 
-    // Returned goods always reduce what we owe (debit). A cash/online refund then settles that
-    // credit (money comes back in), so the payable nets to zero for refunds.
-    const ledgerBase = { supplierId: supplier.id, branchId, date: returnDate, referenceType: 'RETURN', referenceId: ret.id, referenceNumber: returnNumber, userId: actor.id, userName: actor.name };
-    await tx.supplierLedger.create({ data: { ...ledgerBase, entryType: 'PURCHASE_RETURN', debit: total, description: `Return: ${returnNumber} (${input.reason})` } });
+    // If linked to a purchase, offset purchase balanceDue
+    if (purchase) {
+      const curDue = toDec(purchase.balanceDue);
+      const offset = curDue.lessThan(total) ? curDue : total;
+      const nextDue = round2(curDue.minus(offset));
+      const nextStatus = nextDue.isZero() ? 'PAID' : (toDec(purchase.paidAmount).isZero() ? 'UNPAID' : 'PARTIAL');
+      await tx.purchase.update({
+        where: { id: purchase.id },
+        data: { balanceDue: nextDue, paymentStatus: nextStatus },
+      });
+    }
+
+    // Returned goods always reduce what we owe (debit to accounts payable).
+    const ledgerBase = {
+      supplierId: supplier.id, branchId, date: returnDate, referenceType: 'RETURN', referenceId: ret.id,
+      referenceNumber: returnNumber, userId: actor.id, userName: actor.name,
+    };
+    await tx.supplierLedger.create({
+      data: {
+        ...ledgerBase, entryType: 'PURCHASE_RETURN', debit: total,
+        description: `Return: ${returnNumber} (${purchase ? purchase.purchaseNumber + ' · ' : ''}${input.reason})`,
+      },
+    });
 
     let refundTo = { cashDrawerId: null, paymentAccountId: null };
     if (treatment === 'CASH_REFUND' || treatment === 'ONLINE_REFUND') {
@@ -677,23 +805,78 @@ export const createReturn = async (input, actor) => {
         const drawer = await getActiveDrawer(tx, actor, branchId);
         await postCashMovement(tx, {
           holderId: drawer.id, type: 'SUPPLIER_REFUND', direction: 'IN', amount: total, sourceModule: 'INVENTORY',
-          sourceId: ret.id, reference: returnNumber, description: `Supplier refund from ${supplier.name}`, actor,
+          sourceId: ret.id, reference: returnNumber, description: `Supplier refund from ${supplier.name} for ${returnNumber}`, actor,
         });
         refundTo.cashDrawerId = drawer.id;
       } else {
         if (!input.paymentAccountId) throw badRequest('ACCOUNT_REQUIRED', 'Payment account required for online supplier refund.');
         await postAccountMovement(tx, {
           accountId: input.paymentAccountId, branchId, type: 'SUPPLIER_REFUND', direction: 'IN', amount: total, sourceModule: 'INVENTORY',
-          sourceId: ret.id, reference: returnNumber, description: `Supplier refund from ${supplier.name}`, actor,
+          sourceId: ret.id, reference: returnNumber, description: `Supplier refund from ${supplier.name} for ${returnNumber}`, actor,
         });
         refundTo.paymentAccountId = input.paymentAccountId;
       }
-      await tx.supplierLedger.create({ data: { ...ledgerBase, entryType: 'SUPPLIER_REFUND', credit: total, description: `Refund received for ${returnNumber}` } });
+      await tx.supplierLedger.create({
+        data: { ...ledgerBase, entryType: 'SUPPLIER_REFUND', credit: total, description: `Refund received for ${returnNumber}` },
+      });
     }
 
     const saved = await tx.supplierReturn.update({ where: { id: ret.id }, data: { totalAmount: total, ...refundTo }, include: { lines: true } });
-    await audit(tx, actor, 'SUPPLIER_RETURN_POSTED', 'SupplierReturn', ret.id, branchId, { returnNumber, total: total.toNumber(), treatment });
+    await audit(tx, actor, 'SUPPLIER_RETURN_POSTED', 'SupplierReturn', ret.id, branchId, {
+      returnNumber, purchaseId: purchase?.id, total: total.toNumber(), treatment,
+    });
     return toSupplierReturnDTO(saved, supplier.name);
+  });
+};
+
+export const recordSupplierRefund = async (input, actor) => {
+  const branchId = resolveWriteBranch(actor, input.branchId, 'Access Denied: Cannot record supplier refund for another branch.');
+  const method = input.method || (input.cashDrawerId ? 'CASH' : 'ONLINE');
+  const dAmount = toDec(input.amount);
+  if (!dAmount.isPositive() || dAmount.isZero()) throw badRequest('INVALID_AMOUNT', 'Refund amount must be a positive number.');
+  const amount = round2(dAmount);
+
+  return prisma.$transaction(async (tx) => {
+    const date = dateOnly(input.refundDate || (await getBusinessDate(tx)));
+    await tx.$executeRaw`SELECT 1 FROM "Supplier" WHERE id = ${input.supplierId} FOR UPDATE`;
+    const supplier = await loadSupplier(tx, actor, input.supplierId);
+    if (!supplier.isActive) throw badRequest('SUPPLIER_INACTIVE', `Supplier '${supplier.name}' is deactivated.`);
+
+    let receivedTo = { cashDrawerId: null, paymentAccountId: null };
+    const refNumber = input.reference || (await nextSequence(tx, (await activeBranch(tx, branchId)).code, 'SR'));
+
+    if (method === 'CASH') {
+      const drawer = await getActiveDrawer(tx, actor, branchId);
+      await postCashMovement(tx, {
+        holderId: drawer.id, type: 'SUPPLIER_REFUND', direction: 'IN', amount, sourceModule: 'INVENTORY',
+        sourceId: input.returnId || supplier.id, reference: refNumber, description: `Supplier refund from ${supplier.name}${input.notes ? ` · ${input.notes}` : ''}`, actor,
+      });
+      receivedTo.cashDrawerId = drawer.id;
+    } else {
+      if (!input.paymentAccountId) throw badRequest('ACCOUNT_REQUIRED', 'Payment account is required for online supplier refund.');
+      await postAccountMovement(tx, {
+        accountId: input.paymentAccountId, branchId, type: 'SUPPLIER_REFUND', direction: 'IN', amount, sourceModule: 'INVENTORY',
+        sourceId: input.returnId || supplier.id, reference: refNumber, description: `Supplier refund from ${supplier.name}${input.notes ? ` · ${input.notes}` : ''}`, actor,
+      });
+      receivedTo.paymentAccountId = input.paymentAccountId;
+    }
+
+    const ledgerBase = {
+      supplierId: supplier.id, branchId, date, referenceType: 'REFUND', referenceId: input.returnId || supplier.id,
+      referenceNumber: refNumber, userId: actor.id, userName: actor.name,
+    };
+    await tx.supplierLedger.create({
+      data: {
+        ...ledgerBase, entryType: 'SUPPLIER_REFUND', credit: amount,
+        description: `Supplier refund received (${method}): ${refNumber}${input.notes ? ` · ${input.notes}` : ''}`,
+      },
+    });
+
+    await audit(tx, actor, 'SUPPLIER_REFUND_RECORDED', 'Supplier', supplier.id, branchId, {
+      amount: amount.toNumber(), method, refNumber, ...receivedTo,
+    });
+
+    return { success: true, supplierId: supplier.id, amount: amount.toNumber(), method, reference: refNumber };
   });
 };
 

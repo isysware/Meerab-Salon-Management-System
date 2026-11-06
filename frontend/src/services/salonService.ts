@@ -725,6 +725,20 @@ export interface SalonServiceContract {
     ledgerEntry: SupplierLedgerEntry;
     updatedPayable: number;
   }>;
+  recordSupplierRefund?(
+    supplierId: string,
+    input: {
+      branchId?: string;
+      amount: number;
+      method?: 'CASH' | 'ONLINE';
+      paymentAccountId?: string;
+      refundDate?: string;
+      reference?: string;
+      notes?: string;
+      returnId?: string;
+    },
+    actor?: User
+  ): Promise<any>;
 
   // --- PHASE 3H: PURCHASES / STOCK IN ---
   getPurchases(

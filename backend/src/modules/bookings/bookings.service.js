@@ -15,8 +15,8 @@ import { bookingInclude, toBookingDTO } from './bookings.mapper.js';
 import { lockScheduleDay, validateBookingSchedule } from './bookings.scheduling.js';
 
 const json = v => JSON.parse(JSON.stringify(v));
-const admin = actor => { if (!['ADMIN', 'SUPER_ADMIN'].includes(actor.role)) throw forbidden('FORBIDDEN', 'Only administrators may manage bookings.'); };
-const reader = actor => { if (!['ADMIN', 'SUPER_ADMIN', 'ACCOUNTANT'].includes(actor.role)) throw forbidden('FORBIDDEN', 'Booking access denied.'); };
+const admin = actor => { if (!['ADMIN', 'SUPER_ADMIN', 'ACCOUNTANT', 'STAFF'].includes(actor.role)) throw forbidden('FORBIDDEN', 'Booking access denied.'); };
+const reader = actor => { if (!['ADMIN', 'SUPER_ADMIN', 'ACCOUNTANT', 'STAFF'].includes(actor.role)) throw forbidden('FORBIDDEN', 'Booking access denied.'); };
 export const loadBooking = async (tx, actor, id, { lock = false, editable = false } = {}) => {
   reader(actor);
   if (lock) await tx.$executeRaw`SELECT 1 FROM "Booking" WHERE id = ${id} FOR UPDATE`;

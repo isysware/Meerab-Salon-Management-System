@@ -12,7 +12,7 @@ const ADMINS = ['SUPER_ADMIN', 'ADMIN'];
 const router = Router();
 router.use(authenticate);
 
-router.get('/',          authorize(...ADMINS, 'ACCOUNTANT'), validate(listStaffQuery, 'query'), c.list);
+router.get('/',          authorize(...ADMINS, 'ACCOUNTANT', 'STAFF'), validate(listStaffQuery, 'query'), c.list);
 router.get('/next-code', authorize(...ADMINS), c.nextCode);
 router.get('/:id',       authorize(...ADMINS, 'ACCOUNTANT', 'STAFF'), c.getOne);
 

@@ -87,6 +87,17 @@ export const paySupplierSchema = z.object({
   notes:            z.string().trim().optional(),
 }).passthrough().refine((v) => !!(v.method || v.paymentMethod), { message: 'Cash or Online payment method is required.' });
 
+export const recordRefundSchema = z.object({
+  branchId:         z.string().optional(),
+  amount:           positive('Refund amount'),
+  refundDate:       optYmd,
+  method:           z.enum(['CASH', 'ONLINE']).optional(),
+  paymentAccountId: z.string().optional(),
+  reference:        z.string().trim().optional(),
+  notes:            z.string().trim().optional(),
+  returnId:         z.string().optional(),
+}).passthrough();
+
 export const reversePaymentSchema = z.object({ reason: z.string().trim().min(3), reversalDate: ymd });
 
 export const createPurchaseSchema = z.object({

@@ -25,7 +25,17 @@ export function canAccessRoute(user: User | null, routePath: string): boolean {
 
   // Staff specific routes
   if (user.role === 'STAFF') {
-    const staffAllowed = ['/dashboard', '/my-performance', '/my-attendance', '/my-reports', '/profile'];
+    const staffAllowed = [
+      '/dashboard',
+      '/my-performance',
+      '/my-attendance',
+      '/my-reports',
+      '/profile',
+      '/operations/bookings',
+      '/bookings',
+      '/operations/appointments',
+      '/appointments',
+    ];
     return staffAllowed.includes(path);
   }
 
@@ -62,6 +72,8 @@ export function canAccessRoute(user: User | null, routePath: string): boolean {
       ? '/accounts/tips-management' // Tips Statement is a subview of Tips Management (spec §1: not a report-menu page)
       : path === '/operations/staff-performance'
       ? '/reports/staff-performance'
+      : path === '/bookings'
+      ? '/operations/bookings'
       : path === '/appointments'
       ? '/operations/appointments'
       : path === '/clients'

@@ -9,7 +9,7 @@ import * as v from './clients.schema.js';
 import * as c from './clients.controller.js';
 
 const ADMINS = ['SUPER_ADMIN', 'ADMIN'];
-const BACK_OFFICE = [...ADMINS, 'ACCOUNTANT'];
+const BACK_OFFICE = [...ADMINS, 'ACCOUNTANT', 'STAFF'];
 
 const router = Router();
 router.use(authenticate);

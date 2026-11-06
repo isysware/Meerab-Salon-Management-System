@@ -88,8 +88,8 @@ export const listStaff = async (actor, { branchId, active, search } = {}) => {
     } : {}),
   };
   const staff = await prisma.staff.findMany({ where, include, orderBy: [{ branchId: 'asc' }, { employeeCode: 'asc' }] });
-  // Accountants may see who works where (POS/attendance pickers) but never salary data.
-  return staff.map((s) => toStaffDTO(s, { redactPay: actor.role === 'ACCOUNTANT' }));
+  // Accountants & Staff may see who works where (POS/attendance/booking pickers) but never salary data.
+  return staff.map((s) => toStaffDTO(s, { redactPay: actor.role === 'ACCOUNTANT' || actor.role === 'STAFF' }));
 };
 
 export const getStaff = async (actor, id) => {

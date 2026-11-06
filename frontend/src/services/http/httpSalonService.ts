@@ -308,6 +308,7 @@ const liveMethods: SalonServiceContract = {
   reverseCollection: (invoiceId, paymentId, input) => api.post<Invoice>(`/invoices/${invoiceId}/payments/${paymentId}/reverse`, input, input.idempotencyKey),
   paySupplier: (input) => api.post(`/suppliers/${input.supplierId}/payments`, input, input.idempotencyKey || newIdempotencyKey()),
   recordSupplierPayment: (input) => api.post(`/suppliers/${input.supplierId}/payments`, input, input.idempotencyKey || newIdempotencyKey()),
+  recordSupplierRefund: (supplierId, input) => api.post(`/suppliers/${supplierId}/refunds`, input, input.idempotencyKey || newIdempotencyKey()),
 
   getPurchases: (branchId, _actor, dateRange) => api.get<Purchase[]>('/purchases', { ...branchQuery(branchId), ...(dateRange || {}) }),
   getPurchase: (id) => api.get<Purchase>(`/purchases/${id}`),

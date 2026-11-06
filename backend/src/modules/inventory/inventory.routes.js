@@ -41,6 +41,7 @@ supplierRoutes.put('/:id',           validate(v.updateSupplierSchema), c.updateS
 supplierRoutes.post('/:id/archive',  validate(v.archiveSchema), c.archiveSupplier);
 supplierRoutes.post('/:id/payments/:paymentId/reverse', idempotency, validate(v.reversePaymentSchema), c.reversePayment);
 supplierRoutes.post('/:id/payments', idempotency, validate(v.paySupplierSchema), c.pay);
+supplierRoutes.post('/:id/refunds',  idempotency, validate(v.recordRefundSchema), c.refund);
 
 // ── /purchases, /supplier-returns, /stock-movements, /stock-settlements ──────
 export const purchaseRoutes = Router();

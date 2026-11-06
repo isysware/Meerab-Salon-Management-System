@@ -54,7 +54,7 @@ const loadOrThrow = async (tx, id) => {
 };
 
 const assertBookingRole = (actor) => {
-  if (actor.role === 'STAFF' || actor.role === 'ACCOUNTANT') {
+  if (!['SUPER_ADMIN', 'ADMIN', 'ACCOUNTANT', 'STAFF'].includes(actor.role)) {
     throw forbidden('FORBIDDEN', 'Access Denied: You do not have permission to manage appointments.');
   }
 };
@@ -234,7 +234,6 @@ const assertNotBilled = (apt, verb) => {
 // ── Queries ──────────────────────────────────────────────────────────────────
 
 export const listAppointments = async (actor, q = {}) => {
-  if (actor.role === 'STAFF') throw forbidden('FORBIDDEN', 'Access Denied: Staff members cannot view the appointment schedule.');
   const b = resolveReadBranch(actor, q.branchId);
   const dateFilter = {};
   if (q.date) dateFilter.equals = dateOnly(q.date);
@@ -267,14 +266,12 @@ export const listAppointments = async (actor, q = {}) => {
 export const getAppointment = async (actor, id) => {
   const apt = await prisma.appointment.findUnique({ where: { id }, include });
   if (!apt) return null;
-  if (actor.role === 'STAFF') throw forbidden('FORBIDDEN', 'Access Denied: Staff members cannot view the appointment schedule.');
   assertBranchAccess(actor, apt.branchId, 'Access Denied: Cannot view appointments from another branch.');
   return (await toDTOs([apt]))[0];
 };
 
 /** POS queue: unbilled, active appointments of the day (oldest slot first). */
 export const getQueue = async (actor, { branchId, date }) => {
-  if (actor.role === 'STAFF') throw forbidden('FORBIDDEN', 'Access Denied: Staff members cannot access the POS queue.');
   const b = resolveReadBranch(actor, branchId);
   if (!b) throw badRequest('BRANCH_REQUIRED', 'Please select a specific branch to load the POS queue.');
   const list = await prisma.appointment.findMany({

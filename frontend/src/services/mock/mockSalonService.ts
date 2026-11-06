@@ -11493,6 +11493,46 @@ class MockSalonService implements SalonServiceContract {
     return this.paySupplier(input, actor);
   }
 
+  async recordSupplierRefund(
+    supplierId: string,
+    input: {
+      branchId?: string;
+      amount: number;
+      method?: 'CASH' | 'ONLINE';
+      paymentAccountId?: string;
+      refundDate?: string;
+      reference?: string;
+      notes?: string;
+      returnId?: string;
+    },
+    _actor?: User
+  ): Promise<any> {
+    const store = mockStorage.getStore();
+    const cloned = JSON.parse(JSON.stringify(store));
+    const supp = (cloned.suppliers || []).find((s: any) => s.id === supplierId);
+    if (!supp) throw new Error('Supplier not found');
+    const amount = Number(input.amount) || 0;
+    supp.currentPayable = Number(((supp.currentPayable || 0) + amount).toFixed(2));
+    if (!cloned.supplierLedger) cloned.supplierLedger = [];
+    cloned.supplierLedger.push({
+      id: `led-${Date.now()}`,
+      supplierId,
+      supplierName: supp.name,
+      branchId: input.branchId || supp.branchId,
+      date: input.refundDate || mockStorage.getSystemDate(),
+      time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+      entryType: 'SUPPLIER_REFUND',
+      referenceType: 'REFUND',
+      referenceNumber: input.reference || `SR-${Date.now().toString(36).toUpperCase()}`,
+      description: `Supplier refund received (${input.method || 'CASH'})${input.notes ? ` · ${input.notes}` : ''}`,
+      debit: 0,
+      credit: amount,
+      runningBalance: supp.currentPayable,
+    });
+    mockStorage.saveStore(cloned);
+    return { success: true };
+  }
+
   // ======================================================================
   // PHASE 3H: PURCHASES / STOCK IN
   // ======================================================================
@@ -12002,6 +12042,16 @@ class MockSalonService implements SalonServiceContract {
         createdByName: authenticatedActor.name,
         createdAt: nowIso,
       });
+    }
+
+    // Handle purchase balance effect
+    if (purchaseId && clonedStore.purchases) {
+      const p = clonedStore.purchases.find((pur: any) => pur.id === purchaseId);
+      if (p) {
+        const offset = Math.min(p.balanceDue || 0, totalAmount);
+        p.balanceDue = roundCurrency(Math.max(0, (p.balanceDue || 0) - offset));
+        p.paymentStatus = p.balanceDue === 0 ? 'PAID' : (p.paidAmount > 0 ? 'PARTIAL' : 'UNPAID');
+      }
     }
 
     // Handle refund financial effect

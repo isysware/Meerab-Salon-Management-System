@@ -32,6 +32,7 @@ export const updateSupplier  = send((req) => s.updateSupplier(req.params.id, req
 export const archiveSupplier = send((req) => s.archiveSupplier(req.params.id, req.body.isActive, req.user));
 export const ledger          = send((req) => s.supplierLedger(req.user, req.params.id, req.query));
 export const pay             = send((req) => s.paySupplier({ ...req.body, supplierId: req.params.id }, req.user, postingRequest(req)), 201);
+export const refund          = send((req) => s.recordSupplierRefund({ ...req.body, supplierId: req.params.id }, req.user), 201);
 
 // Purchases, returns, movements, counts
 export const listPurchases   = send((req) => s.listPurchases(req.user, req.query));

@@ -37,6 +37,7 @@ import {
   Printer,
   Download,
   Calendar,
+  RotateCcw,
 } from 'lucide-react';
 
 const formatPKR = (amt: number) => {
@@ -114,6 +115,17 @@ export const SuppliersVendorsPage: React.FC = () => {
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const paymentKey = React.useRef('');
   const paymentBusy = React.useRef(false);
+
+  // Record Supplier Refund Modal
+  const [isRefundModalOpen, setIsRefundModalOpen] = useState<boolean>(false);
+  const [refundingSupplier, setRefundingSupplier] = useState<Supplier | null>(null);
+  const [refundAmount, setRefundAmount] = useState<number>(0);
+  const [refundMethod, setRefundMethod] = useState<'CASH' | 'ONLINE'>('CASH');
+  const [refundAccountId, setRefundAccountId] = useState<string>('');
+  const [refundReference, setRefundReference] = useState<string>('');
+  const [refundNotes, setRefundNotes] = useState<string>('');
+  const [refundDate, setRefundDate] = useState(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' }));
+  const [refundSubmitting, setRefundSubmitting] = useState(false);
 
   // Khata Ledger Drawer / Modal & Dedicated View State
   const [isLedgerModalOpen, setIsLedgerModalOpen] = useState<boolean>(false);
@@ -352,6 +364,59 @@ export const SuppliersVendorsPage: React.FC = () => {
       setErrorMessage(msg);
       toast.error(msg);
     } finally { paymentBusy.current = false; setPaymentSubmitting(false); }
+  };
+
+  const handleOpenRefundModal = (s: Supplier) => {
+    const bal = s.currentPayable ?? s.currentBalance ?? 0;
+    const credit = bal < 0 ? Math.abs(bal) : 0;
+    setErrorMessage(null);
+    setRefundingSupplier(s);
+    setRefundAmount(credit);
+    setRefundMethod('CASH');
+    setRefundAccountId(paymentAccounts[0]?.id || '');
+    setRefundReference('');
+    setRefundNotes('');
+    setRefundDate(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' }));
+    setIsRefundModalOpen(true);
+  };
+
+  const handleSubmitRefund = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!refundingSupplier) return;
+    if (!Number.isFinite(refundAmount) || refundAmount <= 0) {
+      toast.error('Enter a valid positive refund amount.');
+      return;
+    }
+    if (refundMethod === 'ONLINE' && !refundAccountId) {
+      toast.error('Select an active payment account.');
+      return;
+    }
+
+    setRefundSubmitting(true);
+    try {
+      if (salonService.recordSupplierRefund) {
+        await salonService.recordSupplierRefund(refundingSupplier.id, {
+          branchId: selectedBranchId === 'ALL' ? refundingSupplier.branchId : selectedBranchId,
+          amount: Number(refundAmount),
+          method: refundMethod,
+          paymentAccountId: refundMethod === 'ONLINE' ? refundAccountId : undefined,
+          refundDate,
+          reference: refundReference.trim() || undefined,
+          notes: refundNotes.trim() || undefined,
+        }, user);
+      }
+      const msg = `Supplier refund of PKR ${formatPKR(refundAmount)} recorded from ${refundingSupplier.name}.`;
+      toast.success(msg);
+      setIsRefundModalOpen(false);
+      loadData(selectedBranchId);
+      if (ledgerSupplier && ledgerSupplier.id === refundingSupplier.id) {
+        fetchSupplierLedger(refundingSupplier.id, selectedBranchId, ledgerStartDate, ledgerEndDate);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to record supplier refund.');
+    } finally {
+      setRefundSubmitting(false);
+    }
   };
 
   // Fetch Supplier Ledger
@@ -1043,14 +1108,26 @@ export const SuppliersVendorsPage: React.FC = () => {
 
               <div className="flex items-center gap-2">
                 {ledgerSupplier && (
-                  <button
-                    type="button"
-                    onClick={() => handleOpenPayModal(ledgerSupplier)}
-                    className="h-9 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-2xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-[0.98]"
-                  >
-                    <Banknote className="w-3.5 h-3.5" />
-                    <span>Pay Supplier</span>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenPayModal(ledgerSupplier)}
+                      className="h-9 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-2xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-[0.98]"
+                      title="Make Payment to Supplier"
+                    >
+                      <Banknote className="w-3.5 h-3.5" />
+                      <span>Pay Supplier</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenRefundModal(ledgerSupplier)}
+                      className="h-9 px-3.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl shadow-2xs flex items-center gap-1.5 cursor-pointer transition-all active:scale-[0.98]"
+                      title="Record Supplier Refund (Wapsi / Money-In)"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Record Refund</span>
+                    </button>
+                  </>
                 )}
 
                 <button
@@ -1121,8 +1198,8 @@ export const SuppliersVendorsPage: React.FC = () => {
                       <th className="py-3 px-4 whitespace-nowrap">Entry Type</th>
                       <th className="py-3 px-4 whitespace-nowrap">Reference #</th>
                       <th className="py-3 px-4 min-w-[200px]">Description</th>
-                      <th className="py-3 px-4 text-right whitespace-nowrap font-bold">Bill (Debit)</th>
-                      <th className="py-3 px-4 text-right whitespace-nowrap font-bold">Paid (Credit)</th>
+                      <th className="py-3 px-4 text-right whitespace-nowrap font-bold text-slate-800">Purchases / Bills (+)</th>
+                      <th className="py-3 px-4 text-right whitespace-nowrap font-bold text-emerald-800">Payments & Returns (-)</th>
                       <th className="py-3 px-4 text-right whitespace-nowrap font-bold text-[#9D2558]">Running Balance</th>
                     </tr>
                   </thead>
@@ -1130,6 +1207,11 @@ export const SuppliersVendorsPage: React.FC = () => {
                     {ledgerEntries.map((e, idx) => {
                       const isPayment = e.entryType === 'SUPPLIER_PAYMENT' || e.referenceType === 'PAYMENT';
                       const isReturn = e.entryType === 'PURCHASE_RETURN' || e.referenceType === 'RETURN';
+                      const isRefund = e.entryType === 'SUPPLIER_REFUND' || e.referenceType === 'REFUND';
+                      const isOpening = e.entryType === 'OPENING_BALANCE' || e.referenceType === 'OPENING';
+                      const isBill = !isPayment && !isReturn && !isRefund;
+                      const billAmount = isBill ? e.credit : 0;
+                      const deductionAmount = (isPayment || isReturn) ? e.debit : 0;
 
                       return (
                         <tr key={e.id || idx} className="hover:bg-[#FDF2F5]/20 transition-colors">
@@ -1147,6 +1229,14 @@ export const SuppliersVendorsPage: React.FC = () => {
                               <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-100 text-amber-800">
                                 Purchase Return
                               </span>
+                            ) : isRefund ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-100 text-indigo-800">
+                                Supplier Refund
+                              </span>
+                            ) : isOpening ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-cyan-100 text-cyan-800">
+                                Opening Balance
+                              </span>
                             ) : (
                               <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-[#FCE8EC] text-[#23151D]">
                                 Purchase Bill
@@ -1160,13 +1250,19 @@ export const SuppliersVendorsPage: React.FC = () => {
                             {e.description || '—'}
                           </td>
                           <td className="py-3 px-4 text-right whitespace-nowrap text-xs font-semibold text-slate-900">
-                            {e.debit > 0 ? `PKR ${formatPKR(e.debit)}` : '—'}
+                            {billAmount > 0 ? `PKR ${formatPKR(billAmount)}` : isRefund ? `+PKR ${formatPKR(e.credit)}` : '—'}
                           </td>
                           <td className="py-3 px-4 text-right whitespace-nowrap text-xs font-semibold text-emerald-700">
-                            {e.credit > 0 ? `PKR ${formatPKR(e.credit)}` : '—'}
+                            {deductionAmount > 0 ? `PKR ${formatPKR(deductionAmount)}` : '—'}
                           </td>
-                          <td className="py-3 px-4 text-right whitespace-nowrap text-xs font-bold text-[#9D2558]">
-                            PKR {formatPKR(e.runningBalance)}
+                          <td className="py-3 px-4 text-right whitespace-nowrap text-xs font-bold">
+                            {e.runningBalance < 0 ? (
+                              <span className="text-emerald-700 font-extrabold">PKR {formatPKR(Math.abs(e.runningBalance))} (Credit)</span>
+                            ) : e.runningBalance > 0 ? (
+                              <span className="text-rose-700 font-extrabold">PKR {formatPKR(e.runningBalance)} (Due)</span>
+                            ) : (
+                              <span className="text-slate-500 font-semibold">PKR 0.00</span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -1176,8 +1272,16 @@ export const SuppliersVendorsPage: React.FC = () => {
                     <tr>
                       <td colSpan={5} className="py-3 px-4 text-left">Period Totals</td>
                       <td className="py-3 px-4 text-right text-slate-900">PKR {formatPKR(ledgerSummary.totalPurchases)}</td>
-                      <td className="py-3 px-4 text-right text-emerald-700">PKR {formatPKR(ledgerSummary.totalPayments)}</td>
-                      <td className="py-3 px-4 text-right text-rose-700">PKR {formatPKR(ledgerSummary.closingPayable || (ledgerSupplier?.currentPayable ?? ledgerSupplier?.currentBalance ?? 0))}</td>
+                      <td className="py-3 px-4 text-right text-emerald-700">PKR {formatPKR((ledgerSummary.totalPayments || 0) + (ledgerSummary.totalReturns || 0))}</td>
+                      <td className="py-3 px-4 text-right">
+                        {((ledgerSummary.closingPayable || (ledgerSupplier?.currentPayable ?? ledgerSupplier?.currentBalance ?? 0)) < 0) ? (
+                          <span className="text-emerald-700 font-extrabold">PKR {formatPKR(Math.abs(ledgerSummary.closingPayable || (ledgerSupplier?.currentPayable ?? ledgerSupplier?.currentBalance ?? 0)))} (Credit)</span>
+                        ) : ((ledgerSummary.closingPayable || (ledgerSupplier?.currentPayable ?? ledgerSupplier?.currentBalance ?? 0)) > 0) ? (
+                          <span className="text-rose-700 font-extrabold">PKR {formatPKR(ledgerSummary.closingPayable || (ledgerSupplier?.currentPayable ?? ledgerSupplier?.currentBalance ?? 0))} (Due)</span>
+                        ) : (
+                          <span className="text-slate-500 font-semibold">PKR 0.00</span>
+                        )}
+                      </td>
                     </tr>
                   </tfoot>
                 </table>
@@ -1526,6 +1630,147 @@ export const SuppliersVendorsPage: React.FC = () => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL: RECORD SUPPLIER REFUND (WAPSI / CASH IN) --- */}
+      {isRefundModalOpen && refundingSupplier && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <RotateCcw className="w-4 h-4 text-amber-600" />
+                <span>Record Supplier Refund</span>
+              </h2>
+              <button
+                onClick={() => setIsRefundModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitRefund} className="mt-4 space-y-4">
+              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200/60 text-xs">
+                <div className="font-bold text-amber-900">{refundingSupplier.name}</div>
+                <div className="text-amber-800 text-[11px] mt-0.5">
+                  Current Khata Balance:{' '}
+                  <strong>
+                    {(refundingSupplier.currentPayable ?? refundingSupplier.currentBalance ?? 0) < 0
+                      ? `PKR ${formatPKR(Math.abs(refundingSupplier.currentPayable ?? refundingSupplier.currentBalance ?? 0))} (Credit/Receivable)`
+                      : `PKR ${formatPKR(refundingSupplier.currentPayable ?? refundingSupplier.currentBalance ?? 0)}`}
+                  </strong>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Refund Amount (PKR) *
+                </label>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="any"
+                  required
+                  value={refundAmount || ''}
+                  onChange={(e) => setRefundAmount(Number(e.target.value))}
+                  placeholder="0.00"
+                  className="w-full text-sm font-bold text-amber-700 px-3 py-2 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Refund Method (Receiving Into) *
+                </label>
+                <select
+                  value={refundMethod}
+                  onChange={(e) => setRefundMethod(e.target.value as any)}
+                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-hidden"
+                >
+                  <option value="CASH">Cash Drawer (Cash Inflow)</option>
+                  <option value="ONLINE">Bank / Online Account Transfer</option>
+                </select>
+              </div>
+
+              {refundMethod === 'ONLINE' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Select Receiving Account *
+                  </label>
+                  <select
+                    value={refundAccountId}
+                    onChange={(e) => setRefundAccountId(e.target.value)}
+                    className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg bg-white focus:outline-hidden"
+                  >
+                    <option value="">Select an account</option>
+                    {paymentAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} ({a.bankName || 'Bank'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Refund Date *
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={refundDate}
+                  onChange={(e) => setRefundDate(e.target.value)}
+                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Reference / Receipt #
+                </label>
+                <input
+                  type="text"
+                  value={refundReference}
+                  onChange={(e) => setRefundReference(e.target.value)}
+                  placeholder="e.g. SR-001 or Cheque/Txn #"
+                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Notes
+                </label>
+                <input
+                  type="text"
+                  value={refundNotes}
+                  onChange={(e) => setRefundNotes(e.target.value)}
+                  placeholder="Optional notes or return reference"
+                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg focus:outline-hidden"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsRefundModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={refundSubmitting}
+                  className="px-5 py-2 text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>{refundSubmitting ? 'Posting...' : 'Confirm Refund Received'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -36,6 +36,9 @@ import {
   CreditCard,
   Building2,
   BookOpen,
+  RotateCcw,
+  Eye,
+  History,
 } from 'lucide-react';
 
 const formatPKR = (amt: number) => {
@@ -114,6 +117,38 @@ export const StockInPurchasesPage: React.FC = () => {
   const [quickProductCategory, setQuickProductCategory] = useState<string>('Hair Care');
   const [quickProductCost, setQuickProductCost] = useState<number>(0);
   const [quickProductPrice, setQuickProductPrice] = useState<number>(0);
+
+  // Return to Supplier Modal State
+  interface ReturnLineItem {
+    itemId: string;
+    itemName: string;
+    itemSku: string;
+    batchId?: string;
+    batchNumber?: string;
+    originalQuantity: number;
+    alreadyReturned: number;
+    availableStock: number;
+    maxReturnable: number;
+    returnQuantity: number;
+    unitCost: number;
+    lineTotal: number;
+    selected: boolean;
+  }
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState<boolean>(false);
+  const [selectedReturnPurchaseId, setSelectedReturnPurchaseId] = useState<string>('');
+  const [selectedReturnPurchase, setSelectedReturnPurchase] = useState<Purchase | null>(null);
+  const [returnLines, setReturnLines] = useState<ReturnLineItem[]>([]);
+  const [returnReason, setReturnReason] = useState<string>('DEFECTIVE');
+  const [returnNotes, setReturnNotes] = useState<string>('');
+  const [returnTreatment, setReturnTreatment] = useState<'REDUCE_PAYABLE' | 'CASH_REFUND' | 'ONLINE_REFUND'>('REDUCE_PAYABLE');
+  const [returnPaymentAccountId, setReturnPaymentAccountId] = useState<string>('');
+  const [returnDate, setReturnDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [isSubmittingReturn, setIsSubmittingReturn] = useState<boolean>(false);
+
+  // Purchase Details Modal State
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState<boolean>(false);
+  const [viewingPurchase, setViewingPurchase] = useState<Purchase | null>(null);
+  const [isLoadingDetails, setIsLoadingDetails] = useState<boolean>(false);
 
   const loadData = useCallback(async (bId: string) => {
     setIsLoading(true);
@@ -387,6 +422,172 @@ export const StockInPurchasesPage: React.FC = () => {
     }
   };
 
+  const populateReturnLines = (pur: Purchase) => {
+    const lines: ReturnLineItem[] = (pur.lines || []).map((l: any) => {
+      const origQty = Number(l.quantity) || 0;
+      const returned = Number(l.returnedQuantity) || 0;
+      const availBatch = l.currentBatchRemainingQuantity !== undefined ? Number(l.currentBatchRemainingQuantity) : origQty;
+      const eligible = l.remainingEligibleQuantity !== undefined ? Number(l.remainingEligibleQuantity) : Math.max(0, origQty - returned);
+      const maxRet = Math.max(0, Math.min(eligible, availBatch));
+      const cost = Number(l.historicalCostSnapshot || l.landedUnitCost || l.unitPurchaseCost) || 0;
+      return {
+        itemId: l.itemId,
+        itemName: l.itemName,
+        itemSku: l.itemSku,
+        batchId: l.batchId,
+        batchNumber: l.batchNumber,
+        originalQuantity: origQty,
+        alreadyReturned: returned,
+        availableStock: availBatch,
+        maxReturnable: maxRet,
+        returnQuantity: maxRet > 0 ? maxRet : 0,
+        unitCost: cost,
+        lineTotal: maxRet > 0 ? Number((maxRet * cost).toFixed(2)) : 0,
+        selected: maxRet > 0,
+      };
+    });
+    setReturnLines(lines);
+  };
+
+  const handleOpenReturnModal = async (pur?: Purchase) => {
+    setErrorMessage(null);
+    setReturnReason('DEFECTIVE');
+    setReturnNotes('');
+    setReturnTreatment('REDUCE_PAYABLE');
+    setReturnPaymentAccountId(paymentAccounts[0]?.id || '');
+    setReturnDate(new Date().toISOString().split('T')[0]);
+
+    if (pur) {
+      setSelectedReturnPurchaseId(pur.id);
+      setSelectedReturnPurchase(pur);
+      try {
+        const full = await salonService.getPurchase(pur.id, user);
+        setSelectedReturnPurchase(full);
+        populateReturnLines(full);
+      } catch {
+        populateReturnLines(pur);
+      }
+    } else {
+      setSelectedReturnPurchaseId('');
+      setSelectedReturnPurchase(null);
+      setReturnLines([]);
+    }
+    setIsReturnModalOpen(true);
+  };
+
+  const handleSelectReturnPurchase = async (purId: string) => {
+    setSelectedReturnPurchaseId(purId);
+    const found = purchases.find((p) => p.id === purId);
+    if (!found) {
+      setSelectedReturnPurchase(null);
+      setReturnLines([]);
+      return;
+    }
+    try {
+      const full = await salonService.getPurchase(purId, user);
+      setSelectedReturnPurchase(full);
+      populateReturnLines(full);
+    } catch {
+      setSelectedReturnPurchase(found);
+      populateReturnLines(found);
+    }
+  };
+
+  const handleToggleReturnLine = (idx: number) => {
+    setReturnLines((prev) =>
+      prev.map((l, i) => {
+        if (i !== idx) return l;
+        const nextSel = !l.selected;
+        return {
+          ...l,
+          selected: nextSel,
+          lineTotal: nextSel ? Number((l.returnQuantity * l.unitCost).toFixed(2)) : 0,
+        };
+      })
+    );
+  };
+
+  const handleReturnQuantityChange = (idx: number, qtyVal: number) => {
+    setReturnLines((prev) =>
+      prev.map((l, i) => {
+        if (i !== idx) return l;
+        const validQty = Math.max(0, Math.min(l.maxReturnable, qtyVal));
+        return {
+          ...l,
+          returnQuantity: validQty,
+          lineTotal: Number((validQty * l.unitCost).toFixed(2)),
+        };
+      })
+    );
+  };
+
+  const calculatedReturnTotal = useMemo(() => {
+    return returnLines
+      .filter((l) => l.selected)
+      .reduce((sum, l) => sum + l.lineTotal, 0);
+  }, [returnLines]);
+
+  const handleConfirmReturn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedReturnPurchase) {
+      toast.error('Please select a purchase to return.');
+      return;
+    }
+    const selectedLines = returnLines.filter((l) => l.selected && l.returnQuantity > 0);
+    if (selectedLines.length === 0) {
+      toast.error('Please select at least one item with a return quantity greater than 0.');
+      return;
+    }
+    if (returnTreatment === 'ONLINE_REFUND' && !returnPaymentAccountId) {
+      toast.error('Please select an active payment account for online refund.');
+      return;
+    }
+
+    setIsSubmittingReturn(true);
+    try {
+      const input = {
+        branchId: selectedBranchId === 'ALL' ? selectedReturnPurchase.branchId : selectedBranchId,
+        supplierId: selectedReturnPurchase.supplierId,
+        purchaseId: selectedReturnPurchase.id,
+        returnDate,
+        reason: returnReason,
+        notes: returnNotes.trim() || undefined,
+        refundTreatment: returnTreatment,
+        paymentAccountId: returnTreatment === 'ONLINE_REFUND' ? returnPaymentAccountId : undefined,
+        lines: selectedLines.map((l) => ({
+          itemId: l.itemId,
+          batchId: l.batchId,
+          batchNumber: l.batchNumber,
+          quantity: Number(l.returnQuantity),
+          unitCost: Number(l.unitCost),
+        })),
+      };
+
+      const res = await salonService.createSupplierReturn(input as any, user);
+      toast.success(`Purchase return ${res.returnNumber} of PKR ${formatPKR(res.totalAmount)} successfully posted!`);
+      setIsReturnModalOpen(false);
+      loadData(selectedBranchId);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to post return to supplier.');
+    } finally {
+      setIsSubmittingReturn(false);
+    }
+  };
+
+  const handleOpenDetailsModal = async (pur: Purchase) => {
+    setIsLoadingDetails(true);
+    setViewingPurchase(pur);
+    setIsDetailsModalOpen(true);
+    try {
+      const full = await salonService.getPurchase(pur.id, user);
+      setViewingPurchase(full);
+    } catch {
+      // keep basic
+    } finally {
+      setIsLoadingDetails(false);
+    }
+  };
+
   // Filtered Purchases
   const filteredPurchases = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
@@ -510,14 +711,25 @@ export const StockInPurchasesPage: React.FC = () => {
             className="w-full text-xs pl-10 pr-4 py-2.5 rounded-2xl border border-white/90 bg-white/70 backdrop-blur-xl focus:bg-white focus:outline-hidden focus:ring-4 focus:ring-[#B82E69]/10 text-[#18191B] font-medium shadow-2xs transition-all placeholder:text-slate-400"
           />
         </div>
-        <button
-          type="button"
-          onClick={handleOpenStockIn}
-          className="w-full sm:w-auto h-10 px-4.5 text-xs font-bold text-white bg-gradient-to-r from-[#B82E69] to-[#9D2558] hover:from-[#A02359] hover:to-[#851C47] rounded-2xl shadow-[0_8px_20px_rgba(184,46,105,0.25)] hover:shadow-[0_10px_26px_rgba(184,46,105,0.35)] transition-all flex items-center justify-center gap-2 cursor-pointer shrink-0 whitespace-nowrap active:scale-[0.98]"
-        >
-          <ArrowDownRight className="w-4 h-4" />
-          <span>New Stock In</span>
-        </button>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={() => handleOpenReturnModal()}
+            className="w-full sm:w-auto h-10 px-4 text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200/80 rounded-2xl shadow-2xs transition-all flex items-center justify-center gap-2 cursor-pointer shrink-0 whitespace-nowrap active:scale-[0.98]"
+            title="Return goods to supplier"
+          >
+            <RotateCcw className="w-4 h-4 text-amber-700" />
+            <span>Return to Supplier</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenStockIn}
+            className="w-full sm:w-auto h-10 px-4.5 text-xs font-bold text-white bg-gradient-to-r from-[#B82E69] to-[#9D2558] hover:from-[#A02359] hover:to-[#851C47] rounded-2xl shadow-[0_8px_20px_rgba(184,46,105,0.25)] hover:shadow-[0_10px_26px_rgba(184,46,105,0.35)] transition-all flex items-center justify-center gap-2 cursor-pointer shrink-0 whitespace-nowrap active:scale-[0.98]"
+          >
+            <ArrowDownRight className="w-4 h-4" />
+            <span>New Stock In</span>
+          </button>
+        </div>
       </div>
 
       {/* Main Table: Luxury Frosted Container */}
@@ -570,6 +782,7 @@ export const StockInPurchasesPage: React.FC = () => {
                   <th className="py-3.5 px-4 text-right whitespace-nowrap font-bold">Total Bill (PKR)</th>
                   <th className="py-3.5 px-4 whitespace-nowrap">Payment Method</th>
                   <th className="py-3.5 px-4 text-center whitespace-nowrap">Status</th>
+                  <th className="py-3.5 px-4 text-center whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100/80">
@@ -579,7 +792,14 @@ export const StockInPurchasesPage: React.FC = () => {
                       {idx + 1}
                     </td>
                     <td className="py-3.5 px-4 whitespace-nowrap font-bold text-[#B82E69]">
-                      {p.invoiceNumber || p.supplierInvoiceNumber || `PO-${p.id.slice(0, 6)}`}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDetailsModal(p)}
+                        className="hover:underline text-left cursor-pointer font-bold"
+                        title="Click to view purchase details"
+                      >
+                        {p.invoiceNumber || p.supplierInvoiceNumber || `PO-${p.id.slice(0, 6)}`}
+                      </button>
                     </td>
                     <td className="py-3.5 px-4 whitespace-nowrap text-slate-600 font-medium">
                       {formatDate(p.purchaseDate)}
@@ -606,7 +826,12 @@ export const StockInPurchasesPage: React.FC = () => {
                       </span>
                     </td>
                     <td className="py-3.5 px-4 text-right font-extrabold text-[#18191B] whitespace-nowrap">
-                      PKR {formatPKR(p.totalCost ?? 0)}
+                      <div>PKR {formatPKR(p.totalCost ?? 0)}</div>
+                      {Boolean(p.totalReturnedAmount && p.totalReturnedAmount > 0) && (
+                        <div className="text-[10px] font-bold text-amber-700 mt-0.5">
+                          Ret: PKR {formatPKR(p.totalReturnedAmount!)}
+                        </div>
+                      )}
                     </td>
                     <td className="py-3.5 px-4 text-slate-600 whitespace-nowrap">
                       {p.paymentMethod === 'CREDIT' ? (
@@ -627,6 +852,27 @@ export const StockInPurchasesPage: React.FC = () => {
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/60 shadow-2xs">
                         {p.paymentStatus === 'PAID' ? 'Fully Paid' : p.paymentStatus === 'PARTIAL' ? 'Partially Paid' : p.paymentStatus === 'UNPAID' ? 'Unpaid' : 'Completed'}
                       </span>
+                    </td>
+                    <td className="py-3.5 px-4 text-center whitespace-nowrap">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDetailsModal(p)}
+                          className="p-1.5 rounded-xl bg-white/90 hover:bg-white text-slate-600 hover:text-slate-900 border border-white/80 shadow-2xs transition-all cursor-pointer"
+                          title="View Purchase Details"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenReturnModal(p)}
+                          className="text-[11px] font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200/80 shadow-2xs px-2.5 py-1 rounded-xl cursor-pointer transition-all flex items-center gap-1 shrink-0"
+                          title="Return to Supplier (Wapas Karna)"
+                        >
+                          <RotateCcw className="w-3 h-3 text-amber-700" />
+                          <span>Return</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1217,20 +1463,644 @@ export const StockInPurchasesPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsQuickProductModalOpen(false)}
-                  className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg"
+                  className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 text-xs font-semibold text-white bg-[#9D2558] hover:bg-[#851C47] rounded-lg shadow-xs"
+                  className="px-4 py-1.5 text-xs font-semibold text-white bg-[#9D2558] hover:bg-[#851C47] rounded-lg shadow-xs cursor-pointer"
                 >
                   Save Product
                 </button>
               </div>
-            
               </fieldset>
-</form>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL: RETURN TO SUPPLIER (WAPAS KARNA) --- */}
+      {isReturnModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200/80 shadow-2xs flex items-center justify-center text-amber-700">
+                  <RotateCcw className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">
+                    Return to Supplier (Purchase Return)
+                  </h2>
+                  <p className="text-[11px] text-slate-400 font-medium">
+                    Deduct stock from original purchase batch and adjust supplier payable / credit
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsReturnModalOpen(false)}
+                className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <form onSubmit={handleConfirmReturn} className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* Step 1: Purchase Order Selection */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                  1. Select Posted Purchase Order *
+                </label>
+                {selectedReturnPurchase ? (
+                  <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-200/70 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-extrabold text-sm text-amber-950">
+                          {selectedReturnPurchase.invoiceNumber || selectedReturnPurchase.supplierInvoiceNumber || selectedReturnPurchase.purchaseNumber}
+                        </span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-white border border-amber-200 text-amber-800 font-bold">
+                          {selectedReturnPurchase.paymentStatus}
+                        </span>
+                      </div>
+                      <div className="text-xs text-amber-900/80 mt-1">
+                        Supplier: <strong>{selectedReturnPurchase.supplierName}</strong> · Date: {formatDate(selectedReturnPurchase.purchaseDate)}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4 text-right text-xs">
+                      <div>
+                        <div className="text-slate-400 text-[10px] font-bold uppercase">Net Bill</div>
+                        <div className="font-extrabold text-slate-900">PKR {formatPKR(selectedReturnPurchase.netAmount || selectedReturnPurchase.totalCost || 0)}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400 text-[10px] font-bold uppercase">Paid</div>
+                        <div className="font-extrabold text-emerald-700">PKR {formatPKR(selectedReturnPurchase.paidAmount || 0)}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400 text-[10px] font-bold uppercase">Outstanding Due</div>
+                        <div className="font-extrabold text-rose-700">PKR {formatPKR(selectedReturnPurchase.balanceDue || 0)}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedReturnPurchase(null);
+                          setSelectedReturnPurchaseId('');
+                          setReturnLines([]);
+                        }}
+                        className="text-[11px] font-bold text-amber-800 underline hover:text-amber-950 ml-2 cursor-pointer"
+                      >
+                        Change
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <select
+                    value={selectedReturnPurchaseId}
+                    onChange={(e) => handleSelectReturnPurchase(e.target.value)}
+                    className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-medium"
+                    required
+                  >
+                    <option value="">-- Choose a posted purchase shipment to return items from --</option>
+                    {purchases.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.invoiceNumber || p.supplierInvoiceNumber || p.purchaseNumber} — {p.supplierName} ({formatDate(p.purchaseDate)}) — PKR {formatPKR(p.totalCost || p.netAmount || 0)} (Due: PKR {formatPKR(p.balanceDue || 0)})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Step 2: Select Items to Return */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    2. Purchased Products & Batches for Return *
+                  </label>
+                  {returnLines.length > 0 && (
+                    <span className="text-[11px] text-slate-500 font-medium">
+                      Select items and enter quantity to return
+                    </span>
+                  )}
+                </div>
+
+                {!selectedReturnPurchase ? (
+                  <div className="p-8 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
+                    Please select a purchase order above to inspect purchased products and available stock.
+                  </div>
+                ) : returnLines.length === 0 ? (
+                  <div className="p-8 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
+                    No items found on this purchase order.
+                  </div>
+                ) : (
+                  <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold text-[11px] uppercase tracking-wider">
+                          <th className="py-2.5 px-3 text-center w-10">Select</th>
+                          <th className="py-2.5 px-3">Product Name & SKU</th>
+                          <th className="py-2.5 px-3 whitespace-nowrap">Batch #</th>
+                          <th className="py-2.5 px-3 text-center whitespace-nowrap">Purchased</th>
+                          <th className="py-2.5 px-3 text-center whitespace-nowrap">Already Ret.</th>
+                          <th className="py-2.5 px-3 text-center whitespace-nowrap">Batch Stock</th>
+                          <th className="py-2.5 px-3 text-center whitespace-nowrap font-bold text-amber-800">Max Returnable</th>
+                          <th className="py-2.5 px-3 text-center whitespace-nowrap w-28">Return Qty</th>
+                          <th className="py-2.5 px-3 text-right whitespace-nowrap">Unit Cost</th>
+                          <th className="py-2.5 px-3 text-right whitespace-nowrap font-bold">Line Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {returnLines.map((line, idx) => {
+                          const isEligible = line.maxReturnable > 0;
+                          return (
+                            <tr
+                              key={line.batchId || idx}
+                              className={`transition-colors ${line.selected ? 'bg-amber-50/30' : 'hover:bg-slate-50/60'} ${!isEligible ? 'opacity-60 bg-slate-50/40' : ''}`}
+                            >
+                              <td className="py-2.5 px-3 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={line.selected}
+                                  disabled={!isEligible}
+                                  onChange={() => handleToggleReturnLine(idx)}
+                                  className="w-4 h-4 rounded-md text-amber-600 focus:ring-amber-500 border-slate-300 cursor-pointer disabled:cursor-not-allowed"
+                                />
+                              </td>
+                              <td className="py-2.5 px-3 font-medium text-slate-900">
+                                <div className="font-bold">{line.itemName}</div>
+                                <div className="text-[10px] text-slate-400 font-mono">{line.itemSku}</div>
+                              </td>
+                              <td className="py-2.5 px-3 font-mono text-slate-600 whitespace-nowrap">
+                                {line.batchNumber || '—'}
+                              </td>
+                              <td className="py-2.5 px-3 text-center text-slate-700 font-medium">
+                                {line.originalQuantity}
+                              </td>
+                              <td className="py-2.5 px-3 text-center text-slate-500 font-medium">
+                                {line.alreadyReturned > 0 ? (
+                                  <span className="text-amber-700 font-bold">{line.alreadyReturned}</span>
+                                ) : (
+                                  '0'
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-center text-slate-700 font-medium">
+                                {line.availableStock}
+                              </td>
+                              <td className="py-2.5 px-3 text-center whitespace-nowrap font-extrabold text-amber-800">
+                                {line.maxReturnable > 0 ? (
+                                  line.maxReturnable
+                                ) : (
+                                  <span className="text-[10px] text-slate-400 font-normal">Exhausted / Returned</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={line.maxReturnable}
+                                  step="any"
+                                  disabled={!line.selected || !isEligible}
+                                  value={line.selected ? line.returnQuantity : 0}
+                                  onChange={(e) => handleReturnQuantityChange(idx, Number(e.target.value))}
+                                  className="w-20 text-center text-xs font-bold px-2 py-1 border border-slate-300 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500 disabled:bg-slate-100"
+                                />
+                              </td>
+                              <td className="py-2.5 px-3 text-right text-slate-700 font-mono">
+                                PKR {formatPKR(line.unitCost)}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-bold text-amber-900 font-mono">
+                                PKR {formatPKR(line.lineTotal)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot className="bg-slate-50 font-bold border-t border-slate-200">
+                        <tr>
+                          <td colSpan={9} className="py-2.5 px-3 text-right text-slate-700">
+                            Calculated Total Return Value:
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-black text-amber-900 text-sm font-mono">
+                            PKR {formatPKR(calculatedReturnTotal)}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Step 3: Return Reason & Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    3. Return Reason *
+                  </label>
+                  <select
+                    value={returnReason}
+                    onChange={(e) => setReturnReason(e.target.value)}
+                    className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-medium"
+                    required
+                  >
+                    <option value="DEFECTIVE">Defective Goods / Manufacturing Defect</option>
+                    <option value="DAMAGED">Damaged in Transit / Broken Packaging</option>
+                    <option value="EXPIRED">Expired / Near Expiry Date</option>
+                    <option value="WRONG_ITEM">Wrong Item / Incorrect Specification</option>
+                    <option value="OTHER">Other Reason</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Return Date *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={returnDate}
+                    onChange={(e) => setReturnDate(e.target.value)}
+                    className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-medium"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Reason Description / Return Notes
+                </label>
+                <input
+                  type="text"
+                  value={returnNotes}
+                  onChange={(e) => setReturnNotes(e.target.value)}
+                  placeholder="e.g. Broken seals on 3 bottles; batch rejected upon quality check"
+                  className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-medium"
+                />
+              </div>
+
+              {/* Step 4: Financial Settlement Method */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                  4. Financial Settlement Method *
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <label
+                    className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between ${
+                      returnTreatment === 'REDUCE_PAYABLE'
+                        ? 'border-amber-500 bg-amber-50/70 shadow-2xs ring-2 ring-amber-500/20'
+                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <input
+                        type="radio"
+                        name="returnTreatment"
+                        checked={returnTreatment === 'REDUCE_PAYABLE'}
+                        onChange={() => setReturnTreatment('REDUCE_PAYABLE')}
+                        className="text-amber-600 focus:ring-amber-500 cursor-pointer"
+                      />
+                      <span className="font-bold text-xs text-slate-900">Supplier Khata (Credit)</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Deduct from purchase payable. Excess amount becomes supplier credit. No cash movement.
+                    </p>
+                  </label>
+
+                  <label
+                    className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between ${
+                      returnTreatment === 'CASH_REFUND'
+                        ? 'border-amber-500 bg-amber-50/70 shadow-2xs ring-2 ring-amber-500/20'
+                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <input
+                        type="radio"
+                        name="returnTreatment"
+                        checked={returnTreatment === 'CASH_REFUND'}
+                        onChange={() => setReturnTreatment('CASH_REFUND')}
+                        className="text-amber-600 focus:ring-amber-500 cursor-pointer"
+                      />
+                      <span className="font-bold text-xs text-slate-900">Cash Drawer Refund</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Supplier immediately refunds cash. Inflow is deposited into your active Cash Drawer.
+                    </p>
+                  </label>
+
+                  <label
+                    className={`p-3.5 rounded-2xl border cursor-pointer transition-all flex flex-col justify-between ${
+                      returnTreatment === 'ONLINE_REFUND'
+                        ? 'border-amber-500 bg-amber-50/70 shadow-2xs ring-2 ring-amber-500/20'
+                        : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <input
+                        type="radio"
+                        name="returnTreatment"
+                        checked={returnTreatment === 'ONLINE_REFUND'}
+                        onChange={() => setReturnTreatment('ONLINE_REFUND')}
+                        className="text-amber-600 focus:ring-amber-500 cursor-pointer"
+                      />
+                      <span className="font-bold text-xs text-slate-900">Bank / Online Refund</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Supplier transfers refund to bank account. Inflow recorded in selected account.
+                    </p>
+                  </label>
+                </div>
+
+                {returnTreatment === 'ONLINE_REFUND' && (
+                  <div className="mt-3">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Select Receiving Bank / Online Account *
+                    </label>
+                    <select
+                      value={returnPaymentAccountId}
+                      onChange={(e) => setReturnPaymentAccountId(e.target.value)}
+                      className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white focus:outline-hidden focus:ring-2 focus:ring-amber-500 font-medium"
+                      required
+                    >
+                      <option value="">Select an active payment account</option>
+                      {paymentAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name} ({a.bankName || 'Bank'}) — PKR {formatPKR(a.currentBalance || 0)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Step 5: Financial Impact Preview */}
+              {selectedReturnPurchase && calculatedReturnTotal > 0 && (
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs space-y-2">
+                  <div className="font-bold text-slate-900 text-sm flex items-center justify-between">
+                    <span>Financial Settlement Impact:</span>
+                    <span className="text-amber-800 font-mono">PKR {formatPKR(calculatedReturnTotal)}</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-200">
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">Purchase Bill</span>
+                      <span className="font-bold text-slate-800">PKR {formatPKR(selectedReturnPurchase.netAmount || selectedReturnPurchase.totalCost || 0)}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">Current Due</span>
+                      <span className="font-bold text-rose-700">PKR {formatPKR(selectedReturnPurchase.balanceDue || 0)}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">Payable Offset</span>
+                      <span className="font-bold text-emerald-700">
+                        -PKR {formatPKR(Math.min(calculatedReturnTotal, selectedReturnPurchase.balanceDue || 0))}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">Excess Khata Credit</span>
+                      <span className="font-bold text-amber-800">
+                        PKR {formatPKR(Math.max(0, calculatedReturnTotal - (selectedReturnPurchase.balanceDue || 0)))}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-slate-600 bg-white p-2.5 rounded-xl border border-slate-100 font-medium">
+                    {calculatedReturnTotal <= (selectedReturnPurchase.balanceDue || 0) ? (
+                      <span>
+                        • Outstanding balance on this purchase order will decrease from <strong>PKR {formatPKR(selectedReturnPurchase.balanceDue || 0)}</strong> to <strong>PKR {formatPKR((selectedReturnPurchase.balanceDue || 0) - calculatedReturnTotal)}</strong>.
+                      </span>
+                    ) : (
+                      <span>
+                        • Outstanding payable on this purchase (<strong>PKR {formatPKR(selectedReturnPurchase.balanceDue || 0)}</strong>) will be fully cleared to <strong>PKR 0.00</strong>. The excess <strong>PKR {formatPKR(calculatedReturnTotal - (selectedReturnPurchase.balanceDue || 0))}</strong> will become credit in {selectedReturnPurchase.supplierName}&apos;s Khata.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Modal Sticky Footer */}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsReturnModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingReturn || calculatedReturnTotal <= 0}
+                  className="px-5 py-2.5 text-xs font-bold text-white bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 rounded-xl shadow-[0_4px_14px_rgba(217,119,6,0.3)] flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isSubmittingReturn ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Posting Return...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Confirm & Post Return (PKR {formatPKR(calculatedReturnTotal)})</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL: PURCHASE ORDER DETAILS & RETURNS HISTORY --- */}
+      {isDetailsModalOpen && viewingPurchase && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-50 border border-rose-200/80 shadow-2xs flex items-center justify-center text-[#B82E69]">
+                  <Receipt className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-slate-900">
+                      Purchase Order: {viewingPurchase.invoiceNumber || viewingPurchase.supplierInvoiceNumber || viewingPurchase.purchaseNumber}
+                    </h2>
+                    <span className="text-[11px] px-2.5 py-0.5 rounded-full font-bold bg-slate-100 text-slate-800">
+                      {viewingPurchase.paymentStatus}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 font-medium">
+                    Received on {formatDate(viewingPurchase.purchaseDate)} · Supplier: {viewingPurchase.supplierName}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDetailsModalOpen(false)}
+                className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* Financial Summary Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Bill</div>
+                  <div className="text-base font-black text-slate-900 mt-0.5">
+                    PKR {formatPKR(viewingPurchase.netAmount || viewingPurchase.totalCost || 0)}
+                  </div>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-emerald-50/60 border border-emerald-100">
+                  <div className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Amount Paid</div>
+                  <div className="text-base font-black text-emerald-800 mt-0.5">
+                    PKR {formatPKR(viewingPurchase.paidAmount || 0)}
+                  </div>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-rose-50/60 border border-rose-100">
+                  <div className="text-[10px] font-bold text-rose-700 uppercase tracking-wider">Balance Due</div>
+                  <div className="text-base font-black text-rose-800 mt-0.5">
+                    PKR {formatPKR(viewingPurchase.balanceDue || 0)}
+                  </div>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-amber-50/60 border border-amber-100">
+                  <div className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">Total Returned</div>
+                  <div className="text-base font-black text-amber-800 mt-0.5">
+                    PKR {formatPKR(viewingPurchase.totalReturnedAmount || 0)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Items Received Table */}
+              <div>
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                  Items Received in this Shipment
+                </h3>
+                <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold text-[11px] uppercase tracking-wider">
+                        <th className="py-2.5 px-3">Product Name & SKU</th>
+                        <th className="py-2.5 px-3 whitespace-nowrap">Batch #</th>
+                        <th className="py-2.5 px-3 text-center whitespace-nowrap">Purchased Qty</th>
+                        <th className="py-2.5 px-3 text-center whitespace-nowrap">Returned Qty</th>
+                        <th className="py-2.5 px-3 text-right whitespace-nowrap">Unit Cost</th>
+                        <th className="py-2.5 px-3 text-right whitespace-nowrap font-bold">Line Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(viewingPurchase.lines || []).map((l: any, i: number) => (
+                        <tr key={l.id || i} className="hover:bg-slate-50/50">
+                          <td className="py-2.5 px-3 font-medium text-slate-900">
+                            <div className="font-bold">{l.itemName}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">{l.itemSku}</div>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-slate-600 whitespace-nowrap">
+                            {l.batchNumber || '—'}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-bold text-slate-800">
+                            {l.quantity}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-bold text-amber-700">
+                            {l.returnedQuantity || 0}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono text-slate-700">
+                            PKR {formatPKR(l.historicalCostSnapshot || l.landedUnitCost || l.unitPurchaseCost || 0)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-bold text-slate-900 font-mono">
+                            PKR {formatPKR(l.lineTotal || (l.quantity * (l.unitPurchaseCost || 0)))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Previous Returns History */}
+              {viewingPurchase.returns && viewingPurchase.returns.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold text-amber-800 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Purchase Returns Log ({viewingPurchase.returns.length} returns recorded)</span>
+                  </h3>
+                  <div className="border border-amber-200/80 rounded-2xl overflow-hidden shadow-2xs">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-amber-50/50 border-b border-amber-200/60 text-amber-900 font-bold text-[11px] uppercase tracking-wider">
+                          <th className="py-2 px-3 whitespace-nowrap">Return #</th>
+                          <th className="py-2 px-3 whitespace-nowrap">Date</th>
+                          <th className="py-2 px-3">Reason</th>
+                          <th className="py-2 px-3">Settlement</th>
+                          <th className="py-2 px-3 text-right whitespace-nowrap font-bold">Total Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-amber-100/60">
+                        {viewingPurchase.returns.map((ret: any) => (
+                          <tr key={ret.id} className="hover:bg-amber-50/20">
+                            <td className="py-2 px-3 font-mono font-bold text-amber-900">
+                              {ret.returnNumber}
+                            </td>
+                            <td className="py-2 px-3 text-slate-600 whitespace-nowrap">
+                              {formatDate(ret.returnDate)}
+                            </td>
+                            <td className="py-2 px-3 text-slate-700">
+                              {ret.reason} {ret.notes ? `(${ret.notes})` : ''}
+                            </td>
+                            <td className="py-2 px-3 text-slate-600">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-white border border-amber-200 text-amber-800">
+                                {ret.refundTreatment}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-right font-bold text-amber-900 font-mono">
+                              PKR {formatPKR(ret.totalAmount)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50">
+              <div className="flex items-center gap-2">
+                {viewingPurchase.supplierId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDetailsModalOpen(false);
+                      navigate(`/operations/supplier-ledger?supplierId=${viewingPurchase.supplierId}`);
+                    }}
+                    className="px-3.5 py-2 text-xs font-bold text-[#B82E69] bg-white border border-slate-200 hover:bg-slate-50 rounded-xl shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <BookOpen className="w-3.5 h-3.5" />
+                    <span>View Supplier Khata</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDetailsModalOpen(false);
+                    handleOpenReturnModal(viewingPurchase);
+                  }}
+                  className="px-3.5 py-2 text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200/80 rounded-xl shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-amber-700" />
+                  <span>Return to Supplier</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsDetailsModalOpen(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-200 hover:bg-slate-300 rounded-xl cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

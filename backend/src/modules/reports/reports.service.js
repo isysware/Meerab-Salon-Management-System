@@ -1014,19 +1014,56 @@ export const incomeExpenseReport = async (actor, query = {}) => {
   }
 
   // Settlement events affect custody and liabilities, never recognized income or expense.
-  // Note: Supplier payments are handled directly above from SupplierPayment model to avoid duplication.
-  const movementWhere = { ...branchFilter, createdAt: utcRange, sourceModule: { in: ['POS', 'BOOKING'] }, type: { in: ['BOOKING_ADVANCE', 'BOOKING_REFUND'] }, ...(actor.role === 'ACCOUNTANT' ? { userId: actor.id } : {}) };
+  // Note: Supplier payments are handled directly above from SupplierPayment model; supplier refunds are included here to reduce inventory cash outflow.
+  const movementWhere = { ...branchFilter, createdAt: utcRange, sourceModule: { in: ['POS', 'BOOKING', 'INVENTORY'] }, type: { in: ['BOOKING_ADVANCE', 'BOOKING_REFUND', 'SUPPLIER_REFUND'] }, ...(actor.role === 'ACCOUNTANT' ? { userId: actor.id } : {}) };
   const [cashSettlements, onlineSettlements] = await Promise.all([
     prisma.drawerMovement.findMany({ where: movementWhere }),
     prisma.accountMovement.findMany({ where: movementWhere }),
   ]);
   for (const [method, movements] of [['CASH', cashSettlements], ['ONLINE_ACCOUNT', onlineSettlements]]) {
-    for (const movement of movements) rawRows.push({
-      id: movement.id, date: toDateString(movement.createdAt), type: 'SETTLEMENT', category: movement.sourceModule === 'BOOKING' ? (movement.type === 'BOOKING_REFUND' ? 'Booking Advance Refunds' : 'Booking Advances / Deposits') : movement.sourceModule === 'POS' ? 'Client Collections' : 'Supplier Payments',
-      source: movement.sourceModule, reference: movement.reference, branchId: movement.branchId, branchName: branchMap.get(movement.branchId),
-      userOrPayee: movement.userName, description: movement.description, income: 0, expense: 0, paid: 0, discount: 0, remaining: 0,
-      cashFlow: n(toDec(movement.amount).times(movement.direction === 'IN' ? 1 : -1)), paymentMethod: method, paymentEventType: movement.type, status: 'POSTED',
-    });
+    for (const movement of movements) {
+      if (movement.type === 'SUPPLIER_REFUND') {
+        const amt = n(toDec(movement.amount));
+        rawRows.push({
+          id: `sr-${movement.id}`,
+          date: toDateString(movement.createdAt),
+          type: 'SUPPLIER_PAYMENT',
+          category: 'Supplier/Vendor Payment — Inventory Cash Outflow',
+          source: 'Supplier Refund',
+          reference: movement.reference,
+          invoiceNumber: movement.reference,
+          customerName: movement.description?.replace(/^Supplier refund (?:from\s+)?/, '').split(' · ')[0] || 'Supplier',
+          branchId: movement.branchId,
+          branchName: branchMap.get(movement.branchId) || 'Branch',
+          userOrPayee: movement.userName ? `Refund: ${movement.userName}` : 'Supplier Refund',
+          description: movement.description || `Supplier refund received (${movement.reference})`,
+          serviceAmount: 0,
+          tax: 0,
+          totalBill: -amt,
+          tipAmount: 0,
+          collectedService: 0,
+          collectedTax: 0,
+          totalReceived: amt,
+          remainingDues: 0,
+          income: 0,
+          expense: 0,
+          paid: 0,
+          cashFlow: amt,
+          collectionAmount: 0,
+          discount: 0,
+          remaining: 0,
+          paymentMethod: method === 'CASH' ? 'CASH' : 'ONLINE',
+          status: 'POSTED',
+        });
+      } else {
+        rawRows.push({
+          id: movement.id, date: toDateString(movement.createdAt), type: 'SETTLEMENT', category: movement.sourceModule === 'BOOKING' ? (movement.type === 'BOOKING_REFUND' ? 'Booking Advance Refunds' : 'Booking Advances / Deposits') : movement.sourceModule === 'POS' ? 'Client Collections' : 'Supplier Payments',
+          source: movement.sourceModule, reference: movement.reference, branchId: movement.branchId, branchName: branchMap.get(movement.branchId),
+          userOrPayee: movement.userName, description: movement.description, income: 0, expense: 0, paid: 0, discount: 0, remaining: 0,
+          cashFlow: n(toDec(movement.amount).times(movement.direction === 'IN' ? 1 : -1)), paymentMethod: method, paymentEventType: movement.type, status: 'POSTED',
+        });
+      }
+    }
   }
   const loanMovements = ['ADMIN', 'SUPER_ADMIN'].includes(actor.role)
     ? await loadStaffLoanMovements(branchFilter, ctx.fromDate, ctx.toDate) : [];
