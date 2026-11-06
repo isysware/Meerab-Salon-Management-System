@@ -410,6 +410,7 @@ export const resetTestData = async (input = {}, actor) => {
     await prisma.invoicePayment.deleteMany({ where: { branchId: targetBranchId } });
     await prisma.commissionEvent.deleteMany({ where: { branchId: targetBranchId } });
     await prisma.invoice.deleteMany({ where: { branchId: targetBranchId } });
+    await prisma.booking.updateMany({ where: { branchId: targetBranchId }, data: { status: 'CONFIRMED' } });
   } else {
     await prisma.refundLine.deleteMany({});
     await prisma.invoiceRefund.deleteMany({});
@@ -419,6 +420,7 @@ export const resetTestData = async (input = {}, actor) => {
     await prisma.invoicePayment.deleteMany({});
     await prisma.commissionEvent.deleteMany({});
     await prisma.invoice.deleteMany({});
+    await prisma.booking.updateMany({ data: { status: 'CONFIRMED' } });
   }
 
   // 2. Appointments

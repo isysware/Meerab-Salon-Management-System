@@ -499,28 +499,51 @@ export const BranchOperationalSections: React.FC<BranchOperationalSectionsProps>
                     )}
                   </div>
                 ) : (
-                  displayedBookings.slice(0, 5).map((b) => (
-                    <div
-                      key={b.id}
-                      onClick={onNavigateBookings}
-                      className="p-3.5 rounded-2xl border border-white/80 bg-white/80 backdrop-blur-xl hover:bg-white transition-all flex items-center justify-between gap-2 cursor-pointer shadow-[0_2px_10px_rgba(35,21,29,0.025)] hover:shadow-[0_4px_16px_rgba(184,46,105,0.08)]"
-                    >
-                      <div className="min-w-0">
-                        <h4 className="text-xs font-bold text-[#18191B] truncate">{b.clientName}</h4>
-                        <p className="text-[10px] text-[#78616C] truncate">
-                          {b.serviceTime || '01:00 PM'} • {b.assignedStaffName || 'Stylist'}
-                        </p>
+                  displayedBookings.slice(0, 5).map((b) => {
+                    const isCompleted = b.status === 'COMPLETED' && (!b.remainingBalance || b.remainingBalance <= 0);
+                    const isInService = b.status === 'IN_PROGRESS' || (Boolean(b.linkedInvoiceId) && Boolean(b.remainingBalance && b.remainingBalance > 0));
+                    const statusLabel = isCompleted
+                      ? 'COMPLETED'
+                      : isInService
+                      ? 'IN SERVICE'
+                      : b.status === 'CANCELLED'
+                      ? 'CANCELLED'
+                      : b.status === 'NO_SHOW'
+                      ? 'NO SHOW'
+                      : 'CONFIRMED';
+                    const statusColor = isCompleted
+                      ? 'text-emerald-600'
+                      : isInService
+                      ? 'text-amber-600'
+                      : b.status === 'CANCELLED'
+                      ? 'text-rose-600'
+                      : b.status === 'NO_SHOW'
+                      ? 'text-slate-600'
+                      : 'text-[#B82E69]';
+
+                    return (
+                      <div
+                        key={b.id}
+                        onClick={onNavigateBookings}
+                        className="p-3.5 rounded-2xl border border-white/80 bg-white/80 backdrop-blur-xl hover:bg-white transition-all flex items-center justify-between gap-2 cursor-pointer shadow-[0_2px_10px_rgba(35,21,29,0.025)] hover:shadow-[0_4px_16px_rgba(184,46,105,0.08)]"
+                      >
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-bold text-[#18191B] truncate">{b.clientName}</h4>
+                          <p className="text-[10px] text-[#78616C] truncate">
+                            {b.serviceTime || '01:00 PM'} • {b.assignedStaffName || 'Stylist'}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="text-xs font-mono font-bold text-slate-900 block">
+                            {formatCurrency(b.totalAmount || 0)}
+                          </span>
+                          <span className={`text-[9px] font-semibold uppercase ${statusColor}`}>
+                            {statusLabel}
+                          </span>
+                        </div>
                       </div>
-                      <div className="text-right shrink-0">
-                        <span className="text-xs font-mono font-bold text-slate-900 block">
-                          {formatCurrency(b.totalAmount || 0)}
-                        </span>
-                        <span className="text-[9px] font-semibold text-emerald-600 uppercase">
-                          {b.status || 'COMPLETED'}
-                        </span>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )
               ) : (
                 displayedAppointments.length === 0 ? (
@@ -545,8 +568,18 @@ export const BranchOperationalSections: React.FC<BranchOperationalSectionsProps>
                         <span className="text-xs font-mono font-bold text-slate-900 block">
                           {formatCurrency(apt.price || 0)}
                         </span>
-                        <span className="text-[9px] font-semibold text-emerald-600 uppercase">
-                          {apt.status || 'COMPLETED'}
+                        <span className={`text-[9px] font-semibold uppercase ${
+                          apt.status === 'COMPLETED'
+                            ? 'text-emerald-600'
+                            : apt.status === 'IN_PROGRESS'
+                            ? 'text-amber-600'
+                            : apt.status === 'CANCELLED'
+                            ? 'text-rose-600'
+                            : apt.status === 'NO_SHOW'
+                            ? 'text-slate-600'
+                            : 'text-[#B82E69]'
+                        }`}>
+                          {apt.status === 'IN_PROGRESS' ? 'IN SERVICE' : (apt.status || 'CONFIRMED')}
                         </span>
                       </div>
                     </div>

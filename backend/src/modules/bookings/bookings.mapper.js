@@ -15,6 +15,7 @@ export const toBookingDTO = b => {
   return { ...b, eventDate: ymd(b.eventDate),
     subtotal: toNum(b.invoice?.subtotal ?? b.subtotal), discount: toNum(b.invoice?.discount ?? b.discount), discountValue: toNum(b.discountValue), taxAmount: toNum(b.invoice?.tax ?? b.taxAmount), totalAmount: b.invoice ? round2(toDec(b.invoice.total).minus(b.invoice.tip)).toNumber() : toNum(b.totalAmount), cancellationCharge: toNum(b.cancellationCharge),
     advancePaid: advance.toNumber(), receivedAmount: received.toNumber(), remainingBalance: remaining.toNumber(),
+    status: (b.status === 'COMPLETED' && remaining.greaterThan(0)) ? (b.invoice ? 'IN_PROGRESS' : 'CONFIRMED') : b.status,
     paymentStatus: b.invoice ? ({ PAID: 'FULLY_PAID', PARTIAL: 'PARTIALLY_PAID', UNPAID: 'UNPAID' }[b.invoice.status]) : remaining.lessThanOrEqualTo(0) ? 'FULLY_PAID' : paid.greaterThan(0) ? 'PARTIALLY_PAID' : 'UNPAID',
     linkedInvoiceId: b.invoice?.id, linkedInvoiceNumber: b.invoice?.invoiceNumber,
     invoice: undefined,

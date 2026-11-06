@@ -626,7 +626,8 @@ export const postInvoice = async (input, actor, idempotencyKey, request) => {
     }
 
     if (booking) {
-      await tx.booking.update({ where: { id: booking.id }, data: { status: 'COMPLETED', revision: { increment: 1 }, updatedById: actor.id, updatedByName: actor.name } });
+      const isBookingDone = amountDue.isZero();
+      await tx.booking.update({ where: { id: booking.id }, data: { status: isBookingDone ? 'COMPLETED' : 'IN_PROGRESS', revision: { increment: 1 }, updatedById: actor.id, updatedByName: actor.name } });
       await bookingHistory(tx, booking, actor, 'BOOKING_CONVERTED_TO_POS', null, { invoiceId: invoice.id, invoiceNumber, advanceAdjusted: advanceAdjusted.toNumber(), amountDue: amountDue.toNumber() });
     }
     // ── Appointment becomes BILLED (no second visit is counted) ──
@@ -719,6 +720,12 @@ export const collectPayment = async (input, actor, request) => {
       where: { id: invoice.id },
       data: { amountPaid: round2(toDec(invoice.amountPaid).plus(collected)), amountDue: remaining, status: remaining.isZero() ? 'PAID' : 'PARTIAL' },
     });
+    if (remaining.isZero() && invoice.bookingId) {
+      await tx.booking.update({
+        where: { id: invoice.bookingId },
+        data: { status: 'COMPLETED' },
+      });
+    }
     await auditLog(tx, {
       userId: actor.id, userName: actor.name, action: 'DUES_COLLECTED', entity: 'Invoice', entityId: invoice.id, branchId: invoice.branchId,
       after: { invoiceNumber: invoice.invoiceNumber, collected: collected.toNumber(), remaining: remaining.toNumber() },
