@@ -21,9 +21,6 @@ import {
   Percent,
   Wallet,
   ShieldCheck,
-  Calendar,
-  ChevronDown,
-  ChevronUp,
 } from 'lucide-react';
 import {
   DATE_PRESETS,
@@ -71,7 +68,6 @@ export const COGSReportPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [reportData, setReportData] = useState<OperatingProfitReport | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [showAdvanceDrilldown, setShowAdvanceDrilldown] = useState<boolean>(false);
 
   const handlePresetChange = (p: DatePreset) => {
     setSelectedPreset(p);
@@ -563,7 +559,7 @@ export const COGSReportPage: React.FC = () => {
                       PKR {formatPKR(activeViewData.kpis.totalGrossCollections ?? activeViewData.totals.collections ?? 0)}
                     </span>
                     <span className="text-[11px] text-[#78616C] font-medium mt-1 block truncate">
-                      Net cash & bank received
+                      Net cash &amp; bank received
                     </span>
                   </div>
                 </div>
@@ -956,179 +952,6 @@ export const COGSReportPage: React.FC = () => {
               </table>
             )}
           </div>
-
-          {/* ── 5. CUSTOMER ADVANCES & DEPOSIT MOVEMENTS (NON-P&L) ── */}
-          {(activeViewData?.customerAdvances || reportData?.customerAdvances) && (() => {
-            const ca = activeViewData?.customerAdvances || reportData?.customerAdvances!;
-            return (
-              <div className="mt-8 rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] overflow-hidden">
-                <div className="p-5 border-b border-white/80 flex flex-wrap items-center justify-between gap-3 bg-white/50">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-teal-50 border border-teal-200/80 flex items-center justify-center text-teal-700 shadow-2xs">
-                      <Calendar className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-bold text-[#18191B] tracking-tight">
-                          Customer Advances / Deposit Movements
-                        </h3>
-                        <span className="bg-teal-50 text-teal-800 border border-teal-200 shadow-2xs text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
-                          Non-P&amp;L Liability
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-[#78616C] mt-0.5">
-                        Unearned client deposits held as liabilities — strictly memorandum and excluded from Revenue &amp; Profit
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-mono text-slate-500 bg-slate-100/80 px-2.5 py-1 rounded-lg border border-slate-200/60 hidden sm:inline-block">
-                      Closing = Opening + Received - Refunds - Applied
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setShowAdvanceDrilldown((prev) => !prev)}
-                      className="h-8 px-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
-                    >
-                      <span>{ca.movements?.length || 0} Movements</span>
-                      {showAdvanceDrilldown ? (
-                        <ChevronUp className="w-3.5 h-3.5 text-slate-500" />
-                      ) : (
-                        <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Summary Cards */}
-                <div className="p-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 border-b border-slate-100">
-                  <div className="p-3.5 rounded-2xl bg-white/60 border border-slate-200/60">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
-                      Opening Advance Liability
-                    </span>
-                    <span className="text-base sm:text-lg font-mono font-bold text-slate-800 block">
-                      PKR {formatPKR(ca.openingBalance)}
-                    </span>
-                    <span className="text-[10px] text-slate-400 mt-0.5 block truncate">
-                      Prior historical balance
-                    </span>
-                  </div>
-
-                  <div className="p-3.5 rounded-2xl bg-emerald-50/50 border border-emerald-200/60">
-                    <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block mb-1">
-                      Advances Received (Credit)
-                    </span>
-                    <span className="text-base sm:text-lg font-mono font-bold text-emerald-700 block">
-                      +PKR {formatPKR(ca.advancesReceived)}
-                    </span>
-                    <span className="text-[10px] text-emerald-600/80 mt-0.5 block truncate">
-                      Fresh booking deposits
-                    </span>
-                  </div>
-
-                  <div className="p-3.5 rounded-2xl bg-rose-50/50 border border-rose-200/60">
-                    <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider block mb-1">
-                      Advance Refunds (Debit)
-                    </span>
-                    <span className="text-base sm:text-lg font-mono font-bold text-rose-700 block">
-                      -PKR {formatPKR(ca.advanceRefunds)}
-                    </span>
-                    <span className="text-[10px] text-rose-600/80 mt-0.5 block truncate">
-                      Cancelled client deposits
-                    </span>
-                  </div>
-
-                  <div className="p-3.5 rounded-2xl bg-blue-50/50 border border-blue-200/60">
-                    <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider block mb-1">
-                      Advances Applied (Debit)
-                    </span>
-                    <span className="text-base sm:text-lg font-mono font-bold text-blue-700 block">
-                      -PKR {formatPKR(ca.advancesApplied)}
-                    </span>
-                    <span className="text-[10px] text-blue-600/80 mt-0.5 block truncate">
-                      Converted to final POS bills
-                    </span>
-                  </div>
-
-                  <div className="p-3.5 rounded-2xl bg-teal-50/70 border border-teal-300 col-span-2 sm:col-span-1">
-                    <span className="text-[10px] font-bold text-teal-800 uppercase tracking-wider block mb-1">
-                      Closing Advance Liability
-                    </span>
-                    <span className="text-base sm:text-lg font-mono font-bold text-teal-900 block">
-                      PKR {formatPKR(ca.closingBalance)}
-                    </span>
-                    <span className="text-[10px] text-teal-700/80 mt-0.5 block truncate">
-                      Outstanding client advance
-                    </span>
-                  </div>
-                </div>
-
-                {/* Collapsible Drilldown Table */}
-                {showAdvanceDrilldown && (
-                  <div className="p-5 bg-white/40">
-                    <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3">
-                      Debit / Credit Transaction Audit Trail
-                    </h4>
-                    <div className="overflow-x-auto w-full rounded-xl border border-slate-200/80">
-                      <table className="w-full text-left text-xs whitespace-nowrap border-collapse">
-                        <thead>
-                          <tr className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 text-[11px] uppercase">
-                            <th className="py-2.5 px-3">Date</th>
-                            <th className="py-2.5 px-3">Movement Type</th>
-                            <th className="py-2.5 px-3">Receipt / Ref</th>
-                            <th className="py-2.5 px-3">Booking #</th>
-                            <th className="py-2.5 px-3">Client</th>
-                            <th className="py-2.5 px-3">Method / Account</th>
-                            <th className="py-2.5 px-3">Processed By</th>
-                            <th className="py-2.5 px-3 text-right">Debit (-)</th>
-                            <th className="py-2.5 px-3 text-right">Credit (+)</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 bg-white">
-                          {!ca.movements?.length ? (
-                            <tr>
-                              <td colSpan={9} className="py-6 text-center text-slate-400">
-                                No customer advance movements recorded in this period.
-                              </td>
-                            </tr>
-                          ) : (
-                            ca.movements.map((m) => (
-                              <tr key={m.id} className="hover:bg-slate-50/70 transition-colors">
-                                <td className="py-2 px-3 text-slate-700 font-medium">{m.date}</td>
-                                <td className="py-2 px-3">
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                                    m.type === 'ADVANCE_RECEIVED'
-                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                      : m.type === 'ADVANCE_REFUND'
-                                      ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                      : 'bg-blue-50 text-blue-700 border-blue-200'
-                                  }`}>
-                                    {m.typeLabel}
-                                  </span>
-                                </td>
-                                <td className="py-2 px-3 font-mono font-bold text-slate-800">{m.receiptNumber}</td>
-                                <td className="py-2 px-3 text-slate-600">{m.bookingNumber}</td>
-                                <td className="py-2 px-3 font-semibold text-slate-900">{m.clientName}</td>
-                                <td className="py-2 px-3 text-slate-600">{m.paymentAccountName || m.paymentMethod}</td>
-                                <td className="py-2 px-3 text-slate-600">{m.processedByName}</td>
-                                <td className="py-2 px-3 text-right font-mono font-bold text-rose-600">
-                                  {m.direction === 'DEBIT' ? `PKR ${formatPKR(m.amount)}` : '—'}
-                                </td>
-                                <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">
-                                  {m.direction === 'CREDIT' ? `PKR ${formatPKR(m.amount)}` : '—'}
-                                </td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
         </div>
       )}
 

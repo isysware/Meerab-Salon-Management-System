@@ -1562,7 +1562,8 @@ export const computePeriodMetrics = async (branchId, fromStr, toStr, fromDate, t
 
     // Collection line allocation
     const posPayments = (inv.payments || []).filter((p) => p.kind === 'POS');
-    const posBillCollected = round2(posPayments.reduce((sum, p) => sum.plus(toDec(p.billAmountAllocated)), toDec(inv.advanceAdjusted || 0)));
+    const posNewBillPaid = round2(posPayments.reduce((sum, p) => sum.plus(toDec(p.billAmountAllocated)), toDec(0)));
+    const posBillCollected = round2(posNewBillPaid.plus(toDec(inv.advanceAdjusted || 0)));
     const alloc = allocatePaymentToInvoice({ invoice: inv, paymentAmount: posBillCollected, previousBillPaid: 0 });
 
     for (const la of alloc.lineAllocations) {

@@ -410,7 +410,10 @@ export const resetTestData = async (input = {}, actor) => {
     await prisma.invoicePayment.deleteMany({ where: { branchId: targetBranchId } });
     await prisma.commissionEvent.deleteMany({ where: { branchId: targetBranchId } });
     await prisma.invoice.deleteMany({ where: { branchId: targetBranchId } });
-    await prisma.booking.updateMany({ where: { branchId: targetBranchId }, data: { status: 'CONFIRMED' } });
+    await prisma.bookingPayment.deleteMany({ where: { branchId: targetBranchId } });
+    await prisma.bookingHistory.deleteMany({ where: { booking: { branchId: targetBranchId } } });
+    await prisma.bookingItem.deleteMany({ where: { booking: { branchId: targetBranchId } } });
+    await prisma.booking.deleteMany({ where: { branchId: targetBranchId } });
   } else {
     await prisma.refundLine.deleteMany({});
     await prisma.invoiceRefund.deleteMany({});
@@ -420,7 +423,10 @@ export const resetTestData = async (input = {}, actor) => {
     await prisma.invoicePayment.deleteMany({});
     await prisma.commissionEvent.deleteMany({});
     await prisma.invoice.deleteMany({});
-    await prisma.booking.updateMany({ data: { status: 'CONFIRMED' } });
+    await prisma.bookingPayment.deleteMany({});
+    await prisma.bookingHistory.deleteMany({});
+    await prisma.bookingItem.deleteMany({});
+    await prisma.booking.deleteMany({});
   }
 
   // 2. Appointments

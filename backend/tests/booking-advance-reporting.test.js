@@ -749,5 +749,135 @@ describe('Booking Advance & POS Payment Integration Tests', () => {
       // Verify Non-P&L invariant: Total Net Sales remains 10,000 (from invoice), not inflated by 5,000 advance
       expect(report.totals.revenue).toBe(10000);
     });
+
+    it('Scenario: PKR 5,000 advance before POS is completely excluded from Operating Profit (Accrual & Collection revenue/profit remain 0)', async () => {
+      const advancePayment = {
+        id: 'bp-adv-only',
+        receiptNumber: 'BPR-5000',
+        bookingId: 'bkg-5000',
+        branchId: 'branch-1',
+        isRefund: false,
+        amount: D(5000),
+        date: new Date('2026-11-02T00:00:00.000Z'),
+        method: 'CASH',
+        paymentAccountId: null,
+        paymentAccountName: 'Cash Drawer',
+        processedByName: 'Staff Reception',
+        createdAt: new Date('2026-11-02T10:00:00.000Z'),
+        booking: { id: 'bkg-5000', bookingNumber: 'BKG-5000', clientName: 'Hira Ali', clientPhone: '03001112233' },
+      };
+
+      mockPrisma.bookingPayment.findMany.mockResolvedValue([advancePayment]);
+      mockPrisma.invoice.findMany.mockResolvedValue([]); // No POS invoice yet
+
+      const actor = { id: 'user-admin', name: 'Admin User', role: 'ADMIN', branchId: 'branch-1' };
+      const report = await operatingProfitReport(actor, {
+        from: '2026-11-01',
+        to: '2026-11-05',
+        branchId: 'branch-1',
+        viewMode: 'COLLECTION',
+      });
+
+      // Accrual invariant: Unearned advance does not increase Accrual Revenue or Profit
+      expect(report.accrual.totals.revenue).toBe(0);
+      expect(report.accrual.totals.netProfit).toBe(0);
+
+      // Collection view: Unearned advance does not increase Collection Revenue or Surplus
+      const colView = report.collection;
+      expect(colView.totals.revenue).toBe(0);
+      expect(colView.totals.netProfit).toBe(0);
+      expect(colView.totals.totalCollections).toBe(0);
+
+      // Statement rows: No advance line in P&L
+      const advLine = colView.statementRows.find(r => r.id === 'col-adv-coll');
+      expect(advLine).toBeUndefined();
+    });
+
+    it('Scenario: PKR 5,000 advance + PKR 5,000 POS checkout against PKR 10,000 invoice (Revenue recognized once, zero double-counting)', async () => {
+      const advancePayment = {
+        id: 'bp-adv-pos',
+        receiptNumber: 'BPR-5001',
+        bookingId: 'bkg-5001',
+        branchId: 'branch-1',
+        isRefund: false,
+        amount: D(5000),
+        date: new Date('2026-11-02T00:00:00.000Z'),
+        method: 'CASH',
+        paymentAccountId: null,
+        paymentAccountName: 'Cash Drawer',
+        processedByName: 'Staff Reception',
+        createdAt: new Date('2026-11-02T10:00:00.000Z'),
+        booking: { id: 'bkg-5001', bookingNumber: 'BKG-5001', clientName: 'Hira Ali' },
+      };
+
+      const finalInvoice = {
+        id: 'inv-5001',
+        invoiceNumber: 'INV-5001',
+        branchId: 'branch-1',
+        date: new Date('2026-11-02T00:00:00.000Z'),
+        subtotal: D(10000),
+        discount: D(0),
+        netSales: D(10000),
+        tax: D(0),
+        total: D(10000),
+        amountPaid: D(10000),
+        amountDue: D(0),
+        advanceAdjusted: D(5000), // Previous advance applied
+        processedByName: 'Staff Reception',
+        clientName: 'Hira Ali',
+        createdAt: new Date('2026-11-02T14:00:00.000Z'),
+        lines: [
+          {
+            id: 'line-5001',
+            type: 'SERVICE',
+            unitPrice: D(10000),
+            quantity: 1,
+            discountAllocated: D(0),
+            netSales: D(10000),
+            tax: D(0),
+            staffId: 'staff-1',
+            staffName: 'Zara',
+            staffCommissionRate: D(0),
+            components: [],
+          },
+        ],
+        payments: [
+          {
+            id: 'pay-pos-5000',
+            kind: 'POS',
+            billAmountAllocated: D(5000), // Actual new POS cash payment
+            createdAt: new Date('2026-11-02T14:00:00.000Z'),
+          },
+        ],
+      };
+
+      mockPrisma.bookingPayment.findMany.mockResolvedValue([advancePayment]);
+      mockPrisma.invoice.findMany.mockResolvedValue([finalInvoice]);
+
+      const actor = { id: 'user-admin', name: 'Admin User', role: 'ADMIN', branchId: 'branch-1' };
+      const report = await operatingProfitReport(actor, {
+        from: '2026-11-01',
+        to: '2026-11-05',
+        branchId: 'branch-1',
+        viewMode: 'COLLECTION',
+      });
+
+      // Accrual invariant: Earned revenue recognized ONCE as 10,000 (not 15,000)
+      expect(report.accrual.totals.revenue).toBe(10000);
+
+      // Collection view: Earned service turnover = 10,000 (earned upon finalized checkout)
+      const colView = report.collection;
+      expect(colView.totals.revenue).toBe(10000);
+      expect(colView.totals.totalCollections).toBe(10000);
+
+      // In Detailed Income: discrete BPR + POS receipt items appear without double-counting
+      const detailed = await detailedIncomeReport(actor, {
+        from: '2026-11-01',
+        to: '2026-11-05',
+        branchId: 'branch-1',
+      });
+      // Gross Customer Collections in Detailed Income = 10,000 (BPR 5,000 + POS 5,000, zero double counting)
+      expect(detailed.kpis.bookingAdvanceCollections).toBe(5000);
+    });
   });
 });

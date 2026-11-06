@@ -464,61 +464,6 @@ export const DetailedIncomeReportPage: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* ── ROW 3 PURE WHITE FROSTED BLUR KPI CARDS ── */}
-          {reportData?.kpis && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3.5">
-              <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Total Lines</span>
-                <span className="text-xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">{reportData.kpis.totalTransactions}</span>
-                <div className="text-[10px] text-slate-400 mt-1">Collection line events</div>
-              </div>
-
-              <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Collected Net Revenue (Excl. Tax)</span>
-                <span className="text-xl font-extrabold text-[#18191B] font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.recognizedNetRevenue)}</span>
-                <div className="text-[10px] text-slate-400 mt-1">After discounts; excluding tax and tips</div>
-              </div>
-
-              <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
-                <span className="text-[10px] font-bold text-[#B82E69] uppercase tracking-wider block mb-1">Gross Customer Collection</span>
-                <span className="text-xl font-extrabold text-[#B82E69] font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.totalPaid)}</span>
-                <div className="text-[10px] text-emerald-600 mt-1">Actual receipts including collected tax and tips</div>
-              </div>
-
-              {typeof reportData.kpis.bookingAdvanceCollections === 'number' && (
-                <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
-                  <span className="text-[10px] font-bold text-teal-700 uppercase tracking-wider block mb-1">Advance Deposits</span>
-                  <span className="text-xl font-extrabold text-teal-700 font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.bookingAdvanceCollections)}</span>
-                  <div className="text-[10px] text-slate-400 mt-1">Held client deposit liability</div>
-                </div>
-              )}
-
-              <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
-                <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block mb-1">Services Net</span>
-                <span className="text-xl font-extrabold text-emerald-700 font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.serviceRevenue)}</span>
-                <div className="text-[10px] text-slate-400 mt-1">{reportData.kpis.serviceCount} service units</div>
-              </div>
-
-              <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
-                <span className="text-[10px] font-bold text-purple-700 uppercase tracking-wider block mb-1">Products Net</span>
-                <span className="text-xl font-extrabold text-purple-700 font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.productRevenue)}</span>
-                <div className="text-[10px] text-slate-400 mt-1">{reportData.kpis.productCount} retail units</div>
-              </div>
-
-              <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
-                <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block mb-1">Packages Net</span>
-                <span className="text-xl font-extrabold text-amber-700 font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.packageRevenue)}</span>
-                <div className="text-[10px] text-slate-400 mt-1">{reportData.kpis.packageCount} package sales</div>
-              </div>
-
-              <div className="p-4 rounded-[20px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] hover:border-white hover:shadow-md transition-all">
-                <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block mb-1">Tax Collected Net</span>
-                <span className="text-xl font-extrabold text-slate-800 font-mono tabular-nums tracking-tight block">PKR {formatPKR(reportData.kpis.netTaxLiability)}</span>
-                <div className="text-[10px] text-slate-400 mt-1">Excluded tax liability</div>
-              </div>
-            </div>
-          )}
-
           {/* ── FROSTED TABLE CONTAINER ── */}
           <div className="rounded-[24px] border border-white/90 bg-white/75 backdrop-blur-2xl shadow-[0_10px_35px_rgba(35,21,29,0.035),inset_0_1.5px_2px_rgba(255,255,255,1)] overflow-hidden">
             <div className="p-5 border-b border-white/80 flex flex-wrap items-center justify-between gap-3 bg-white/50">
