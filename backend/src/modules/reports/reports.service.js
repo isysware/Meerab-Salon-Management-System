@@ -321,7 +321,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
             components: true,
           },
         },
-        payments: { where: { reversedAt: null }, select: { id: true, kind: true, billAmountAllocated: true } },
+        payments: { where: { reversedAt: null }, select: { id: true, kind: true, billAmountAllocated: true, receiptNumber: true, paymentAccountName: true, method: true } },
       },
     }),
     // Dues collections received during this reporting period
@@ -559,15 +559,19 @@ export const incomeExpenseReport = async (actor, query = {}) => {
     const net = toDec(inv.netSales);
     const due = toDec(inv.amountDue || 0);
     const posPayments = (inv.payments || []).filter((p) => p.kind === 'POS');
-    const posBillCollected = round2(posPayments.reduce((sum, p) => sum.plus(toDec(p.billAmountAllocated)), toDec(inv.advanceAdjusted || 0)));
-    const allocation = allocatePaymentToInvoice({ invoice: inv, paymentAmount: posBillCollected, previousBillPaid: 0 });
+    const advanceAdjustedDec = toDec(inv.advanceAdjusted || 0);
+    const posBillSettled = round2(posPayments.reduce((sum, p) => sum.plus(toDec(p.billAmountAllocated)), advanceAdjustedDec));
+    const allocation = allocatePaymentToInvoice({ invoice: inv, paymentAmount: posBillSettled, previousBillPaid: 0 });
     const collectedNet = allocation.totalCollectedNet;
     const collectedTax = allocation.totalCollectedTax;
     const tipAmount = posPayments.reduce((sum, p) => sum.plus(tipsByPayment.get(p.id) || 0), toDec(0));
-    const grossReceipt = posBillCollected.plus(tipAmount);
+
+    // Canonical POS Cash Collection: Only new payment received at checkout, excluding previously adjusted advance
+    const posNewBillPaid = round2(posPayments.reduce((sum, p) => sum.plus(toDec(p.billAmountAllocated)), toDec(0)));
+    const posNewReceipt = posNewBillPaid.plus(tipAmount);
 
     const totalBill = round2(net.plus(inv.tax || 0));
-    const balanceAfterInitial = round2(max0(totalBill.minus(posBillCollected)));
+    const balanceAfterInitial = round2(max0(totalBill.minus(posBillSettled)));
     const firstPosPayment = posPayments[0];
 
     rawRows.push({
@@ -575,7 +579,7 @@ export const incomeExpenseReport = async (actor, query = {}) => {
       invoiceId: inv.id,
       recordType: 'ORIGINAL_INVOICE',
       recordTypeLabel: 'Original Invoice',
-      paymentSequence: posBillCollected.gt(0) ? 1 : 0,
+      paymentSequence: posBillSettled.gt(0) ? 1 : 0,
       receiptNumber: firstPosPayment?.receiptNumber || null,
       paymentAccountName: firstPosPayment?.paymentAccountName || null,
       balanceAfterPayment: n(balanceAfterInitial),
@@ -598,16 +602,17 @@ export const incomeExpenseReport = async (actor, query = {}) => {
       tipAmount: n(tipAmount),
       collectedService: n(collectedNet),
       collectedTax: n(collectedTax),
-      totalReceived: n(grossReceipt),
+      advanceAdjusted: n(advanceAdjustedDec),
+      totalReceived: n(posNewReceipt),
       remainingDues: n(due),
       income: n(collectedNet),
       recognizedIncome: n(net),
       expense: 0,
-      paid: n(grossReceipt),
-      collectionAmount: n(grossReceipt),
+      paid: n(posNewReceipt),
+      collectionAmount: n(posNewReceipt),
       discount: n(toDec(inv.discount || 0)),
       remaining: n(due),
-      paymentMethod: inv.paymentMethod || 'CASH',
+      paymentMethod: firstPosPayment?.method || inv.paymentMethod || 'CASH',
       status: inv.status,
     });
   }

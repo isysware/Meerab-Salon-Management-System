@@ -223,6 +223,66 @@ export const StaffDashboard: React.FC = () => {
         </div>
       </div>
 
+      {/* ── 7 DAYS UPCOMING BOOKINGS & APPOINTMENTS ALERTS ───────────────── */}
+      {data.pendingActions && data.pendingActions.length > 0 && (
+        <div className="rounded-[24px] border border-[#F8D2DC]/80 bg-gradient-to-r from-rose-50/70 via-white/80 to-[#FDF2F5]/90 backdrop-blur-2xl p-5 shadow-2xs space-y-3">
+          <div className="flex items-center justify-between pb-2 border-b border-rose-100/60">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#B82E69] to-[#9D2558] text-white flex items-center justify-center shadow-2xs">
+                <Calendar className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-[#18191B] tracking-tight">
+                  Upcoming Bookings & Appointments (Next 7 Days)
+                </h3>
+                <p className="text-[11px] text-[#78616C]">
+                  Scheduled events and appointments for your salon preparation
+                </p>
+              </div>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-[#B82E69] text-white shadow-2xs">
+              {data.pendingActions.length} Upcoming
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {data.pendingActions.map((alert: any) => (
+              <div
+                key={alert.id}
+                onClick={() => navigate(alert.href)}
+                className="p-3.5 rounded-2xl bg-white/90 border border-rose-100/80 shadow-2xs hover:shadow-xs hover:border-[#B82E69]/40 transition-all cursor-pointer flex flex-col justify-between gap-2 group"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#B82E69] block">
+                      {alert.bookingNumber || alert.type}
+                    </span>
+                    <span className="text-xs font-bold text-[#18191B] truncate block mt-0.5">
+                      {alert.title}
+                    </span>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[9px] font-bold shrink-0 ${
+                      alert.urgency === 'high'
+                        ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                        : 'bg-amber-100 text-amber-800 border border-amber-200'
+                    }`}
+                  >
+                    {alert.daysRemaining === 0 ? 'Today' : alert.daysRemaining === 1 ? 'Tomorrow' : `in ${alert.daysRemaining}d`}
+                  </span>
+                </div>
+                <p className="text-[11px] text-[#78616C] line-clamp-2 leading-relaxed">
+                  {alert.description}
+                </p>
+                <div className="flex items-center justify-end text-[11px] font-bold text-[#B82E69] group-hover:underline pt-1">
+                  <span>View Details →</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── ROW 2: COMPENSATION BREAKDOWN & SHIFT ATTENDANCE ───────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Personal Monthly Earnings Breakdown Card */}

@@ -413,7 +413,11 @@ export const staffDashboard = async (actor) => {
   const month = { gte: dateOnly(start), lte: dateOnly(end) };
   const sid = staff.id;
 
-  const [events, tips, overtime, today, week, lines] = await Promise.all([
+  // 7 Days Booking and Appointment Alerts for Staff branch
+  const todayDateOnly = dateOnly(date);
+  const sevenDaysAheadDate = dateOnly(addDays(date, 7));
+
+  const [events, tips, overtime, today, week, lines, upcomingBookings, upcomingAppointments] = await Promise.all([
     loadCollectionEvents({ branchId: staff.branchId }, start, date),
     prisma.tipAllocation.aggregate({ where: { staffId: sid, status: { not: 'CANCELLED' }, allocationDate: month }, _sum: { amount: true } }),
     prisma.overtimeRecord.findMany({ where: { staffId: sid, workDate: month, status: 'APPROVED' } }),
@@ -424,7 +428,69 @@ export const staffDashboard = async (actor) => {
       include: { invoice: { select: { date: true, clientName: true } } },
       orderBy: { invoice: { date: 'desc' } }, take: 200,
     }),
+    prisma.booking.findMany({
+      where: {
+        branchId: staff.branchId,
+        status: { notIn: ['CANCELLED', 'COMPLETED'] },
+        eventDate: {
+          gte: todayDateOnly,
+          lte: sevenDaysAheadDate,
+        },
+      },
+      orderBy: [{ eventDate: 'asc' }, { serviceTime: 'asc' }],
+      take: 15,
+    }),
+    prisma.appointment.findMany({
+      where: {
+        branchId: staff.branchId,
+        status: { in: ['CONFIRMED', 'PENDING'] },
+        date: {
+          gte: todayDateOnly,
+          lte: sevenDaysAheadDate,
+        },
+      },
+      orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+      take: 15,
+    }),
   ]);
+
+  const bookingAlerts = upcomingBookings.map((b) => {
+    const diffMs = new Date(b.eventDate).getTime() - todayDateOnly.getTime();
+    const diffDays = Math.max(0, Math.round(diffMs / 86400000));
+    const dayLabel = diffDays === 0 ? 'Today' : diffDays === 1 ? 'Tomorrow' : `in ${diffDays} days`;
+    const eventDateStr = new Date(b.eventDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    return {
+      id: `booking-${b.id}`,
+      type: 'BOOKING_REMINDER',
+      title: `Upcoming Booking (${dayLabel})`,
+      description: `${b.clientName} · ${b.bookingNumber} (${b.type}) scheduled on ${eventDateStr} at ${b.serviceTime}. Total: ${pkr(b.totalAmount)}.`,
+      urgency: diffDays <= 2 ? 'high' : 'medium',
+      href: `/operations/bookings?search=${encodeURIComponent(b.bookingNumber)}`,
+      daysRemaining: diffDays,
+      isBookingAlert: true,
+      bookingNumber: b.bookingNumber,
+    };
+  });
+
+  const appointmentAlerts = upcomingAppointments.map((a) => {
+    const diffMs = new Date(a.date).getTime() - todayDateOnly.getTime();
+    const diffDays = Math.max(0, Math.round(diffMs / 86400000));
+    const dayLabel = diffDays === 0 ? 'Today' : diffDays === 1 ? 'Tomorrow' : `in ${diffDays} days`;
+    const appDateStr = new Date(a.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    return {
+      id: `appointment-${a.id}`,
+      type: 'BOOKING_REMINDER',
+      title: `Upcoming Appointment (${dayLabel})`,
+      description: `${a.clientName} · ${a.appointmentNumber} scheduled on ${appDateStr} at ${a.startTime}. Price: ${pkr(a.price)}.`,
+      urgency: diffDays <= 2 ? 'high' : 'medium',
+      href: `/operations/appointments?date=${new Date(a.date).toISOString().slice(0, 10)}`,
+      daysRemaining: diffDays,
+      isBookingAlert: true,
+      bookingNumber: a.appointmentNumber,
+    };
+  });
+
+  const pendingActions = [...bookingAlerts, ...appointmentAlerts];
 
   const earnEvents = events.flatMap(e => e.commissions).filter(c => c.staffId === sid);
   const collectedSales = events.flatMap(e => e.line.type === 'PRODUCT' ? [] : e.staffAllocations).filter(c => c.staffId === sid).reduce((sum, c) => sum.plus(c.net), toDec(0));
@@ -444,6 +510,7 @@ export const staffDashboard = async (actor) => {
     monthlyServiceSalesTotal: n(collectedSales),
     earnedCommissionTotal: n(earned),
     personalTipsTotal: n(tipsTotal),
+    pendingActions,
     attendanceSummary: {
       todayCheckIn: today?.checkIn ?? 'Not recorded',
       scheduledHoursWeek: n(week.reduce((s, a) => s.plus(a.scheduledHours), toDec(0))),

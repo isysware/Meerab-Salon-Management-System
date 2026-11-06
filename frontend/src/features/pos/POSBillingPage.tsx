@@ -3413,24 +3413,31 @@ export const POSBillingPage: React.FC = () => {
               return (
                 <div className="space-y-3">
                   {/* Customer Details when there are Remaining Dues */}
-                  {currentDue > 0 && selectedClient && (
-                    <div className="p-2.5 bg-emerald-50/70 border border-emerald-200/90 rounded-2xl flex items-center justify-between text-xs shadow-2xs">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  {currentDue > 0 && (selectedClient || isNamedClientValid) && (
+                    <div className="p-3 bg-slate-50/90 border border-slate-200/90 rounded-2xl flex items-center justify-between text-xs shadow-2xs">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center shrink-0">
+                          <CheckCircle2 className="w-4 h-4" />
+                        </div>
                         <div className="min-w-0">
-                          <span className="font-bold text-[#23151D] truncate block text-xs">
-                            Client: <span className="text-[#B82E69]">{selectedClient.name}</span> ({selectedClient.phone})
-                          </span>
-                          <span className="text-[10px] text-slate-500 block">
-                            Customer account linked • Due will be tracked in ledger
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-[#18191B] truncate text-xs">
+                              {selectedClient?.name || cleanClientName}
+                            </span>
+                            <span className="text-[10px] text-emerald-700 bg-emerald-100/70 px-1.5 py-0.2 rounded font-bold">
+                              Khata Linked
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-[#78616C] font-mono block">
+                            {selectedClient?.phone || clientPhone}
                           </span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="flex items-center gap-2 shrink-0">
                         <button
                           type="button"
                           onClick={() => setIsClientPickerOpen(true)}
-                          className="text-[10px] font-bold text-[#B82E69] bg-white border border-rose-200/80 px-2 py-0.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                          className="text-[11px] font-bold text-[#B82E69] hover:underline cursor-pointer px-1 py-0.5"
                         >
                           Change
                         </button>
@@ -3441,97 +3448,70 @@ export const POSBillingPage: React.FC = () => {
                     </div>
                   )}
 
-                  {currentDue > 0 && !selectedClient && (
-                    <div className="p-3 bg-[#FAF8F9] border border-rose-100/90 rounded-2xl space-y-2.5 text-xs shadow-2xs">
+                  {currentDue > 0 && !selectedClient && !isNamedClientValid && (
+                    <div className="p-3 bg-[#FAF8F9] border border-amber-200/80 rounded-2xl space-y-2 text-xs shadow-2xs">
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 font-bold text-[#23151D] text-xs">
+                        <div className="flex items-center gap-1.5 font-bold text-[#18191B] text-xs">
                           <User className="w-3.5 h-3.5 text-[#B82E69] shrink-0" />
-                          <span>Customer Details (Required for Khata / Dues)</span>
+                          <span>Customer for Khata Dues</span>
                         </div>
-                        <span className="text-[11px] font-mono font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-lg border border-amber-200/80">
-                          Due: {formatCurrency(currentDue)}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setIsClientPickerOpen(true)}
-                          className="flex-1 py-1.5 px-3 bg-white hover:bg-rose-50/80 text-[#9D2558] border border-rose-200/90 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer transition-all active:scale-[0.98]"
-                        >
-                          <Search className="w-3.5 h-3.5 text-[#B82E69]" />
-                          Select Existing Client
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenAddClientModal(clientName || clientPhone)}
-                          className="py-1.5 px-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 rounded-xl font-semibold text-xs flex items-center justify-center gap-1 cursor-pointer transition-all shadow-2xs active:scale-[0.98]"
-                        >
-                          <Plus className="w-3.5 h-3.5 text-slate-500" />
-                          New Client
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 pt-1 border-t border-rose-100/60">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-600 block mb-1">Customer Name *</label>
-                          <Input
-                            placeholder="e.g. Nadia Butt"
-                            value={clientName === 'Walk-in Customer' ? '' : clientName}
-                            onChange={(e) => {
-                              setClientName(e.target.value);
-                              setIsWalkIn(false);
-                              setPostingError(null);
-                            }}
-                            className="text-xs h-8 bg-white border-slate-200/90 rounded-xl font-medium focus:border-[#B82E69] shadow-2xs"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-600 block mb-1">Phone Number (10–11 digits) *</label>
-                          <Input
-                            placeholder="03001234567"
-                            value={clientPhone === 'N/A' ? '' : clientPhone}
-                            onChange={(e) => {
-                              setClientPhone(e.target.value);
-                              setIsWalkIn(false);
-                              setPostingError(null);
-                            }}
-                            className="text-xs h-8 bg-white border-slate-200/90 rounded-xl font-mono font-medium focus:border-[#B82E69] shadow-2xs"
-                          />
-                        </div>
-                      </div>
-                      {/* Real-time Status Indicator */}
-                      {isNamedClientValid ? (
-                        <div className="p-2 bg-emerald-50/90 border border-emerald-200/90 rounded-xl flex items-center gap-2 text-[11px] text-emerald-800 font-medium">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                          <span>Contact details valid — will create/link customer and record dues in Client Ledger.</span>
-                        </div>
-                      ) : (
-                        <div className="p-2 bg-amber-50/80 border border-amber-200/80 rounded-xl flex items-center gap-2 text-[10px] text-amber-800 font-medium">
-                          <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span>
-                            {!cleanClientName || cleanClientName.toLowerCase() === 'walk-in customer' || cleanClientName.toLowerCase() === 'walk-in' || cleanClientName.toLowerCase() === 'n/a'
-                              ? 'Customer name is required so unpaid balance is tracked in their ledger.'
-                              : cleanClientDigits.length < 10
-                              ? `Please enter at least 10 digits for phone number (currently: ${cleanClientDigits.length} digits).`
-                              : 'Please enter valid customer name and contact phone number.'}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsClientPickerOpen(true)}
+                            className="text-[11px] font-bold text-[#B82E69] hover:underline cursor-pointer"
+                          >
+                            Select Existing
+                          </button>
+                          <span className="text-[10px] font-mono font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
+                            Due: {formatCurrency(currentDue)}
                           </span>
                         </div>
-                      )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input
+                          placeholder="Client Name *"
+                          value={clientName === 'Walk-in Customer' ? '' : clientName}
+                          onChange={(e) => {
+                            setClientName(e.target.value);
+                            setIsWalkIn(false);
+                            setPostingError(null);
+                          }}
+                          className="text-xs h-8 bg-white border-slate-200 rounded-xl focus:border-[#B82E69] shadow-2xs"
+                        />
+                        <Input
+                          placeholder="Phone (10–11 digits) *"
+                          value={clientPhone === 'N/A' ? '' : clientPhone}
+                          onChange={(e) => {
+                            setClientPhone(e.target.value);
+                            setIsWalkIn(false);
+                            setPostingError(null);
+                          }}
+                          className="text-xs h-8 bg-white border-slate-200 rounded-xl font-mono focus:border-[#B82E69] shadow-2xs"
+                        />
+                      </div>
+
+                      <p className="text-[10px] text-amber-700 font-medium flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 text-amber-600 shrink-0" />
+                        <span>Valid name & 10-digit phone required to track balance in Khata ledger.</span>
+                      </p>
                     </div>
                   )}
 
                   {/* Payment Method Selector Tabs */}
                   <Tabs value={checkoutMode} onValueChange={(val: any) => setCheckoutMode(val)}>
-                    <TabsList className="grid grid-cols-3 bg-[#FAF8F9] border border-white/80 p-1 h-10 w-full rounded-2xl shadow-2xs">
-                      <TabsTrigger value="CASH" className="text-xs font-bold rounded-xl transition-all cursor-pointer">
-                        <Banknote className="w-3.5 h-3.5 mr-1 text-[#B82E69]" />
+                    <TabsList className="grid grid-cols-3 bg-slate-100/90 border border-slate-200/60 p-1 h-9.5 w-full rounded-2xl shadow-2xs">
+                      <TabsTrigger value="CASH" className="text-xs font-bold rounded-xl data-[state=active]:bg-[#B82E69] data-[state=active]:text-white data-[state=active]:shadow-2xs transition-all cursor-pointer">
+                        <Banknote className="w-3.5 h-3.5 mr-1" />
                         Cash
                       </TabsTrigger>
-                      <TabsTrigger value="ONLINE" className="text-xs font-bold rounded-xl transition-all cursor-pointer">
-                        <CreditCard className="w-3.5 h-3.5 mr-1 text-[#B82E69]" />
+                      <TabsTrigger value="ONLINE" className="text-xs font-bold rounded-xl data-[state=active]:bg-[#B82E69] data-[state=active]:text-white data-[state=active]:shadow-2xs transition-all cursor-pointer">
+                        <CreditCard className="w-3.5 h-3.5 mr-1" />
                         Online
                       </TabsTrigger>
-                      <TabsTrigger value="SPLIT" className="text-xs font-bold rounded-xl transition-all cursor-pointer">
-                        <Coins className="w-3.5 h-3.5 mr-1 text-[#B82E69]" />
+                      <TabsTrigger value="SPLIT" className="text-xs font-bold rounded-xl data-[state=active]:bg-[#B82E69] data-[state=active]:text-white data-[state=active]:shadow-2xs transition-all cursor-pointer">
+                        <Coins className="w-3.5 h-3.5 mr-1" />
                         Split
                       </TabsTrigger>
                     </TabsList>
@@ -3568,7 +3548,7 @@ export const POSBillingPage: React.FC = () => {
 
                       {/* Return change or due badge */}
                       {currentChange > 0 && (
-                        <div className="flex items-center justify-between bg-emerald-50 text-emerald-800 p-2.5 rounded-xl border border-emerald-200 font-bold text-xs shadow-2xs">
+                        <div className="flex items-center justify-between bg-emerald-50 text-emerald-800 px-3 py-2 rounded-xl border border-emerald-200 font-bold text-xs shadow-2xs">
                           <span className="flex items-center gap-1.5">
                             <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Change to Return:
                           </span>
@@ -3577,9 +3557,9 @@ export const POSBillingPage: React.FC = () => {
                       )}
 
                       {currentDue > 0 && (
-                        <div className="flex items-center justify-between bg-amber-50 text-amber-900 p-2.5 rounded-xl border border-amber-200 font-bold text-xs shadow-2xs">
+                        <div className="flex items-center justify-between bg-amber-50 text-amber-900 px-3 py-2 rounded-xl border border-amber-200 font-bold text-xs shadow-2xs">
                           <span className="flex items-center gap-1.5">
-                            <AlertCircle className="w-4 h-4 text-amber-600" /> Remaining Due:
+                            <AlertCircle className="w-4 h-4 text-amber-600" /> Remaining Due (Khata):
                           </span>
                           <span className="font-mono text-sm">{formatCurrency(currentDue)}</span>
                         </div>
@@ -3638,11 +3618,11 @@ export const POSBillingPage: React.FC = () => {
                       </div>
 
                       {currentDue > 0 && (
-                        <div className="flex items-center justify-between bg-amber-50 text-amber-900 p-2.5 rounded-xl border border-amber-200 font-bold text-xs shadow-2xs">
+                        <div className="flex items-center justify-between bg-amber-50 text-amber-900 px-3 py-2 rounded-xl border border-amber-200 font-bold text-xs shadow-2xs">
                           <span className="flex items-center gap-1.5">
-                            <AlertCircle className="w-4 h-4 text-amber-600" /> Remaining Due:
+                            <AlertCircle className="w-3.5 h-3.5 text-amber-600" /> Remaining Due (Khata):
                           </span>
-                          <span className="font-mono text-sm">{formatCurrency(currentDue)}</span>
+                          <span className="font-mono text-xs">{formatCurrency(currentDue)}</span>
                         </div>
                       )}
                     </div>
@@ -3774,11 +3754,11 @@ export const POSBillingPage: React.FC = () => {
                       </div>
 
                       {currentDue > 0 && (
-                        <div className="flex items-center justify-between bg-amber-50 text-amber-900 p-2 rounded-lg border border-amber-200 font-bold text-xs">
+                        <div className="flex items-center justify-between bg-amber-50 text-amber-900 px-3 py-2 rounded-xl border border-amber-200 font-bold text-xs shadow-2xs">
                           <span className="flex items-center gap-1.5">
-                            <AlertCircle className="w-4 h-4 text-amber-600" /> Remaining Due:
+                            <AlertCircle className="w-3.5 h-3.5 text-amber-600" /> Remaining Due (Khata):
                           </span>
-                          <span className="font-mono text-sm">{formatCurrency(currentDue)}</span>
+                          <span className="font-mono text-xs">{formatCurrency(currentDue)}</span>
                         </div>
                       )}
                     </div>

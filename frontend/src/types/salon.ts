@@ -2354,6 +2354,7 @@ export interface IncomeExpenseReportRow {
   reportEvents?: Array<{ id: string; reference?: string; date: string; type: string; amount: number; net: number; tax: number; tip: number; method?: string }>;
   invoiceId?: string;
   invoiceBillTotal?: number;
+  advanceAdjusted?: number;
   tipAmount?: number;
   collectionAmount?: number;
   paymentEventType?: string;

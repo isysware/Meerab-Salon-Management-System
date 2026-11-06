@@ -81,11 +81,27 @@ export const Header: React.FC<HeaderProps> = ({
   });
 
   const fetchNotifications = useCallback(() => {
-    if (!user || user.role === 'STAFF') return;
+    if (!user) return;
     const branchToFetch = (user.role === 'SUPER_ADMIN' && activeBranchId === 'ALL')
       ? (allBranches[0]?.id || '')
       : (user.branchId || activeBranchId || '');
     if (!branchToFetch) return;
+
+    if (user.role === 'STAFF') {
+      salonService.getStaffDashboardData(user.staffId || '', branchToFetch)
+        .then((data: any) => {
+          let storedCleared: string[] = [];
+          try {
+            storedCleared = JSON.parse(localStorage.getItem('salonos_cleared_notifications') || '[]');
+          } catch {}
+          const actions = (data?.pendingActions || []).filter((item: any) => !storedCleared.includes(item.id));
+          setNotifications(actions);
+        })
+        .catch((err) => {
+          console.error('Failed to load staff header notifications:', err);
+        });
+      return;
+    }
 
     salonService.getAdminDashboardData(branchToFetch)
       .then((data) => {

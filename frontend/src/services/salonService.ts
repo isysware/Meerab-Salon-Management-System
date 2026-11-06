@@ -248,6 +248,17 @@ export interface StaffDashboardData {
     commissionEarned: number;
     tipReceived: number;
   }>;
+  pendingActions?: Array<{
+    id: string;
+    type: string;
+    title: string;
+    description: string;
+    urgency: 'high' | 'medium' | 'low';
+    href: string;
+    daysRemaining?: number;
+    isBookingAlert?: boolean;
+    bookingNumber?: string;
+  }>;
 }
 
 export interface SalonServiceContract {

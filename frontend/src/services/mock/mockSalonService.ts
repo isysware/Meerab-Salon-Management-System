@@ -1953,6 +1953,58 @@ class MockSalonService implements SalonServiceContract {
       tipReceived: 0,
     }));
 
+    // 7 Days Upcoming Bookings & Appointments Alerts for Staff
+    const todayMs = new Date(targetDate).getTime();
+    const sevenDaysMs = todayMs + 7 * 86400000;
+
+    const upcomingBookings = (store.bookings || []).filter((b: any) => {
+      if (b.branchId !== branch.id) return false;
+      if (b.status === 'CANCELLED' || b.status === 'COMPLETED') return false;
+      const bDateMs = new Date(b.eventDate).getTime();
+      return bDateMs >= todayMs && bDateMs <= sevenDaysMs;
+    });
+
+    const upcomingAppointments = (store.appointments || []).filter((a: any) => {
+      if (a.branchId !== branch.id) return false;
+      if (a.status === 'CANCELLED' || a.status === 'NO_SHOW') return false;
+      const aDateMs = new Date(a.date).getTime();
+      return aDateMs >= todayMs && aDateMs <= sevenDaysMs;
+    });
+
+    const bookingAlerts = upcomingBookings.map((b: any) => {
+      const diffDays = Math.max(0, Math.ceil((new Date(b.eventDate).getTime() - todayMs) / 86400000));
+      const dayLabel = diffDays === 0 ? 'Today' : diffDays === 1 ? 'Tomorrow' : `in ${diffDays} days`;
+      return {
+        id: `booking-${b.id}`,
+        type: 'BOOKING_REMINDER',
+        title: `Upcoming Booking (${dayLabel})`,
+        description: `${b.clientName} (${b.bookingNumber}) scheduled for ${b.eventDate} at ${b.serviceTime || 'counter'}. Total: PKR ${(Number(b.totalAmount) || 0).toLocaleString('en-PK')}.`,
+        urgency: diffDays <= 2 ? ('high' as const) : ('medium' as const),
+        href: `/operations/bookings?search=${encodeURIComponent(b.bookingNumber)}`,
+        isBookingAlert: true,
+        bookingNumber: b.bookingNumber,
+        daysRemaining: diffDays,
+      };
+    });
+
+    const appointmentAlerts = upcomingAppointments.map((a: any) => {
+      const diffDays = Math.max(0, Math.ceil((new Date(a.date).getTime() - todayMs) / 86400000));
+      const dayLabel = diffDays === 0 ? 'Today' : diffDays === 1 ? 'Tomorrow' : `in ${diffDays} days`;
+      return {
+        id: `appointment-${a.id}`,
+        type: 'BOOKING_REMINDER',
+        title: `Upcoming Appointment (${dayLabel})`,
+        description: `${a.clientName} (${a.appointmentNumber}) scheduled for ${a.date} at ${a.startTime}. Price: PKR ${(Number(a.price) || 0).toLocaleString('en-PK')}.`,
+        urgency: diffDays <= 2 ? ('high' as const) : ('medium' as const),
+        href: `/operations/appointments?date=${a.date}`,
+        isBookingAlert: true,
+        bookingNumber: a.appointmentNumber,
+        daysRemaining: diffDays,
+      };
+    });
+
+    const pendingActions = [...bookingAlerts, ...appointmentAlerts];
+
     return {
       staffMember,
       branch,
@@ -1963,6 +2015,7 @@ class MockSalonService implements SalonServiceContract {
       attendanceSummary,
       monthlyEarningsSummary,
       recentCompletedServices,
+      pendingActions,
     };
   }
 
