@@ -10,6 +10,7 @@ import cookieParser   from 'cookie-parser';
 import { env }        from './config/env.js';
 import { isAllowedOrigin } from './config/cors.js';
 import apiRouter      from './routes.js';
+import publicRoutes   from './modules/public/public.routes.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
 
 const app = express();
@@ -31,7 +32,6 @@ app.use(cors({
   },
   credentials: true, // Required for the httpOnly refresh cookie
   methods:     ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
 }));
 
 // ── Body parsing ──────────────────────────────────────────────────────────────
@@ -59,6 +59,9 @@ app.get(['/', '/api', '/api/v1'], (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// ── Public Customer Receipts (Mounted at root so clicking localhost:5000 directly works) ─
+app.use(['/receipt', '/r', '/public/receipt'], publicRoutes);
 
 // ── API routes (Dual-mounted for standalone and Vercel serverless rewrites) ───
 app.use(['/api/v1', '/v1'], apiRouter);

@@ -61,7 +61,7 @@ export const ReceiptModal: React.FC<ReceiptModalProps> = ({
   const [inputPhone, setInputPhone] = useState('');
   const [copied, setCopied] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const [pdfNotice, setPdfNotice] = useState<{ fileName: string; phone: string } | null>(null);
+  const [pdfNotice, setPdfNotice] = useState<{ fileName: string; phone: string; imageCopied?: boolean } | null>(null);
 
   useEffect(() => {
     if (invoice?.clientPhone && invoice.clientPhone !== 'N/A') {
@@ -213,17 +213,11 @@ Powered by Isysware Software Solutions`;
         targetPhone: cleanPhone,
       });
 
-      if (res.sharedDirectly) {
-        toast.success('Receipt PDF shared to WhatsApp!');
-        setIsPromptingPhone(false);
-      } else {
-        // Desktop browser flow
-        setIsPromptingPhone(false);
-        setPdfNotice({ fileName: res.fileName, phone: res.phone });
-        toast.success(`Receipt PDF downloaded & WhatsApp opened for +${res.phone}`);
-      }
+      setIsPromptingPhone(false);
+      setPdfNotice(null);
+      toast.success(`WhatsApp chat opened for +${res.phone} with PDF download link.`);
     } catch (err: any) {
-      toast.error(err.message || 'Failed to generate receipt PDF.');
+      toast.error(err.message || 'Failed to prepare WhatsApp receipt.');
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -362,10 +356,15 @@ Powered by Isysware Software Solutions`;
               <p className="text-slate-700 text-[11px] leading-relaxed">
                 Downloaded: <strong className="font-mono text-emerald-950 font-bold">{pdfNotice.fileName}</strong>
               </p>
-              <div className="bg-white/90 border border-emerald-200/90 rounded-lg p-2 text-[11px] text-slate-700 space-y-0.5">
+              <div className="bg-white/90 border border-emerald-200/90 rounded-lg p-2 text-[11px] text-slate-700 space-y-1">
                 <p className="text-emerald-900 font-semibold">How to send on WhatsApp Web:</p>
                 <p>1. Open the WhatsApp tab for <strong>+{pdfNotice.phone}</strong>.</p>
-                <p>2. Drag & drop the downloaded PDF or press <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-300 rounded font-mono text-[10px] text-slate-900 font-semibold">Ctrl + V</kbd> to paste receipt!</p>
+                {pdfNotice.imageCopied ? (
+                  <p className="text-emerald-950 font-medium">2. Press <kbd className="px-1.5 py-0.5 bg-emerald-100 border border-emerald-300 rounded font-mono text-[10px] text-emerald-900 font-bold">Ctrl + V</kbd> to paste the full receipt image directly into chat, or drag the downloaded PDF!</p>
+                ) : (
+                  <p>2. Drag & drop the downloaded PDF or customer can tap the direct link in the message!</p>
+                )}
+                <p className="text-[10px] text-slate-500">Official verified online invoice link has also been included in the text.</p>
               </div>
             </div>
           )}

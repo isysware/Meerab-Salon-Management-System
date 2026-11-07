@@ -10,6 +10,7 @@
     "dev:frontend": "npm --prefix frontend run dev",
     "build:backend": "npm --prefix backend run build",
     "build:frontend": "npm --prefix frontend run build",
+    "package:cpanel": "node scripts/package-cpanel.js",
     "build": "node scripts/vercel-build.js",
     "vercel-build": "node scripts/vercel-build.js",
     "test": "npm --prefix backend test:run"

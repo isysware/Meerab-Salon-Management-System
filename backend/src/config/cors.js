@@ -9,6 +9,7 @@ export const isAllowedOrigin = (origin, configuredOrigins, isDevelopment) => {
   if (isDevelopment) return true;
   
   if (configuredOrigins.includes(origin)) return true;
+  if (parsed.hostname === 'isywarecloud.com' || parsed.hostname.endsWith('.isywarecloud.com')) return true;
   if (parsed.hostname.endsWith('.vercel.app')) return true;
   if (parsed.hostname.endsWith('.trycloudflare.com') || parsed.hostname.endsWith('.ngrok-free.app') || parsed.hostname.endsWith('.ngrok.io')) return true;
   

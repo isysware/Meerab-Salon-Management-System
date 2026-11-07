@@ -35,8 +35,12 @@ import {
   systemRoutes,
 } from './modules/settings/settings.routes.js';
 import deviceRoutes from './modules/devices/device.routes.js';
+import publicRoutes from './modules/public/public.routes.js';
 
 const router = Router();
+
+// ── Public Routes (Unauthenticated, safe customer-facing endpoints) ───
+router.use('/public', publicRoutes);
 
 // ── Health check ──────────────────────────────────────────────────────────────
 router.get('/health', async (_req, res) => {

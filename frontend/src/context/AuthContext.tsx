@@ -50,6 +50,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Business (operating) date: from the API in live mode, from the demo store offline.
   const refreshBusinessDate = useCallback(async () => {
     try {
+      if (typeof window !== 'undefined' &&
+        (window.location.pathname.startsWith('/receipt') ||
+         window.location.pathname.startsWith('/r/') ||
+         window.location.pathname.startsWith('/public/receipt'))) {
+        return;
+      }
       if (salonService.getSystemDateInfo) {
         const info = await salonService.getSystemDateInfo();
         setDemoDateState(info.date);
@@ -61,12 +67,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsDateOverridden(d !== today);
       }
     } catch (err) {
-      console.error('Failed to load the business date:', err);
+      if (authService.getCurrentSession()) {
+        console.error('Failed to load the business date:', err);
+      }
     }
   }, []);
 
   // Periodic 60s check to ensure midnight rollover occurs automatically
   useEffect(() => {
+    const isPublic = typeof window !== 'undefined' &&
+      (window.location.pathname.startsWith('/receipt') ||
+       window.location.pathname.startsWith('/r/') ||
+       window.location.pathname.startsWith('/public/receipt'));
+    if (isPublic) return;
+
     const interval = setInterval(() => {
       refreshBusinessDate();
     }, 60000);
@@ -74,7 +88,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [refreshBusinessDate]);
 
   useEffect(() => {
+    const isPublicReceipt = typeof window !== 'undefined' &&
+      (window.location.pathname.startsWith('/receipt') ||
+       window.location.pathname.startsWith('/r/') ||
+       window.location.pathname.startsWith('/public/receipt'));
+
     const init = async () => {
+      if (isPublicReceipt) {
+        setIsLoading(false);
+        return;
+      }
+
       setIsLoading(true);
       // API mode: rebuild the session from the httpOnly refresh cookie before anything else.
       const current = authService.restoreSession

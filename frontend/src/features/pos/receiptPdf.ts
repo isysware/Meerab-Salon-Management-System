@@ -137,8 +137,9 @@ export function generateThermalReceiptHtml(invoice: Invoice, branch: Branch | nu
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'Courier New', Courier, Monaco, monospace;
+      font-weight: 600;
       color: #000000; background: #ffffff; width: 72mm; margin: 0 auto;
-      padding: 3mm 0 5mm 0; font-size: 11px; line-height: 1.22;
+      padding: 3mm 0 5mm 0; font-size: 11.5px; line-height: 1.25;
       -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
     .brand-title { font-size: 13.5px; font-weight: bold; text-align: center; margin-bottom: 1.5px; }
@@ -340,58 +341,58 @@ export async function generateReceiptPdf(
 
   let y = 7;
   const dashLine = '--------------------------------------------';
-  pdf.setFont('courier', 'bold'); pdf.setFontSize(10.5);
+  pdf.setFont('courier', 'bold'); pdf.setFontSize(11);
   pdf.text(branchName, center, y, { align: 'center' }); y += 4;
-  pdf.setFont('courier', 'normal'); pdf.setFontSize(7.2);
-  pdf.text(branchAddress, center, y, { align: 'center' }); y += 3.2;
-  if (branchPhone) { pdf.text(branchPhone, center, y, { align: 'center' }); y += 3.2; }
-  if (taxReg) { pdf.text(taxReg, center, y, { align: 'center' }); y += 3.2; }
+  pdf.setFont('courier', 'bold'); pdf.setFontSize(8);
+  pdf.text(branchAddress, center, y, { align: 'center' }); y += 3.4;
+  if (branchPhone) { pdf.text(branchPhone, center, y, { align: 'center' }); y += 3.4; }
+  if (taxReg) { pdf.text(taxReg, center, y, { align: 'center' }); y += 3.4; }
   pdf.text(dashLine, center, y, { align: 'center' }); y += 3.5;
-  pdf.setFont('courier', 'bold'); pdf.setFontSize(8.5);
+  pdf.setFont('courier', 'bold'); pdf.setFontSize(9);
   pdf.text(isBkg ? (invoice.currentPaymentAmount !== undefined ? 'BOOKING ADVANCE PAYMENT RECEIPT' : 'BOOKING ADVANCE INVOICE') : branch?.taxRegistrationNumber ? 'TAX INVOICE' : 'RETAIL INVOICE', center, y, { align: 'center' }); y += 3.5;
-  pdf.setFont('courier', 'normal'); pdf.setFontSize(7.2);
+  pdf.setFont('courier', 'bold'); pdf.setFontSize(8);
   if (isBkg && invoice.bookingReceiptNumber) {
     pdf.text(`Receipt #: ${invoice.bookingReceiptNumber}`, leftMargin, y);
-    pdf.text(`Booking Ref: ${invoice.invoiceNumber}`, rightMargin, y, { align: 'right' }); y += 3.2;
-    pdf.text(`Event: ${invoice.date}${invoice.time ? ` ${invoice.time}` : ''}`, leftMargin, y); y += 3.2;
+    pdf.text(`Booking Ref: ${invoice.invoiceNumber}`, rightMargin, y, { align: 'right' }); y += 3.4;
+    pdf.text(`Event: ${invoice.date}${invoice.time ? ` ${invoice.time}` : ''}`, leftMargin, y); y += 3.4;
   } else {
     pdf.text(`${isBkg ? 'Booking #:' : 'Inv #: '} ${invoice.invoiceNumber}`, leftMargin, y);
-    pdf.text(`${isBkg ? 'Event: ' : ''}${invoice.date}${invoice.time ? ` ${invoice.time}` : ''}`, rightMargin, y, { align: 'right' }); y += 3.2;
+    pdf.text(`${isBkg ? 'Event: ' : ''}${invoice.date}${invoice.time ? ` ${invoice.time}` : ''}`, rightMargin, y, { align: 'right' }); y += 3.4;
   }
   if (isBkg) {
-    pdf.text(`Type: ${bkgTypeLabel}`, leftMargin, y); y += 3.2;
+    pdf.text(`Type: ${bkgTypeLabel}`, leftMargin, y); y += 3.4;
   }
   const clientText = `Client: ${invoice.clientName || 'Walk-in Customer'}${invoice.clientPhone && invoice.clientPhone !== 'N/A' ? ` (${invoice.clientPhone})` : ''}`;
-  pdf.text(clientText.substring(0, 42), leftMargin, y); y += 3.2;
-  if (invoice.processedByName) { pdf.text(`Cashier: ${invoice.processedByName}`, leftMargin, y); y += 3.2; }
+  pdf.text(clientText.substring(0, 42), leftMargin, y); y += 3.4;
+  if (invoice.processedByName) { pdf.text(`Cashier: ${invoice.processedByName}`, leftMargin, y); y += 3.4; }
   pdf.text(dashLine, center, y, { align: 'center' }); y += 3.5;
 
-  pdf.setFont('courier', 'bold'); pdf.setFontSize(7.2);
-  pdf.text(isBkg ? 'RESERVED SERVICE' : 'ITEM / SERVICE', leftMargin, y); pdf.text('QTY', 51, y, { align: 'center' }); pdf.text('AMOUNT', rightMargin, y, { align: 'right' }); y += 2.2;
-  pdf.setFont('courier', 'normal'); pdf.text(dashLine, center, y, { align: 'center' }); y += 3.2;
+  pdf.setFont('courier', 'bold'); pdf.setFontSize(8);
+  pdf.text(isBkg ? 'RESERVED SERVICE' : 'ITEM / SERVICE', leftMargin, y); pdf.text('QTY', 51, y, { align: 'center' }); pdf.text('AMOUNT', rightMargin, y, { align: 'right' }); y += 2.4;
+  pdf.setFont('courier', 'bold'); pdf.text(dashLine, center, y, { align: 'center' }); y += 3.4;
 
   lines.forEach((li) => {
-    pdf.setFont('courier', 'bold'); pdf.setFontSize(7.2);
+    pdf.setFont('courier', 'bold'); pdf.setFontSize(8);
     const qtySuffix = li.quantity > 1 ? ` (${li.quantity}x)` : '';
     const itemName = `${li.name}${qtySuffix}`;
     pdf.text(itemName.length > 25 ? `${itemName.substring(0, 23)}..` : itemName, leftMargin, y);
-    pdf.setFont('courier', 'normal');
     pdf.text(String(li.quantity), 51, y, { align: 'center' });
-    pdf.text(formatPkr(li.total || (li.netSales == null ? li.unitPrice * li.quantity : li.netSales + (li.discountAllocated ?? 0))), rightMargin, y, { align: 'right' }); y += 3;
-    if (li.staffName) { pdf.setFontSize(6.5); pdf.text(`  Stylist: ${li.staffName}`, leftMargin, y); y += 2.8; }
+    pdf.text(formatPkr(li.total || (li.netSales == null ? li.unitPrice * li.quantity : li.netSales + (li.discountAllocated ?? 0))), rightMargin, y, { align: 'right' }); y += 3.2;
+    if (li.staffName) { pdf.setFontSize(7.2); pdf.text(`  Stylist: ${li.staffName}`, leftMargin, y); y += 2.8; }
     li.batchAllocations?.forEach(a => {
-      pdf.setFontSize(6.5); pdf.text(`  ${a.quantity} x ${formatPkr(a.sellingPrice)}`, leftMargin, y); y += 2.8;
+      pdf.setFontSize(7.2); pdf.text(`  ${a.quantity} x ${formatPkr(a.sellingPrice)}`, leftMargin, y); y += 2.8;
     });
     const comps = li.packageComponentsSnapshot || li.packageComponents || [];
     comps.forEach((c) => {
-      pdf.setFontSize(6.2); pdf.text(`  • ${c.serviceName}${c.staffName ? ` (${c.staffName})` : ''}`, leftMargin, y); y += 2.6;
+      pdf.setFontSize(7); pdf.text(`  • ${c.serviceName}${c.staffName ? ` (${c.staffName})` : ''}`, leftMargin, y); y += 2.6;
     });
   });
 
-  pdf.setFontSize(7.2); pdf.text(dashLine, center, y, { align: 'center' }); y += 3.2;
-  const printRow = (label: string, val: string, isBold = false) => {
-    if (isBold) pdf.setFont('courier', 'bold'); else pdf.setFont('courier', 'normal');
-    pdf.text(label, leftMargin, y); pdf.text(val, rightMargin, y, { align: 'right' }); y += 3.2;
+  pdf.setFontSize(8); pdf.text(dashLine, center, y, { align: 'center' }); y += 3.4;
+  const printRow = (label: string, val: string, isBig = false) => {
+    pdf.setFont('courier', 'bold');
+    pdf.setFontSize(isBig ? 9.5 : 8.2);
+    pdf.text(label, leftMargin, y); pdf.text(val, rightMargin, y, { align: 'right' }); y += 3.5;
   };
   if (invoice.discount > 0) printRow('Discount:', `- ${formatPkr(invoice.discount)}`);
   if (invoice.tax > 0) printRow(`Sales Tax:`, formatPkr(invoice.tax));
@@ -436,25 +437,96 @@ export async function downloadReceiptPdf(invoiceOrElement: Invoice | HTMLElement
 }
 
 export interface ShareWhatsAppResult {
-  sharedDirectly: boolean; downloaded: boolean; fileName: string; phone: string; file: File;
+  opened: boolean;
+  phone: string;
+  receiptUrl: string;
+  directPdfUrl?: string;
+  message: string;
 }
 
-export async function shareReceiptPdfViaWhatsApp({ invoice, branch, targetPhone }: { invoice: Invoice; branch: Branch | null; targetPhone: string; }): Promise<ShareWhatsAppResult> {
+export async function shareReceiptPdfViaWhatsApp({
+  invoice,
+  branch,
+  targetPhone,
+}: {
+  invoice: Invoice;
+  branch: Branch | null;
+  targetPhone: string;
+}): Promise<ShareWhatsAppResult> {
   const cleanPhone = getCleanWhatsAppPhone(targetPhone);
   if (!cleanPhone) throw new Error('Please enter a valid customer WhatsApp number.');
-  const generated = await generateReceiptPdf(invoice, branch);
-  generated.pdf.save(generated.fileName);
-  const branchName = (branch?.name || 'MEERUB SALON & SPA').toUpperCase();
-  const methodSummary = getPaymentMethodSummary(invoice);
-  const isBkg = Boolean(invoice.isBookingInvoice || invoice.invoiceNumber?.startsWith('BKG'));
-  const summaryText = isBkg
-    ? (invoice.currentPaymentAmount !== undefined
-        ? `*${branchName} — BOOKING ADVANCE PAYMENT RECEIPT*\nReceipt No: *${invoice.bookingReceiptNumber || invoice.invoiceNumber}*\nBooking Ref: *${invoice.invoiceNumber}*\nEvent Date: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Quoted Price:* ${formatCurrency(invoice.total)}\n*Payment Received (${methodSummary}):* ${formatCurrency(invoice.currentPaymentAmount)}\n*Total Advance to Date:* ${formatCurrency(invoice.totalAdvanceReceived ?? invoice.amountPaid)}\n*Remaining Balance (Due on Event):* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official Booking Advance Receipt PDF attached above._\nThank you for choosing ${branchName}!`
-        : `*${branchName} — BOOKING ADVANCE INVOICE*\nBooking Ref: *${invoice.invoiceNumber}*\nEvent Date: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Quoted Price:* ${formatCurrency(invoice.total)}\n*Total Advance Paid (${methodSummary}):* ${formatCurrency(invoice.totalAdvanceReceived ?? invoice.amountPaid)}\n*Remaining Balance (Due on Event):* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official Booking Advance Invoice PDF attached above._\nThank you for choosing ${branchName}!`)
-    : (invoice.advanceAdjusted && invoice.advanceAdjusted > 0
-        ? `*${branchName} — OFFICIAL RECEIPT*\nInvoice No: *${invoice.invoiceNumber}*\nDate: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Bill:* ${formatCurrency(invoice.total)}\nBooking Advance Applied: - ${formatCurrency(invoice.advanceAdjusted)}\nRemaining Payable: ${formatCurrency(Math.max(0, invoice.total - invoice.advanceAdjusted))}\n*Checkout Payment (${methodSummary}):* ${formatCurrency(Math.max(0, invoice.amountPaid - invoice.advanceAdjusted))}\n*Total Settled:* ${formatCurrency(invoice.amountPaid)}\n*Outstanding Balance:* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official PDF Receipt attached above._\nThank you for visiting!`
-        : `*${branchName} — OFFICIAL RECEIPT*\nInvoice No: *${invoice.invoiceNumber}*\nDate: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}\nCustomer: ${invoice.clientName || 'Valued Customer'}\n*Total Payable:* ${formatCurrency(invoice.total)}\n*Paid Amount (${methodSummary}):* ${formatCurrency(invoice.amountPaid)}\n*Outstanding Balance:* ${formatCurrency(invoice.amountDue)}\n\n📄 _Please find your official PDF Receipt attached above._\nThank you for visiting!`);
-  const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(summaryText)}`;
+
+  let receiptUrl = '';
+  let directPdfUrl = '';
+  let whatsappMessage = '';
+
+  try {
+    const res = await fetch('/api/v1/public/receipt-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        invoiceId: invoice.id,
+        bookingId: invoice.isBookingInvoice ? invoice.id : undefined,
+        reference: invoice.invoiceNumber,
+      }),
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      receiptUrl = json.data?.receiptUrl || '';
+      directPdfUrl = json.data?.directPdfUrl || '';
+      whatsappMessage = json.data?.whatsappMessage || '';
+    }
+  } catch (err) {
+    console.warn('Backend receipt-link fetch failed, using frontend fallback:', err);
+  }
+
+  // Fallback if backend link could not be generated
+  if (!whatsappMessage || !receiptUrl) {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const ref = invoice.invoiceNumber || invoice.id;
+    receiptUrl = `${origin}/receipt/${encodeURIComponent(ref)}`;
+    const branchName = (branch?.name || 'MEERUB SALON & SPA').toUpperCase();
+    const isBkg = Boolean(invoice.isBookingInvoice || invoice.invoiceNumber?.startsWith('BKG'));
+    const itemsList = (invoice.lineItems || invoice.lines || [])
+      .map((l) => l.name)
+      .filter(Boolean)
+      .join(', ') || 'Salon Services';
+    const fmt = (n: number | undefined | null) => (Number(n) || 0).toLocaleString('en-PK', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const refLabel = isBkg
+      ? `Booking / Advance Receipt #${invoice.invoiceNumber}`
+      : `Invoice / Receipt #${invoice.invoiceNumber}`;
+    const dateLabel = isBkg ? 'Event Date' : 'Date';
+
+    whatsappMessage = `*${branchName}*
+*${refLabel}*
+
+Dear Customer,
+Thank you for choosing us!
+
+${dateLabel}: ${invoice.date}${invoice.time ? ` • ${invoice.time}` : ''}
+Services / Products: ${itemsList}
+Total Amount: Rs. ${fmt(invoice.total)}
+Paid Amount: Rs. ${fmt(invoice.amountPaid)}
+Remaining Balance: Rs. ${fmt(invoice.amountDue)}
+
+📄 *Download Your PDF Invoice:*
+${receiptUrl}
+
+Thank you for visiting!`;
+  }
+
+  // Open customer's WhatsApp chat with prefilled message
+  // Staff will manually review and click Send in WhatsApp
+  const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodeURIComponent(whatsappMessage)}`;
   window.open(waUrl, '_blank', 'noopener,noreferrer');
-  return { sharedDirectly: false, downloaded: true, fileName: generated.fileName, phone: cleanPhone, file: generated.file };
+
+  return {
+    opened: true,
+    phone: cleanPhone,
+    receiptUrl,
+    directPdfUrl,
+    message: whatsappMessage,
+  };
 }

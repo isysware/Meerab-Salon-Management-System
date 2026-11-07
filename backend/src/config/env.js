@@ -32,5 +32,6 @@ export const env = {
   jwtRefreshExpires: process.env.JWT_REFRESH_EXPIRES || '30d',
 
   corsOrigin:        process.env.CORS_ORIGIN || 'http://localhost:3000',
+  publicAppUrl:      process.env.PUBLIC_APP_URL || '',
   tz:                process.env.TZ           || 'Asia/Karachi',
 };

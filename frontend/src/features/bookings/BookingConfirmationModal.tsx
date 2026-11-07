@@ -6,7 +6,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -25,6 +24,8 @@ import {
 } from 'lucide-react';
 import { toast } from '@/context/ToastContext';
 import { formatCurrency, normalizePhoneDigits } from '@/lib/formatters';
+import { bookingToInvoice } from './bookingToInvoice';
+import { shareReceiptPdfViaWhatsApp } from '@/features/pos/receiptPdf';
 
 interface BookingConfirmationModalProps {
   isOpen: boolean;
@@ -42,6 +43,7 @@ export const BookingConfirmationModal: React.FC<BookingConfirmationModalProps> =
   onPrintReceipt,
 }) => {
   const [copied, setCopied] = useState<boolean>(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
 
   const fullMessageText = useMemo(() => {
     if (!booking) return '';
@@ -81,6 +83,26 @@ We look forward to serving you!`;
     setTimeout(() => setCopied(false), 2500);
   };
 
+  const handleSendWhatsAppPdf = async () => {
+    if (!booking) return;
+    setIsGeneratingPdf(true);
+    try {
+      const inv = bookingToInvoice(booking, branch);
+      const res = await shareReceiptPdfViaWhatsApp({
+        invoice: inv,
+        branch: branch || null,
+        targetPhone: booking.clientPhone,
+      });
+
+      toast.success(`WhatsApp chat opened for +${res.phone} with PDF download link.`);
+      onClose();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to prepare WhatsApp receipt.');
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
   const handleOpenWhatsApp = () => {
     if (!booking) return;
     const digitsOnly = normalizePhoneDigits(booking.clientPhone);
@@ -101,38 +123,38 @@ We look forward to serving you!`;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg p-5 sm:p-6 font-sans">
-        <DialogHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center font-bold shadow-xs">
-                <MessageSquare className="w-4.5 h-4.5" />
-              </div>
-              <div>
+      <DialogContent className="max-w-xl w-[95vw] p-5 sm:p-6 font-sans flex flex-col gap-3.5 overflow-hidden">
+        <DialogHeader className="pb-1 pr-10">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+              <MessageSquare className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
                 <DialogTitle className="text-base font-bold text-slate-900 tracking-tight">
                   Booking Confirmation
                 </DialogTitle>
-                <p className="text-xs text-slate-400">
-                  Ready to send via WhatsApp or SMS
-                </p>
+                <Badge variant="neutral" className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border-emerald-200 py-0.5 px-2 shrink-0">
+                  WhatsApp Ready
+                </Badge>
               </div>
+              <p className="text-xs text-slate-500">
+                Ready to send via WhatsApp or SMS
+              </p>
             </div>
-            <Badge variant="neutral" className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border-emerald-200 py-0.5 px-2">
-              WhatsApp Ready
-            </Badge>
           </div>
         </DialogHeader>
 
-        <div className="space-y-3 py-1">
+        <div className="space-y-3 py-1 w-full min-w-0">
           {/* Client Summary Header */}
-          <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 border border-slate-200/80 text-xs">
-            <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200/80 text-xs gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
               <div className="w-7 h-7 rounded-full bg-[#FCE8EC] text-[#9D2558] flex items-center justify-center font-bold text-xs shrink-0">
                 {booking.clientName?.charAt(0) || 'C'}
               </div>
-              <div className="truncate">
+              <div className="min-w-0">
                 <span className="font-bold text-slate-900 block text-xs truncate">{booking.clientName}</span>
-                <span className="text-[10px] text-slate-500 font-mono block">{booking.clientPhone}</span>
+                <span className="text-[10px] text-slate-500 font-mono block truncate">{booking.clientPhone}</span>
               </div>
             </div>
             <div className="text-right shrink-0">
@@ -142,9 +164,9 @@ We look forward to serving you!`;
           </div>
 
           {/* WhatsApp Styled Message Bubble Container */}
-          <div className="p-3.5 rounded-2xl bg-[#EFEAE2]/60 border border-slate-200/70 space-y-2">
+          <div className="p-3.5 rounded-2xl bg-[#EFEAE2]/60 border border-slate-200/70 space-y-2 w-full min-w-0">
             <div className="text-center">
-              <span className="text-[9px] font-semibold bg-white/90 text-slate-500 px-2.5 py-0.5 rounded-full shadow-2xs inline-flex items-center gap-1">
+              <span className="text-[9px] font-semibold bg-white/90 text-slate-600 px-2.5 py-0.5 rounded-full shadow-2xs inline-flex items-center gap-1">
                 {booking.type === 'BRIDAL' ? (
                   <>
                     <Sparkles className="w-2.5 h-2.5 text-[#9D2558]" />
@@ -160,7 +182,7 @@ We look forward to serving you!`;
             </div>
 
             {/* Chat Message Bubble */}
-            <div className="bg-white p-3.5 rounded-2xl rounded-tl-xs shadow-xs border border-slate-200/50 space-y-2 text-xs">
+            <div className="bg-white p-3.5 rounded-2xl rounded-tl-xs shadow-xs border border-slate-200/50 space-y-2.5 text-xs w-full min-w-0">
               <div className="space-y-0.5">
                 <p className="font-bold text-slate-900 text-xs">
                   Dear {booking.clientName},
@@ -171,57 +193,57 @@ We look forward to serving you!`;
               </div>
 
               {/* Structured Details Box */}
-              <div className="p-2.5 rounded-xl bg-slate-50/90 border border-slate-100 space-y-1.5 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500 text-[11px] flex items-center gap-1.5">
+              <div className="p-3 rounded-xl bg-slate-50/90 border border-slate-100 space-y-2 text-xs w-full min-w-0">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-slate-600 text-[11px] flex items-center gap-1.5 shrink-0">
                     <Calendar className="w-3.5 h-3.5 text-[#9D2558]" /> Event Date:
                   </span>
-                  <span className="font-semibold text-slate-800 font-mono text-[11px]">{booking.eventDate}</span>
+                  <span className="font-bold text-slate-900 font-mono text-[11px] shrink-0">{booking.eventDate}</span>
                 </div>
 
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-500 text-[11px] flex items-center gap-1.5">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-slate-600 text-[11px] flex items-center gap-1.5 shrink-0">
                     <Clock className="w-3.5 h-3.5 text-emerald-600" /> Start Time:
                   </span>
-                  <span className="font-bold text-emerald-700 font-mono text-[11px]">{booking.serviceTime || '10:00 AM'}</span>
+                  <span className="font-bold text-emerald-700 font-mono text-[11px] shrink-0">{booking.serviceTime || '10:00 AM'}</span>
                 </div>
 
-                <div className="flex items-start justify-between gap-2">
-                  <span className="text-slate-500 text-[11px] flex items-center gap-1.5 shrink-0">
+                <div className="flex items-start justify-between gap-4">
+                  <span className="text-slate-600 text-[11px] flex items-center gap-1.5 shrink-0">
                     <Scissors className="w-3.5 h-3.5 text-[#9D2558]" /> Services:
                   </span>
-                  <span className="font-semibold text-slate-800 text-right truncate text-[11px] max-w-[200px]">
+                  <span className="font-semibold text-slate-900 text-right text-[11px] min-w-0 break-words flex-1 pl-2">
                     {servicesDisplay}
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between pt-1 border-t border-slate-200/70">
-                  <span className="text-slate-500 text-[11px]">Total Package:</span>
-                  <span className="font-bold font-mono text-[#9D2558] text-xs">
+                <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-200">
+                  <span className="text-slate-700 font-semibold text-[11px] shrink-0">Total Package:</span>
+                  <span className="font-extrabold font-mono text-[#9D2558] text-xs shrink-0">
                     {formatCurrency(booking.totalAmount)}
                   </span>
                 </div>
 
                 {advance > 0 && (
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-emerald-700">Advance Paid:</span>
-                    <span className="font-semibold font-mono text-emerald-700">
+                  <div className="flex items-center justify-between gap-4 text-[11px]">
+                    <span className="text-emerald-700 font-semibold shrink-0">Advance Paid:</span>
+                    <span className="font-bold font-mono text-emerald-700 shrink-0">
                       {formatCurrency(advance)}
                     </span>
                   </div>
                 )}
 
                 {advance > 0 && remaining > 0 && (
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-slate-500">Remaining Balance:</span>
-                    <span className="font-semibold font-mono text-slate-700">
+                  <div className="flex items-center justify-between gap-4 text-[11px]">
+                    <span className="text-slate-600 font-semibold shrink-0">Remaining Balance:</span>
+                    <span className="font-bold font-mono text-slate-800 shrink-0">
                       {formatCurrency(remaining)}
                     </span>
                   </div>
                 )}
               </div>
 
-              <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5">
+              <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1">
                 <span>Contact: <strong className="font-mono text-slate-700">{branch?.phone || 'Salon Reception'}</strong></span>
                 <div className="flex items-center gap-1 text-slate-400 font-mono">
                   <span>Just now</span>
@@ -232,53 +254,70 @@ We look forward to serving you!`;
           </div>
         </div>
 
-        <DialogFooter className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 sm:gap-0">
+        {/* Footer Actions — Clean 2-Tier Layout that NEVER Overflows or Clips */}
+        <div className="pt-2 border-t border-slate-100 flex flex-col gap-2.5 w-full">
+          {/* Primary Action: Send WhatsApp with PDF Link */}
           <Button
             type="button"
-            variant="ghost"
-            size="sm"
-            onClick={onClose}
-            className="text-xs text-slate-500 hover:text-slate-800"
+            disabled={isGeneratingPdf}
+            onClick={handleSendWhatsAppPdf}
+            className="w-full bg-[#25D366] hover:bg-[#1EBE5D] text-white font-bold rounded-xl h-10 shadow-xs cursor-pointer transition-all flex items-center justify-center gap-2 text-xs sm:text-sm"
           >
-            Close
+            <MessageSquare className="w-4 h-4 shrink-0" />
+            <span>{isGeneratingPdf ? 'Preparing WhatsApp Receipt...' : 'Send WhatsApp Receipt (with PDF Link)'}</span>
           </Button>
 
-          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap justify-end">
-            {onPrintReceipt && (
+          {/* Secondary Actions Row */}
+          <div className="flex items-center justify-between gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              className="text-xs text-slate-500 hover:text-slate-800 h-8.5 px-3"
+            >
+              Close
+            </Button>
+
+            <div className="flex items-center gap-2">
+              {onPrintReceipt && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onPrintReceipt(booking)}
+                  className="gap-1.5 text-xs text-slate-700 rounded-lg h-8.5 px-3"
+                >
+                  <Printer className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Print Voucher</span>
+                </Button>
+              )}
+
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => onPrintReceipt(booking)}
-                className="gap-1.5 text-xs text-slate-700 rounded-xl h-8.5"
+                onClick={handleCopy}
+                className="gap-1.5 text-xs text-slate-700 rounded-lg h-8.5 px-3"
               >
-                <Printer className="w-3.5 h-3.5 text-slate-500" />
-                Print Voucher
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-slate-500" />}
+                <span>{copied ? 'Copied' : 'Copy'}</span>
               </Button>
-            )}
 
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleCopy}
-              className="gap-1.5 text-xs text-slate-700 rounded-xl h-8.5"
-            >
-              {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-              {copied ? 'Copied' : 'Copy'}
-            </Button>
-
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleOpenWhatsApp}
-              className="bg-[#25D366] hover:bg-[#1EBE5D] text-white gap-1.5 text-xs font-bold rounded-xl h-8.5 px-3.5 shadow-xs cursor-pointer transition-all"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              Open WhatsApp
-            </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleOpenWhatsApp}
+                title="Send plain WhatsApp text confirmation without PDF link"
+                className="gap-1.5 text-xs text-slate-600 rounded-lg h-8.5 px-3"
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                <span>Text Only</span>
+              </Button>
+            </div>
           </div>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

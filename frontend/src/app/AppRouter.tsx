@@ -57,6 +57,7 @@ import { AttendanceOvertimeReportPage } from '../features/reports/AttendanceOver
 import { ScheduledModuleView } from '../features/scaffold/ScheduledModuleView';
 import { AccessDeniedView } from '../features/scaffold/AccessDeniedView';
 import { ScissorLoader } from '../components/ui/ScissorLoader';
+import { PublicReceiptPage } from '../features/receipt/PublicReceiptPage';
 
 export const AppRouter: React.FC = () => {
   const { user, session, isLoading } = useAuth();
@@ -75,6 +76,15 @@ export const AppRouter: React.FC = () => {
       navigate(getDefaultRouteForRole(user.role));
     }
   }, [user, pathname, isLoading, navigate]);
+
+  // Public Receipt & Invoice Page (accessible immediately without staff login or auth wait)
+  if (pathname.startsWith('/receipt') || pathname.startsWith('/public/receipt') || pathname.startsWith('/r/')) {
+    const searchParams = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+    const token = searchParams.get('token');
+    const keyParam = searchParams.get('k') || searchParams.get('key');
+    const reference = pathname.replace(/^\/(public\/)?(receipt|r)(\/download)?\/?/, '');
+    return <PublicReceiptPage reference={reference} token={token} keyParam={keyParam} />;
+  }
 
   // Loading state with Scissors Loader
   if (isLoading) {

@@ -4,7 +4,19 @@
 // - API errors ({ error: { code, message } }) are thrown as Error(message) so existing UI
 //   error handling (err.message) keeps working unchanged.
 
-export const API_BASE_URL: string = import.meta.env.VITE_API_URL || '/api/v1';
+const resolveApiBaseUrl = (): string => {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (envUrl && envUrl.startsWith('http')) return envUrl;
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host === 'meerub.isywarecloud.com') {
+      return 'https://api.meerub.isywarecloud.com/api/v1';
+    }
+  }
+  return envUrl || '/api/v1';
+};
+
+export const API_BASE_URL: string = resolveApiBaseUrl();
 
 export class ApiError extends Error {
   status: number;
@@ -97,7 +109,8 @@ const tryRefresh = async (): Promise<boolean> => {
 };
 
 export async function apiRequest<T = any>(method: string, path: string, opts: RequestOptions = {}): Promise<T> {
-  const headers: Record<string, string> = { Accept: 'application/json', 'ngrok-skip-browser-warning': 'true' };
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (API_BASE_URL.includes('ngrok')) headers['ngrok-skip-browser-warning'] = 'true';
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
   if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
